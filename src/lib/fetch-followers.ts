@@ -15,7 +15,7 @@ async function captureScreenshot(url: string): Promise<Buffer> {
     throw new Error("請設定環境變數 SCREENSHOT_ONE_ACCESS_KEY（可至 screenshotone.com 申請免費額度）");
   }
   const encoded = encodeURIComponent(url);
-  const apiUrl = `https://api.screenshotone.com/take?url=${encoded}&access_key=${key}&viewport_width=1280&viewport_height=800&cache_bust=1`;
+  const apiUrl = `https://api.screenshotone.com/take?url=${encoded}&access_key=${key}&viewport_width=1280&viewport_height=800`;
   const res = await fetch(apiUrl);
   if (!res.ok) {
     const text = await res.text();
