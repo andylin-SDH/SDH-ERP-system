@@ -3,7 +3,6 @@
  * 依環境變數選擇截圖方式：SCREENSHOT_ONE_ACCESS_KEY（建議 Vercel）或自架用 Playwright
  */
 
-import OpenAI from "openai";
 import { getPartners, updatePartner } from "@/lib/db/partners";
 import { parseSocialUrls, getPlatform } from "@/lib/utils/social-urls";
 
@@ -26,16 +25,15 @@ async function captureScreenshot(url: string): Promise<Buffer> {
   return Buffer.from(arrayBuffer);
 }
 
-/** 用 OpenAI Vision 從截圖辨識訂閱／粉絲數 */
+/** 用 Gemini Vision 從截圖辨識訂閱／粉絲數 */
 async function extractFollowerCountWithVision(
   imageBuffer: Buffer,
   platform: "youtube" | "facebook" | "instagram"
 ): Promise<string | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("請設定環境變數 OPENAI_API_KEY");
+    throw new Error("請設定環境變數 GEMINI_API_KEY");
   }
-  const openai = new OpenAI({ apiKey });
   const base64 = imageBuffer.toString("base64");
   const platformPrompt =
     platform === "youtube"
@@ -43,28 +41,45 @@ async function extractFollowerCountWithVision(
       : platform === "facebook"
       ? "這是 Facebook 粉絲專頁，請找出「追蹤者」或「followers」的數字。"
       : "這是 Instagram 頁面，請找出粉絲數（followers）的數字。";
-  const res = await openai.chat.completions.create({
-    model: "gpt-4o",
-    max_tokens: 100,
-    messages: [
-      {
-        role: "user",
-        content: [
+  const promptText = `${platformPrompt} 只回傳數字或「萬」「K」「M」等單位（例如：1.2萬、500K），若無法辨識請回傳：unknown`;
+
+  const res = await fetch(
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + encodeURIComponent(apiKey),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: [
           {
-            type: "text",
-            text: `${platformPrompt} 只回傳數字或「萬」「K」「M」等單位（例如：1.2萬、500K），若無法辨識請回傳：unknown`,
-          },
-          {
-            type: "image_url",
-            image_url: { url: `data:image/png;base64,${base64}` },
+            parts: [
+              { text: promptText },
+              { inline_data: { mime_type: "image/png", data: base64 } },
+            ],
           },
         ],
-      },
-    ],
-  });
-  const text = res.choices[0]?.message?.content?.trim() ?? "";
-  if (!text || text.toLowerCase() === "unknown") return null;
-  return text;
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Gemini API 錯誤 (${res.status}): ${text.slice(0, 200)}`);
+  }
+
+  type GeminiPart = { text?: string };
+  type GeminiContent = { parts?: GeminiPart[]; text?: string };
+  type GeminiCandidate = { content?: GeminiContent };
+  type GeminiResponse = { candidates?: GeminiCandidate[] };
+
+  const json = (await res.json()) as GeminiResponse;
+  const candidate = json.candidates?.[0];
+  const parts = candidate?.content?.parts ?? [];
+  const combined = parts.map((p) => p.text ?? "").join(" ").trim();
+  const answer = combined || (candidate?.content?.text ?? "").trim();
+  if (!answer || answer.toLowerCase() === "unknown") return null;
+  return answer;
 }
 
 export interface RefreshResult {

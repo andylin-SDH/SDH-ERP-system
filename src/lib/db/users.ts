@@ -205,7 +205,11 @@ export async function getUserByEmail(email: string): Promise<User | null> {
     log("users.db", "getUserByEmail 未找到符合的使用者", { raw });
     return null;
   }
-  log("users.db", "getUserByEmail 找到使用者", { email: (found as unknown as Record<string, unknown>)[emailKey], role: (found as any).role ?? (found as any).角色 });
+  const foundRecord = found as unknown as Record<string, unknown>;
+  log("users.db", "getUserByEmail 找到使用者", {
+    email: foundRecord[emailKey],
+    role: (foundRecord["role"] as string | undefined) ?? (foundRecord["角色"] as string | undefined),
+  });
   return rowToUser(found);
 }
 
