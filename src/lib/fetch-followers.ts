@@ -44,7 +44,7 @@ async function extractFollowerCountWithVision(
   const promptText = `${platformPrompt} 只回傳數字或「萬」「K」「M」等單位（例如：1.2萬、500K），若無法辨識請回傳：unknown`;
 
   const res = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + encodeURIComponent(apiKey),
+    "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=" + encodeURIComponent(apiKey),
     {
       method: "POST",
       headers: {
