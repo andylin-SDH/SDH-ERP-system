@@ -1,0 +1,52 @@
+/**
+ * Finance 資料層（Supabase）
+ */
+
+import { getSupabase } from "@/lib/supabase/server";
+import type { FinanceRow, InvoiceRow } from "@/modules/finance/types";
+
+export async function getInvoices(): Promise<InvoiceRow[]> {
+  const { data, error } = await getSupabase()
+    .from("發票")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    if (error.code === "42P01") return []; // 表不存在時回傳空陣列，避免 500
+    throw error;
+  }
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    專案ID: r.專案ID as string | undefined,
+    發票號碼: r.發票號碼 as string | undefined,
+    發票日期: r.發票日期 as string | undefined,
+    發票金額未稅: r.發票金額未稅 as string | undefined,
+    發票金額含稅: r.發票金額含稅 as string | undefined,
+    發票稅金: r.發票稅金 as string | undefined,
+    廠商預計付款日: r.廠商預計付款日 as string | undefined,
+    廠商實付金額: r.廠商實付金額 as string | undefined,
+    廠商付款狀態: r.廠商付款狀態 as string | undefined,
+    廠商付款日期: r.廠商付款日期 as string | undefined,
+    備註: r.備註 as string | undefined,
+  }));
+}
+
+export async function getFinance(): Promise<FinanceRow[]> {
+  const { data, error } = await getSupabase().from("財務").select("*").order("created_at", { ascending: false });
+  if (error) {
+    if (error.code === "42P01") return []; // 表不存在時回傳空陣列，避免 500
+    throw error;
+  }
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    專案ID: r.專案ID as string | undefined,
+    專案總金額未稅: r.專案總金額未稅 as string | undefined,
+    專案成本: r.專案成本 as string | undefined,
+    專案實際成本: r.專案實際成本 as string | undefined,
+    專案分潤: r.專案分潤 as string | undefined,
+    專案利潤: r.專案利潤 as string | undefined,
+    專案利潤比: r.專案利潤比 as string | undefined,
+    發票號碼: r.發票號碼 as string | undefined,
+    廠商付款狀態: r.廠商付款狀態 as string | undefined,
+    員工分潤狀態: r.員工分潤狀態 as string | undefined,
+  }));
+}
+

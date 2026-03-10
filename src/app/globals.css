@@ -1,8 +1,14 @@
 @import "tailwindcss";
 
+/* 與 studio.sdh-corp.com 盛德好錄音室一致之配色 */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0c0f14;
+  --foreground: #f1f5f9;
+  --surface: #151922;
+  --accent: #f59e0b;
+  --accent-hover: #fbbf24;
+  --muted: #94a3b8;
+  --border: #1e293b;
 }
 
 @theme inline {
@@ -12,15 +18,8 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }

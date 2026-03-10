@@ -4,7 +4,8 @@
 
 ## 架構
 
-- **大總表**：Google Sheets（source、Projects、Tasks、Partners、Settlement、Invoices、StaffPayouts、BankTx、Matches、Users、Finance）
+- **模組化**：採模組化設計，各區塊可獨立開發，詳見 [MODULES.md](./MODULES.md)
+- **資料庫**：Supabase（PostgreSQL），支援交易、併發、財務自動化
 - **ERP**：Next.js 應用程式，讀寫試算表，依使用者角色與責任範圍顯示 Dashboard
 - **連動**：財務確認收款等操作，由 ERP 統一更新多個試算表
 
@@ -22,9 +23,11 @@ npm run dev
 
 瀏覽 [http://localhost:3000](http://localhost:3000)。
 
-## 設定（待實作）
+## 設定
 
-1. Google Cloud Console 啟用 Google Sheets API
-2. 建立服務帳戶，下載 JSON 憑證
-3. 將大總表與服務帳戶共用（編輯權限）
-4. 複製 `.env.example` 為 `.env.local`，填寫試算表 ID 與憑證路徑
+詳見 [docs/SUPABASE_SETUP.md](./docs/SUPABASE_SETUP.md)，簡要步驟：
+
+1. 在 [supabase.com](https://supabase.com) 建立專案
+2. 複製 `.env.example` 為 `.env.local`，填寫 Supabase URL 與金鑰
+3. 在 Supabase SQL Editor 執行 `supabase/migrations/001_initial_schema.sql`
+4. 執行 `scripts/seed-users.sql` 建立初始使用者

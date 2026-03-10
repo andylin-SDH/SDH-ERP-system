@@ -34,8 +34,14 @@ yarn-error.log*
 .env*
 !.env.example
 
+# credentials / secrets (never commit)
+sdh-erp-system-*.json
+
 # vercel
 .vercel
+
+# supabase local temp
+supabase/.temp/
 
 # typescript
 *.tsbuildinfo

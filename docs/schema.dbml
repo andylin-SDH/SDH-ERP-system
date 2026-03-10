@@ -1,0 +1,132 @@
+// SDH ERP 資料庫架構 - 可匯入 dbdiagram.io
+// 使用方式：前往 https://dbdiagram.io → Import → 貼上此檔內容
+
+Project SDH_ERP {
+  database_type: 'PostgreSQL'
+  Note: '以 project_master（大總表）為中心，其餘表以 專案ID 連動'
+}
+
+Table users [headercolor: #3498db] {
+  id uuid [pk, default: `gen_random_uuid()`]
+  email text [unique, not null]
+  name text [not null]
+  role text [not null]
+  dept text
+  scope text
+  password text [not null]
+  active_flag boolean [default: true]
+  created_at timestamptz [default: `now()`]
+  Note: '使用者（帳號、角色、Scope），不更動'
+}
+
+Table project_master [headercolor: #e74c3c] {
+  id uuid [pk, default: `gen_random_uuid()`]
+  project_id text [unique, not null]
+  project_name text
+  project_type text
+  project_status text
+  status_confirm_date text
+  start_date text
+  total_amount_excl_tax text
+  project_revenue text
+  project_cost text
+  kol_cost_excl_tax text
+  kol_name text
+  cost_type text
+  vendor_name text
+  content text
+  memo text
+  bd_pm_pct text
+  referrer_pct text
+  pm_pct text
+  exec_mgr_pct text
+  owner_email text
+  co_kol text
+  project_folder text
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+  Note: '大總表（中心主題）'
+}
+
+Table "角色設定表" [headercolor: #e67e22] {
+  id uuid [pk, default: `gen_random_uuid()`]
+  "角色" text [unique, not null]
+  "分潤成數" text [not null]
+  created_at timestamptz [default: `now()`]
+  Note: '規範角色與%數對應'
+}
+
+Table "分潤表" [headercolor: #2ecc71] {
+  id uuid [pk, default: `gen_random_uuid()`]
+  "專案ID" text [not null]
+  "專案名稱" text
+  "專案總金額未稅" text
+  "角色" text [not null]
+  "分潤成數" text
+  "分潤金額" text
+  "領取人" text
+  created_at timestamptz [default: `now()`]
+  Note: '分潤成數由角色設定表帶入，領取人對應大總表'
+}
+
+Table tasks [headercolor: #9b59b6] {
+  id uuid [pk, default: `gen_random_uuid()`]
+  project_id text [not null]
+  task_id text
+  task_name text
+  task_status text
+  task_level text
+  task_memo text
+  partner_id text
+  partner_name text
+  partner_type text
+  partner_emails text
+  bank_account_name text
+  bank_account_no text
+  bank_name text
+  notes text
+  created_at timestamptz [default: `now()`]
+  Note: '任務（含 Partner 欄位）'
+}
+
+Table finance [headercolor: #f39c12] {
+  id uuid [pk, default: `gen_random_uuid()`]
+  project_id text [not null]
+  total_amount_excl_tax text
+  project_cost text
+  actual_cost text
+  project_payout text
+  project_profit text
+  profit_ratio text
+  advance_amount text
+  vendor_payment_status text
+  staff_payout_status text
+  created_at timestamptz [default: `now()`]
+  Note: '財務'
+}
+
+Table vendors [headercolor: #1abc9c] {
+  id uuid [pk, default: `gen_random_uuid()`]
+  project_id text [not null]
+  invoice_id text
+  invoice_no text
+  invoice_date text
+  total_incl_tax text
+  total_excl_tax text
+  expected_payment_date text
+  actual_payment_amount text
+  payment_status text
+  payment_date text
+  memo text
+  created_at timestamptz [default: `now()`]
+  Note: '廠商（發票與付款）'
+}
+
+// 關聯
+Ref: "分潤表"."專案ID" > "大總表"."專案ID" [delete: cascade]
+Ref: tasks.project_id > project_master.project_id [delete: cascade]
+Ref: finance.project_id > project_master.project_id [delete: cascade]
+Ref: vendors.project_id > project_master.project_id [delete: cascade]
+
+// 使用者與大總表的對應（透過欄位，非 FK）
+// users.email / users.name ↔ project_master.owner_email（專案負責人）
