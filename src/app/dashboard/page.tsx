@@ -327,7 +327,7 @@ export default function DashboardPage() {
       const q = keyword.trim().toLowerCase();
       if (!q || !keys.length) return rows;
       return rows.filter((row) =>
-        keys.some((k) => String((row as Record<string, unknown>)[k] ?? "").toLowerCase().includes(q))
+        keys.some((k) => String((row as unknown as Record<string, unknown>)[k] ?? "").toLowerCase().includes(q))
       );
     },
     []
@@ -343,7 +343,7 @@ export default function DashboardPage() {
       const uEmail = (me.email ?? "").trim();
       return rows.filter((row) => {
         for (const key of matchFields) {
-          const val = String((row as Record<string, unknown>)[key] ?? "").trim();
+          const val = String((row as unknown as Record<string, unknown>)[key] ?? "").trim();
           if (!val) continue;
           if (val === uName || val === uEmail) return true;
         }
@@ -353,14 +353,26 @@ export default function DashboardPage() {
     [me, visibilityRules]
   );
 
-  const filteredMasterList = useMemo(() => filterRowsByVisibility(masterList as unknown as Record<string, unknown>[], "master") as MasterRow[], [masterList, filterRowsByVisibility]);
-  const filteredPartners = useMemo(() => filterRowsByVisibility(partners as unknown as Record<string, unknown>[], "partners") as PartnerRow[], [partners, filterRowsByVisibility]);
-  const filteredTasks = useMemo(() => filterRowsByVisibility(tasks as unknown as Record<string, unknown>[], "tasks") as TaskRow[], [tasks, filterRowsByVisibility]);
+  const filteredMasterList = useMemo(
+    () => filterRowsByVisibility(masterList as unknown as Record<string, unknown>[], "master") as unknown as MasterRow[],
+    [masterList, filterRowsByVisibility]
+  );
+  const filteredPartners = useMemo(
+    () => filterRowsByVisibility(partners as unknown as Record<string, unknown>[], "partners") as unknown as PartnerRow[],
+    [partners, filterRowsByVisibility]
+  );
+  const filteredTasks = useMemo(
+    () => filterRowsByVisibility(tasks as unknown as Record<string, unknown>[], "tasks") as unknown as TaskRow[],
+    [tasks, filterRowsByVisibility]
+  );
 
   const masterVisibleCols = useMemo(() => getVisibleColumnKeys("master"), [getVisibleColumnKeys]);
   const partnersVisibleCols = useMemo(() => getVisibleColumnKeys("partners"), [getVisibleColumnKeys]);
   const tasksVisibleCols = useMemo(() => getVisibleColumnKeys("tasks"), [getVisibleColumnKeys]);
-  const filteredPayout = useMemo(() => filterRowsByVisibility(payoutList as unknown as Record<string, unknown>[], "payout") as PayoutRow[], [payoutList, filterRowsByVisibility]);
+  const filteredPayout = useMemo(
+    () => filterRowsByVisibility(payoutList as unknown as Record<string, unknown>[], "payout") as unknown as PayoutRow[],
+    [payoutList, filterRowsByVisibility]
+  );
   const payoutVisibleCols = useMemo(() => getVisibleColumnKeys("payout"), [getVisibleColumnKeys]);
   const financeVisibleCols = useMemo(() => getVisibleColumnKeys("finance"), [getVisibleColumnKeys]);
   const invoicesVisibleCols = useMemo(() => getVisibleColumnKeys("invoices"), [getVisibleColumnKeys]);
@@ -376,19 +388,23 @@ export default function DashboardPage() {
 
   /** 套用關鍵字搜尋後的各 Table 資料 */
   const searchedMasterList = useMemo(
-    () => filterRowsBySearch(filteredMasterList as unknown as Record<string, unknown>[], masterVisibleCols, masterSearch) as MasterRow[],
+    () =>
+      filterRowsBySearch(filteredMasterList as unknown as Record<string, unknown>[], masterVisibleCols, masterSearch) as unknown as MasterRow[],
     [filteredMasterList, masterVisibleCols, masterSearch, filterRowsBySearch]
   );
   const searchedPartners = useMemo(
-    () => filterRowsBySearch(filteredPartners as unknown as Record<string, unknown>[], partnerListCols, partnersSearch) as PartnerRow[],
+    () =>
+      filterRowsBySearch(filteredPartners as unknown as Record<string, unknown>[], partnerListCols, partnersSearch) as unknown as PartnerRow[],
     [filteredPartners, partnerListCols, partnersSearch, filterRowsBySearch]
   );
   const searchedTasks = useMemo(
-    () => filterRowsBySearch(filteredTasks as unknown as Record<string, unknown>[], tasksVisibleCols, tasksSearch) as TaskRow[],
+    () =>
+      filterRowsBySearch(filteredTasks as unknown as Record<string, unknown>[], tasksVisibleCols, tasksSearch) as unknown as TaskRow[],
     [filteredTasks, tasksVisibleCols, tasksSearch, filterRowsBySearch]
   );
   const searchedPayout = useMemo(
-    () => filterRowsBySearch(filteredPayout as unknown as Record<string, unknown>[], payoutVisibleCols, payoutSearch) as PayoutRow[],
+    () =>
+      filterRowsBySearch(filteredPayout as unknown as Record<string, unknown>[], payoutVisibleCols, payoutSearch) as unknown as PayoutRow[],
     [filteredPayout, payoutVisibleCols, payoutSearch, filterRowsBySearch]
   );
   const searchedFinance = useMemo(
@@ -1031,7 +1047,7 @@ export default function DashboardPage() {
                             {masterVisibleCols.map((k) => {
                               const amountKeys = ["專案總金額未稅", "專案營收", "專案成本", "KOL費用未稅"];
                               const isAmount = amountKeys.includes(k);
-                              const val = (row as Record<string, unknown>)[k];
+                              const val = (row as unknown as Record<string, unknown>)[k];
                               if (k === "專案ID") {
                                 return (
                                   <td key={k} className="sticky left-0 z-20 w-[5rem] min-w-[5rem] max-w-[5rem] bg-slate-800/20 px-2 py-3.5" title={pid}>
@@ -2186,7 +2202,7 @@ export default function DashboardPage() {
                           </button>
                         </td>
                         {partnerListCols.map((k) => {
-                          const val = (pt as Record<string, unknown>)[k];
+                          const val = (pt as unknown as Record<string, unknown>)[k];
                           if (
                             k === "是否有經營 私域群" ||
                             k === "廣告經銷夥伴" ||
@@ -2227,7 +2243,7 @@ export default function DashboardPage() {
                           >
                             <div className="grid grid-cols-2 gap-x-6 gap-y-3 md:grid-cols-3 lg:grid-cols-4">
                               {TABLE_COLUMNS.partners.map((c) => {
-                                const val = (pt as Record<string, unknown>)[c.key];
+                                const val = (pt as unknown as Record<string, unknown>)[c.key];
                                 const display =
                                   c.key === "是否有經營 私域群" || c.key === "廣告經銷夥伴" || c.key === "節目製作夥伴" || c.key === "課程製作夥伴"
                                     ? Boolean(val)
@@ -2369,7 +2385,7 @@ export default function DashboardPage() {
                             </td>
                           );
                         }
-                        const val = (t as Record<string, unknown>)[k];
+                        const val = (t as unknown as Record<string, unknown>)[k];
                         const str = String(val ?? "—");
                         return (
                           <td key={k} className={k === "任務" ? "max-w-[240px] truncate px-4 py-3.5 text-sm font-medium text-white" : k === "專案名稱" ? "max-w-[180px] truncate px-4 py-3.5 text-sm font-medium text-slate-300" : "whitespace-nowrap px-4 py-3.5 text-sm font-medium text-slate-300"} title={k === "專案名稱" || k === "任務" ? str : undefined}>
@@ -2424,7 +2440,7 @@ export default function DashboardPage() {
                     searchedPayout.map((row, i) => (
                       <tr key={row.id ?? i} className="hover:bg-white/5">
                         {payoutVisibleCols.map((k) => {
-                          const val = (row as Record<string, unknown>)[k];
+                          const val = (row as unknown as Record<string, unknown>)[k];
                           const str = String(val ?? "—");
                           return (
                             <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm ${k === "專案ID" ? "font-medium text-slate-500" : "font-medium text-slate-300"}`}>
@@ -2480,7 +2496,7 @@ export default function DashboardPage() {
                     searchedFinance.map((row, i) => (
                       <tr key={i} className="hover:bg-white/5">
                         {financeVisibleCols.map((k) => {
-                          const v = (row as Record<string, unknown>)[k];
+                          const v = (row as unknown as Record<string, unknown>)[k];
                           return <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm text-slate-300">{String(v ?? "—")}</td>;
                         })}
                       </tr>
@@ -2531,7 +2547,7 @@ export default function DashboardPage() {
                     searchedInvoices.map((inv, i) => (
                       <tr key={i} className="hover:bg-white/5">
                         {invoicesVisibleCols.map((k) => {
-                          const v = (inv as Record<string, unknown>)[k];
+                          const v = (inv as unknown as Record<string, unknown>)[k];
                           return (
                             <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm ${k === "專案ID" ? "font-medium text-white" : "text-slate-300"}`}>
                               {String(v ?? "—")}
@@ -2576,12 +2592,12 @@ export default function DashboardPage() {
                   }),
                   });
                   const data = (await safeResJson(res)) as { ok?: boolean; error?: string; master?: MasterRow };
-                  if (!res.ok || !data.ok) {
+                  if (!res.ok || !data.ok || !data.master) {
                     setCreateError(data.error ?? "新增失敗");
                     setCreating(false);
                     return;
                   }
-                  setMasterList((prev) => [data.master, ...prev]);
+                  setMasterList((prev) => [data.master!, ...prev]);
                   setCreating(false);
                   setShowCreateMaster(false);
                 } catch (err: unknown) {
@@ -3013,6 +3029,7 @@ export default function DashboardPage() {
                       KOL名稱: selectedMaster.KOL名稱 ?? "",
                       廠商名稱: selectedMaster.廠商名稱 ?? "",
                       專案BDPM: selectedMaster.專案BDPM ?? "",
+                      專案BDPM分潤成數: selectedMaster.專案BDPM分潤成數 ?? "",
                       專案引薦人: selectedMaster.專案引薦人 ?? "",
                       專案引薦人分潤成數: selectedMaster.專案引薦人分潤成數 ?? "",
                       專案管理員: selectedMaster.專案管理員 ?? "",
@@ -3322,7 +3339,7 @@ export default function DashboardPage() {
                     }),
                   });
                   const data = (await safeResJson(res)) as { ok?: boolean; error?: string; task?: TaskRow };
-                  if (!res.ok || !data.ok) {
+                  if (!res.ok || !data.ok || !data.task) {
                     setSaveTaskError(data.error ?? "更新失敗");
                     setSavingTask(false);
                     return;

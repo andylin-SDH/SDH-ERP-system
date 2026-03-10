@@ -9,12 +9,12 @@ import type { User } from "@/lib/types";
 
 /** 從 DB 列轉成 User（相容 帳號/姓名 或 email/name） */
 function rowToUser(r: Record<string, unknown>): User {
-  const email = (r.email ?? r.帳號 ?? "") as string;
-  const name = (r.name ?? r.姓名 ?? "") as string;
-  const role = (r.role ?? r.角色 ?? "") as string;
-  const dept = (r.dept ?? r.部門 ?? "") as string;
-  const scope = (r.scope ?? r.scope) as string | undefined;
-  const activeFlag = (r.active_flag ?? r.active_flag ?? false) as boolean;
+  const email = (r["email"] ?? r["帳號"] ?? "") as string;
+  const name = (r["name"] ?? r["姓名"] ?? "") as string;
+  const role = (r["role"] ?? r["角色"] ?? "") as string;
+  const dept = (r["dept"] ?? r["部門"] ?? "") as string;
+  const scope = r["scope"] as string | undefined;
+  const activeFlag = (r["active_flag"] ?? false) as boolean;
   return { email, name, role, dept, scope, activeFlag };
 }
 
@@ -70,15 +70,20 @@ export async function createUser(payload: CreateUserInput): Promise<User> {
   const { data: dataEn, error: errEn } = await supabase.from("users").insert(insertEn).select("email, name, role, dept, scope, active_flag").maybeSingle();
   if (!errEn && dataEn) {
     log("users.db", "createUser 成功（英文欄位）", { email });
-    return rowToUser(dataEn as Record<string, unknown>);
+    return rowToUser(dataEn as unknown as Record<string, unknown>);
   }
-  const { data, error } = await supabase.from("users").insert(insertZh).select("帳號, 姓名, 角色, 部門, scope, active_flag").maybeSingle();
+  const { data, error } = await supabase
+    .from("users")
+    .insert(insertZh)
+    // Supabase select parser 對中文欄位需加上雙引號
+    .select('"帳號","姓名","角色","部門","scope","active_flag"')
+    .maybeSingle();
   if (error) {
     log("users.db", "createUser 失敗", { error: String(error?.message) });
     throw error;
   }
   log("users.db", "createUser 成功（中文欄位）", { email });
-  return rowToUser(data as Record<string, unknown>);
+  return rowToUser(data as unknown as Record<string, unknown>);
 }
 
 /** 依 email（帳號）更新使用者資料，支援中英文欄位 */
@@ -110,14 +115,15 @@ export async function updateUser(email: string, payload: UpdateUserInput): Promi
 
   if (!errEn && dataEn) {
     log("users.db", "updateUser 成功（英文欄位）", { email: raw?.slice(0, 25) });
-    return rowToUser(dataEn as Record<string, unknown>);
+    return rowToUser(dataEn as unknown as Record<string, unknown>);
   }
 
   const { data: dataZh, error } = await supabase
     .from("users")
     .update(updatesZh)
     .eq("帳號", raw)
-    .select("帳號, 姓名, 角色, 部門, scope, active_flag")
+    // Supabase select parser 對中文欄位需加上雙引號
+    .select('"帳號","姓名","角色","部門","scope","active_flag"')
     .maybeSingle();
 
   if (error) {
@@ -126,7 +132,7 @@ export async function updateUser(email: string, payload: UpdateUserInput): Promi
   }
   if (!dataZh) return null;
   log("users.db", "updateUser 成功（中文欄位）", { email: raw?.slice(0, 25) });
-  return rowToUser(dataZh as Record<string, unknown>);
+  return rowToUser(dataZh as unknown as Record<string, unknown>);
 }
 
 export async function getUsers(): Promise<User[]> {
@@ -137,15 +143,16 @@ export async function getUsers(): Promise<User[]> {
     .eq("active_flag", true)
     .order("email");
   if (!errEn && dataEn?.length) {
-    return (dataEn ?? []).map((r) => rowToUser(r as Record<string, unknown>));
+    return (dataEn ?? []).map((r) => rowToUser(r as unknown as Record<string, unknown>));
   }
   const { data, error } = await supabase
     .from("users")
-    .select("帳號, 姓名, 角色, 部門, scope, active_flag")
+    // Supabase select parser 對中文欄位需加上雙引號
+    .select('"帳號","姓名","角色","部門","scope","active_flag"')
     .eq("active_flag", true)
     .order("帳號");
   if (error) throw error;
-  return (data ?? []).map((r) => rowToUser(r as Record<string, unknown>));
+  return (data ?? []).map((r) => rowToUser(r as unknown as Record<string, unknown>));
 }
 
 function normalizeEmail(s: string): string {
@@ -182,7 +189,8 @@ export async function getUserByEmail(email: string): Promise<User | null> {
   } else {
     const { data, error } = await supabase
       .from("users")
-      .select("帳號, 姓名, 角色, 部門, scope, active_flag");
+      // Supabase select parser 對中文欄位需加上雙引號
+      .select('"帳號","姓名","角色","部門","scope","active_flag"');
     if (error) {
       log("users.db", "getUserByEmail 查詢錯誤", { error: String(error?.message) });
       throw error;
@@ -197,7 +205,7 @@ export async function getUserByEmail(email: string): Promise<User | null> {
     log("users.db", "getUserByEmail 未找到符合的使用者", { raw });
     return null;
   }
-  log("users.db", "getUserByEmail 找到使用者", { email: (found as Record<string, unknown>)[emailKey], role: found.role ?? found.角色 });
+  log("users.db", "getUserByEmail 找到使用者", { email: (found as unknown as Record<string, unknown>)[emailKey], role: (found as any).role ?? (found as any).角色 });
   return rowToUser(found);
 }
 
@@ -221,19 +229,20 @@ export async function verifyCredentials(
     .eq("email", rawEmail)
     .maybeSingle();
   if (!errEn && dataEn) {
-    data = dataEn as Record<string, unknown>;
+    data = dataEn as unknown as Record<string, unknown>;
   }
   if (!data) {
     const { data: dataZh, error } = await supabase
       .from("users")
-      .select("帳號, 姓名, 角色, 部門, scope, 密碼, active_flag")
+      // Supabase select parser 對中文欄位需加上雙引號
+      .select('"帳號","姓名","角色","部門","scope","密碼","active_flag"')
       .eq("帳號", rawEmail)
       .maybeSingle();
     if (error) {
       log("users.db", "verifyCredentials 查詢錯誤", { error: String(error?.message) });
       throw error;
     }
-    data = dataZh as Record<string, unknown> | null;
+    data = dataZh as unknown as Record<string, unknown> | null;
   }
   if (!data) {
     log("users.db", "verifyCredentials 未找到使用者", { rawEmail: rawEmail?.slice(0, 25) });

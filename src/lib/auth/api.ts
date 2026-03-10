@@ -45,7 +45,8 @@ export async function requireAuth(request: NextRequest | Request): Promise<{ use
 export async function requireAdmin(request: NextRequest | Request): Promise<{ user: User } | NextResponse> {
   const result = await requireAuth(request);
   if (result instanceof NextResponse) return result;
-  if (!ADMIN_ROLES.includes(result.user.role)) {
+  const role = result.user.role as (typeof ADMIN_ROLES)[number] | string;
+  if (!ADMIN_ROLES.includes(role as (typeof ADMIN_ROLES)[number])) {
     return NextResponse.json({ ok: false, error: "僅董事長或管理者可執行此操作" }, { status: 403 });
   }
   return result;

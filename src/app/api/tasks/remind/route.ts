@@ -11,10 +11,10 @@ import { requireAuth } from "@/lib/auth/api";
 
 function rowToTask(r: Record<string, unknown>) {
   return {
-    專案ID: r.專案ID as string,
-    專案名稱: (r.專案名稱 as string) ?? undefined,
-    任務: (r.任務名稱 as string) ?? undefined,
-    負責人: (r.負責人 as string) ?? undefined,
+    專案ID: r["專案ID"] as string,
+    專案名稱: (r["專案名稱"] as string) ?? undefined,
+    任務: (r["任務名稱"] as string) ?? undefined,
+    負責人: (r["負責人"] as string) ?? undefined,
   };
 }
 
@@ -30,7 +30,8 @@ export async function POST(request: NextRequest) {
 
     const { data, error } = await getSupabase()
       .from("任務")
-      .select("專案ID, 專案名稱, 任務名稱, 負責人")
+      // Supabase select parser 對中文欄位需加上雙引號
+      .select('"專案ID","專案名稱","任務名稱","負責人"')
       .eq("任務ID", 任務ID)
       .maybeSingle();
 
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "找不到該任務" }, { status: 404 });
     }
 
-    const task = rowToTask(data as Record<string, unknown>);
+    const task = rowToTask(data as unknown as Record<string, unknown>);
     const 負責人 = task.負責人?.trim();
     if (!負責人) {
       return NextResponse.json({ ok: false, error: "此任務未指定負責人" }, { status: 400 });
