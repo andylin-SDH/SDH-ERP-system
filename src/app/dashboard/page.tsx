@@ -359,11 +359,11 @@ export default function DashboardPage() {
     () => filterRowsByVisibility(masterList as unknown as Record<string, unknown>[], "master") as unknown as MasterRow[],
     [masterList, filterRowsByVisibility]
   );
-  /**
-   * 合作夥伴 / KOL：一律不過濾列（後端已 63 筆仍空白時，多為 match_fields 對不到姓名/Email）
-   * ③ 使用者可見範圍仍會限制「欄位」顯示，但列數與大總表無關時改為全顯較符合實務
-   */
-  const filteredPartners = useMemo(() => partners, [partners]);
+  /** 合作夥伴 / KOL：與其他表相同，依 ② match_fields 篩列（未勾選 = 不篩；勾選經紀人 = 只顯示該欄位等於登入者姓名或帳號的列） */
+  const filteredPartners = useMemo(
+    () => filterRowsByVisibility(partners as unknown as Record<string, unknown>[], "partners") as unknown as PartnerRow[],
+    [partners, filterRowsByVisibility]
+  );
   const filteredTasks = useMemo(
     () => filterRowsByVisibility(tasks as unknown as Record<string, unknown>[], "tasks") as unknown as TaskRow[],
     [tasks, filterRowsByVisibility]
@@ -380,10 +380,13 @@ export default function DashboardPage() {
   const financeVisibleCols = useMemo(() => getVisibleColumnKeys("finance"), [getVisibleColumnKeys]);
   const invoicesVisibleCols = useMemo(() => getVisibleColumnKeys("invoices"), [getVisibleColumnKeys]);
 
-  /** KOL 區塊主列表只顯示的 6 個欄位（與可見欄位交集） */
+  /**
+   * KOL 區塊主列表欄位（與 ③ 可見欄位交集）
+   * 含「經紀人」方便對照 ② 篩選：該欄必須與登入者 Users.姓名 或 Users.帳號 完全一致才會留下該列
+   */
   const partnerListCols = useMemo(
     () =>
-      ["合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "資料夾", "分級"].filter((k) =>
+      ["合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "資料夾", "經紀人", "分級"].filter((k) =>
         partnersVisibleCols.includes(k)
       ),
     [partnersVisibleCols]
@@ -864,10 +867,16 @@ export default function DashboardPage() {
                           setVisibilityRulesError(null);
                           setSavingVisibilityRules(true);
                           try {
-                            const res = await fetch("/api/visibility-rules", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rules: visibilityRules }) });
+                            /** 每個 table_key 都寫入 DB；缺 key 時以前端畫面為準視為 []，避免只送部分 rules 導致 partners 等未更新仍用舊 match_fields */
+                            const fullRules: Record<string, string[]> = {};
+                            for (const tk of TABLE_KEYS) {
+                              const v = visibilityRules[tk];
+                              fullRules[tk] = Array.isArray(v) ? v : [];
+                            }
+                            const res = await fetch("/api/visibility-rules", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rules: fullRules }) });
                             const data = (await safeResJson(res)) as { ok?: boolean; error?: string; rules?: Record<string, string[]> };
                             if (!res.ok || !data.ok) { setVisibilityRulesError(data.error ?? "儲存失敗"); setSavingVisibilityRules(false); return; }
-                            setVisibilityRules(data.rules ?? visibilityRules);
+                            setVisibilityRules(data.rules ?? fullRules);
                           } catch (err) { setVisibilityRulesError(err instanceof Error ? err.message : "儲存失敗"); }
                           setSavingVisibilityRules(false);
                         }}
