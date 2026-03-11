@@ -6,7 +6,8 @@
 
 export const VISIBILITY_RULES_DEFAULTS: Record<string, string[]> = {
   master: ["專案BDPM", "執行管理員", "專案引薦人", "專案管理員"],
-  partners: ["負責經紀人"],
+  /** 空陣列 = 不過濾，所有人可看全部 KOL（表內欄位為「經紀人」非「負責經紀人」，舊預設會導致永遠比對不到而空白） */
+  partners: [],
   tasks: ["任務負責人"],
   payout: ["領取人"],
 };

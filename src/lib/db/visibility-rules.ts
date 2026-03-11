@@ -21,9 +21,10 @@ export async function getVisibilityRules(): Promise<Record<string, string[]>> {
   const result: Record<string, string[]> = { ...VISIBILITY_RULES_DEFAULTS };
   for (const row of data ?? []) {
     const key = (row as { table_key?: string }).table_key;
-    const fields = (row as { match_fields?: string[] }).match_fields;
-    if (key && Array.isArray(fields)) {
-      result[key] = fields;
+    const fields = (row as { match_fields?: string[] | null }).match_fields;
+    // 有 table_key 就覆寫：空規則務必為 []，否則 null 會讓 result 仍留預設而繼續過濾
+    if (key) {
+      result[key] = Array.isArray(fields) ? fields : [];
     }
   }
   return result;
