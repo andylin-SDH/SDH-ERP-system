@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPartners } from "@/modules/partners";
+import { getPartnersWithError } from "@/lib/db/partners";
 import { createPartner, updatePartner, type NewPartnerInput, type UpdatePartnerInput } from "@/lib/db/partners";
 import { requireAdmin, requireAuth } from "@/lib/auth/api";
 
@@ -7,8 +7,12 @@ export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   try {
-    const partners = await getPartners();
-    return NextResponse.json({ ok: true, partners });
+    const { partners, error: partnersError, usedFallback } = await getPartnersWithError();
+    return NextResponse.json({
+      ok: true,
+      partners,
+      ...(partnersError ? { partnersError, usedFallback } : {}),
+    });
   } catch (error) {
     console.error("GET /api/partners error:", error);
     return NextResponse.json(

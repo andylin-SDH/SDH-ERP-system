@@ -1,24 +1,37 @@
 /**
  * Partners 資料層（Supabase）
- * 目前無「合作夥伴」表時一律回傳空陣列，不拋錯
+ * 查詢失敗時改為回傳錯誤訊息（供 API 顯示），並可 fallback select('*') 以相容舊表結構
  */
 
 import { getSupabase } from "@/lib/supabase/server";
+import { log } from "@/lib/log";
 import type { PartnerRow } from "@/modules/partners/types";
 
+/** 與目前 DB 中文欄位一致；若任一名稱不符 PostgREST 會整段失敗 */
+const PARTNER_SELECT =
+  '"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "經紀人", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級"';
+
 function rowToPartner(r: Record<string, unknown>): PartnerRow {
+  // 舊表 partners（migration 000）為 partner_id / partner_name 等，一併對應
+  const PartnerID =
+    (r.PartnerID as string) ||
+    (r.partner_id as string) ||
+    (r["PartnerID"] as string) ||
+    undefined;
   return {
-    PartnerID: r.PartnerID as string,
+    PartnerID,
     類別一: (r["類別一"] as string) || undefined,
     類別二: (r["類別二"] as string) || undefined,
     類別三: (r["類別三"] as string) || undefined,
-    合作夥伴名稱: (r["合作夥伴名稱"] as string) || undefined,
+    合作夥伴名稱:
+      (r["合作夥伴名稱"] as string) || (r.partner_name as string) || undefined,
     社群網站: (r["社群網站"] as string) || undefined,
     粉絲數: (r["粉絲數"] as string) || undefined,
     "頻道｜節目名稱": (r["頻道｜節目名稱"] as string) || undefined,
     "是否有經營 私域群": (r["是否有經營 私域群"] as boolean) ?? false,
     資料夾: (r["資料夾"] as string) || undefined,
-    經紀人: (r["經紀人"] as string) || undefined,
+    經紀人:
+      (r["經紀人"] as string) || (r.responsible_agent as string) || undefined,
     廣告經銷夥伴: (r["廣告經銷夥伴"] as boolean) ?? false,
     節目製作夥伴: (r["節目製作夥伴"] as boolean) ?? false,
     課程製作夥伴: (r["課程製作夥伴"] as boolean) ?? false,
@@ -74,7 +87,7 @@ export async function createPartner(payload: NewPartnerInput): Promise<PartnerRo
   const { data, error } = await getSupabase()
     .from("partners")
     .insert(insert)
-    .select('"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "經紀人", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級"')
+    .select(PARTNER_SELECT)
     .single();
 
   if (error || !data) {
@@ -125,31 +138,69 @@ export async function updatePartner(PartnerID: string, payload: UpdatePartnerInp
     .from("partners")
     .update(update)
     .eq("PartnerID", PartnerID)
-    .select('"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "經紀人", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級"')
+    .select(PARTNER_SELECT)
     .single();
 
   if (error || !data) return null;
   return rowToPartner(data as Record<string, unknown>);
 }
 
-export async function getPartners(): Promise<PartnerRow[]> {
+export interface GetPartnersResult {
+  partners: PartnerRow[];
+  /** 非 null 表示精確欄位 select 失敗；可能已用 select('*') fallback */
+  error: string | null;
+  /** true 表示有使用 fallback，欄位可能不完整 */
+  usedFallback?: boolean;
+}
+
+/**
+ * 取得合作夥伴列表；失敗時回傳 error 字串，並嘗試 select('*') 以相容欄位名不同的表
+ */
+export async function getPartnersWithError(): Promise<GetPartnersResult> {
+  const supabase = getSupabase();
   try {
-    const { data, error } = await getSupabase()
+    const { data, error } = await supabase
       .from("partners")
-      .select('"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "經紀人", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級"')
+      .select(PARTNER_SELECT)
       .order("PartnerID");
-    if (error) return [];
-    return (data ?? []).map(rowToPartner);
-  } catch {
-    return [];
+    if (!error && data) {
+      const partners = data.map(rowToPartner);
+      log("partners.db", "getPartners 筆數", { count: partners.length });
+      return { partners, error: null };
+    }
+    const msg = error?.message ?? String(error);
+    log("partners.db", "getPartners 精確欄位查詢失敗，嘗試 select *", { error: msg });
+
+    const { data: raw, error: err2 } = await supabase.from("partners").select("*").limit(2000);
+    if (err2) {
+      log("partners.db", "getPartners fallback 也失敗", { error: String(err2.message) });
+      return { partners: [], error: msg || err2.message };
+    }
+    const rows = (raw ?? []).map((r) => rowToPartner(r as Record<string, unknown>));
+    log("partners.db", "getPartners fallback 筆數", { count: rows.length, firstError: msg });
+    return {
+      partners: rows,
+      error: `欄位清單查詢失敗已改用全欄位：${msg}`,
+      usedFallback: true,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log("partners.db", "getPartners 例外", { error: msg });
+    return { partners: [], error: msg };
   }
+}
+
+/** 向後相容：只取列表時仍可用；建議 API 改用 getPartnersWithError 以便除錯 */
+export async function getPartners(): Promise<PartnerRow[]> {
+  const { partners } = await getPartnersWithError();
+  return partners;
 }
 
 export async function getPartnersByAgent(agentEmail: string): Promise<PartnerRow[]> {
   try {
     const { data, error } = await getSupabase()
       .from("partners")
-      .select('"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "經紀人", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級"')
+      .select(PARTNER_SELECT)
       .ilike("經紀人", agentEmail)
       .order("PartnerID");
     if (error) return [];
@@ -165,7 +216,7 @@ export async function getPartnersByScope(scopeStr: string): Promise<PartnerRow[]
   try {
     const { data, error } = await getSupabase()
       .from("partners")
-      .select('"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "經紀人", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級"')
+      .select(PARTNER_SELECT)
       .in("PartnerID", ids)
       .order("PartnerID");
     if (error) return [];

@@ -119,6 +119,8 @@ export default function DashboardPage() {
   }));
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [partners, setPartners] = useState<PartnerRow[]>([]);
+  /** GET /api/partners 回傳的 partnersError：精確欄位查詢失敗或 DB 結構不符 */
+  const [partnersLoadError, setPartnersLoadError] = useState<string | null>(null);
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const [addingTaskFor, setAddingTaskFor] = useState<string | null>(null);
   const [newTaskForm, setNewTaskForm] = useState({ 任務名稱: "", 任務狀態: "", 任務負責人: "" });
@@ -357,10 +359,11 @@ export default function DashboardPage() {
     () => filterRowsByVisibility(masterList as unknown as Record<string, unknown>[], "master") as unknown as MasterRow[],
     [masterList, filterRowsByVisibility]
   );
-  const filteredPartners = useMemo(
-    () => filterRowsByVisibility(partners as unknown as Record<string, unknown>[], "partners") as unknown as PartnerRow[],
-    [partners, filterRowsByVisibility]
-  );
+  /**
+   * 合作夥伴 / KOL：一律不過濾列（後端已 63 筆仍空白時，多為 match_fields 對不到姓名/Email）
+   * ③ 使用者可見範圍仍會限制「欄位」顯示，但列數與大總表無關時改為全顯較符合實務
+   */
+  const filteredPartners = useMemo(() => partners, [partners]);
   const filteredTasks = useMemo(
     () => filterRowsByVisibility(tasks as unknown as Record<string, unknown>[], "tasks") as unknown as TaskRow[],
     [tasks, filterRowsByVisibility]
@@ -549,8 +552,11 @@ export default function DashboardPage() {
             setMasterList(((m.value as { list?: MasterRow[] }).list) ?? []);
           if (t.status === "fulfilled" && (t.value as { ok?: boolean }).ok)
             setTasks(((t.value as { tasks?: TaskRow[] }).tasks) ?? []);
-          if (pt.status === "fulfilled" && (pt.value as { ok?: boolean }).ok)
-            setPartners(((pt.value as { partners?: PartnerRow[] }).partners) ?? []);
+          if (pt.status === "fulfilled" && (pt.value as { ok?: boolean }).ok) {
+            const ptVal = pt.value as { partners?: PartnerRow[]; partnersError?: string };
+            setPartners(ptVal.partners ?? []);
+            setPartnersLoadError(ptVal.partnersError ?? null);
+          }
           if (vis.status === "fulfilled" && (vis.value as { ok?: boolean }).ok) {
             const v = vis.value as { tables?: string[]; columns?: Record<string, string[]> };
             setMyVisibility({ tables: v.tables ?? [], columns: v.columns ?? {} });
@@ -2045,6 +2051,13 @@ export default function DashboardPage() {
         {/* 合作夥伴 / KOL */}
         {activeSection === "partners" && (
         <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-6 shadow-xl ring-1 ring-white/5">
+          {partnersLoadError && (
+            <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+              <p className="font-semibold text-amber-300">合作夥伴列表載入異常（已嘗試備援查詢）</p>
+              <p className="mt-1 text-xs text-amber-200/90">{partnersLoadError}</p>
+              <p className="mt-2 text-xs text-slate-400">若仍無資料，請在 Supabase 確認 public.partners 欄位名是否與程式一致，或表內是否有列。</p>
+            </div>
+          )}
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-xl font-bold tracking-tight text-white">合作夥伴 / KOL</h2>
             <div className="flex flex-wrap items-center gap-3">
@@ -2136,7 +2149,7 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10 bg-slate-800/10">
-                {filteredPartners.length === 0 ? (
+                {partners.length === 0 ? (
                   <tr>
                     <td colSpan={(partnerListCols.length || 6) + 1} className="px-4 py-8 text-center text-base font-medium text-slate-500">
                       尚無合作夥伴資料
