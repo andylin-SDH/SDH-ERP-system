@@ -7,4 +7,6 @@ export const MASTER_PAYOUT_DEFAULTS = {
   專案引薦人分潤成數: "2.5%",
   專案管理員分潤成數: "2.5%",
   執行管理員分潤成數: "2.5%",
+  /** KOL 開發者分潤成數預設（與 partners.KOL開發者 對應之業務預設） */
+  KOL開發者分潤成數: "2.5%",
 } as const;

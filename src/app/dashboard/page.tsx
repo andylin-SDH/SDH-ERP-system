@@ -1398,7 +1398,7 @@ export default function DashboardPage() {
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-x-6 gap-y-2">
-                  {(["專案BDPM分潤成數", "專案引薦人分潤成數", "專案管理員分潤成數", "執行管理員分潤成數"] as const).map((k) => (
+                  {(["專案BDPM分潤成數", "專案引薦人分潤成數", "專案管理員分潤成數", "執行管理員分潤成數", "KOL開發者分潤成數"] as const).map((k) => (
                     <div key={k} className="flex items-center gap-2">
                       <span className="text-xs text-slate-400">{k}</span>
                       <input
@@ -2808,6 +2808,7 @@ export default function DashboardPage() {
                       options={userNames}
                     />
                     <Field label="執行管理員分潤成數" value={payoutDefaults.執行管理員分潤成數} />
+                    <Field label="KOL開發者分潤成數" value={payoutDefaults.KOL開發者分潤成數} />
                   </div>
                 </section>
 
@@ -3364,6 +3365,7 @@ export default function DashboardPage() {
                     <Field label="執行管理員" value={selectedMaster.執行管理員} />
                   )}
                   <Field label="執行管理員分潤成數" value={payoutDefaults.執行管理員分潤成數} />
+                  <Field label="KOL開發者分潤成數" value={payoutDefaults.KOL開發者分潤成數} />
                 </div>
               </section>
 
