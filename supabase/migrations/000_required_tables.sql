@@ -15,7 +15,7 @@ COMMENT ON TABLE "visibility_rules" IS '各 Table 的「符合即顯示」欄位
 INSERT INTO "visibility_rules" ("table_key", "match_fields")
 VALUES
   ('master', ARRAY['專案BDPM', '執行管理員', '專案引薦人', '專案管理員']),
-  ('partners', ARRAY['負責經紀人']),
+  ('partners', ARRAY[]::text[]),
   ('tasks', ARRAY['任務負責人']),
   ('payout', ARRAY['領取人'])
 ON CONFLICT ("table_key") DO NOTHING;

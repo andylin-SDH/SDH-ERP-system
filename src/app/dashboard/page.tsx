@@ -335,11 +335,12 @@ export default function DashboardPage() {
     []
   );
 
-  /** 列過濾：依 ② 資料可見規則，非 fullAccess 時只顯示 match_fields 符合登入者姓名/Email 的列 */
+  /** 列過濾：依 ② 資料可見規則，非 fullAccess 時只顯示 match_fields 符合登入者姓名/Email 的列；空字串視同未勾選 */
   const filterRowsByVisibility = useCallback(
     <T extends Record<string, unknown>>(rows: T[], tableKey: string): T[] => {
       if (!me || isFullAccessRole(me.role)) return rows;
-      const matchFields = visibilityRules[tableKey] ?? [];
+      const raw = visibilityRules[tableKey] ?? [];
+      const matchFields = (Array.isArray(raw) ? raw : []).map((f) => String(f).trim()).filter(Boolean);
       if (matchFields.length === 0) return rows;
       const uName = (me.name ?? "").trim();
       const uEmail = (me.email ?? "").trim();
@@ -871,7 +872,8 @@ export default function DashboardPage() {
                             const fullRules: Record<string, string[]> = {};
                             for (const tk of TABLE_KEYS) {
                               const v = visibilityRules[tk];
-                              fullRules[tk] = Array.isArray(v) ? v : [];
+                              const arr = Array.isArray(v) ? v : [];
+                              fullRules[tk] = arr.map((f) => String(f).trim()).filter(Boolean);
                             }
                             const res = await fetch("/api/visibility-rules", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rules: fullRules }) });
                             const data = (await safeResJson(res)) as { ok?: boolean; error?: string; rules?: Record<string, string[]> };
