@@ -8,17 +8,22 @@ import {
   type UpdatePartnerInput,
 } from "@/lib/db/partners";
 import { requireAdmin, requireAuth, ADMIN_ROLES } from "@/lib/auth/api";
-import { PARTNER_STATUS, PARTNER_AGENT_EDITABLE_KEYS, PARTNER_AGENT_PENDING_EDITABLE_KEYS } from "@/lib/db/partner-approval";
+import { PARTNER_STATUS, isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
 import { getPartnersWithError } from "@/lib/db/partners";
 
 function isAdminRole(role: string): boolean {
   return ADMIN_ROLES.includes(role as (typeof ADMIN_ROLES)[number]);
 }
 
-/** 經紀人 PATCH 時只允許這些 key（已核准） */
-const AGENT_APPROVED_KEYS = new Set(PARTNER_AGENT_EDITABLE_KEYS as unknown as string[]);
-/** 待審核／已駁回且為建立者時允許的 key */
-const AGENT_PENDING_KEYS = new Set(PARTNER_AGENT_PENDING_EDITABLE_KEYS as unknown as string[]);
+/** 經紀人 PATCH：允許除 KOL開發者／審核狀態／駁回理由 外的所有 UpdatePartnerInput 欄位 */
+function filterAgentPatchPayload(rest: Record<string, unknown>): UpdatePartnerInput {
+  const filtered: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(rest)) {
+    if (isPartnerAgentBlockedKey(k)) continue;
+    filtered[k] = v;
+  }
+  return filtered as UpdatePartnerInput;
+}
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
@@ -79,7 +84,8 @@ export async function POST(request: NextRequest) {
         "是否有經營 私域群": Boolean(body?.["是否有經營 私域群"]),
         資料夾: body?.資料夾,
         經紀人: body?.經紀人 ?? auth.user.name ?? auth.user.email,
-        KOL開發者: body?.KOL開發者,
+        /** 非管理者不可指定 KOL開發者，由董事長後續補 */
+        KOL開發者: admin ? body?.KOL開發者 : undefined,
         合約開始日期: body?.合約開始日期,
         廣告經銷夥伴: Boolean(body?.廣告經銷夥伴),
         節目製作夥伴: Boolean(body?.節目製作夥伴),
@@ -143,14 +149,11 @@ export async function PATCH(request: NextRequest) {
 
     if (status === PARTNER_STATUS.APPROVED) {
       if (!agentMatch && !isCreator) {
-        return NextResponse.json({ ok: false, error: "僅負責經紀人或建立者可修改部分欄位" }, { status: 403 });
+        return NextResponse.json({ ok: false, error: "僅負責經紀人或建立者可修改" }, { status: 403 });
       }
-      const filtered: UpdatePartnerInput = {};
-      for (const k of AGENT_APPROVED_KEYS) {
-        if (rest[k] !== undefined) (filtered as Record<string, unknown>)[k] = rest[k];
-      }
+      const filtered = filterAgentPatchPayload(rest);
       if (Object.keys(filtered).length === 0) {
-        return NextResponse.json({ ok: false, error: "無可更新的欄位（經紀人僅能改社群網站、粉絲數等）" }, { status: 400 });
+        return NextResponse.json({ ok: false, error: "無可更新的欄位（KOL開發者僅董事長可改）" }, { status: 400 });
       }
       const partner = await updatePartner(PartnerID, filtered);
       if (!partner) return NextResponse.json({ ok: false, error: "更新失敗" }, { status: 404 });
@@ -161,11 +164,8 @@ export async function PATCH(request: NextRequest) {
     if (!isCreator) {
       return NextResponse.json({ ok: false, error: "僅建立者可修改待審核申請" }, { status: 403 });
     }
-    const filtered: UpdatePartnerInput = {};
-    for (const k of AGENT_PENDING_KEYS) {
-      if (rest[k] !== undefined) (filtered as Record<string, unknown>)[k] = rest[k];
-    }
-    // 駁回後再編輯：清駁回理由並改回待審核
+    const filtered = filterAgentPatchPayload(rest);
+    // 駁回後再編輯：清駁回理由並改回待審核（管理者專用欄位，僅在此流程寫入）
     if (status === PARTNER_STATUS.REJECTED) {
       filtered.審核狀態 = PARTNER_STATUS.PENDING;
       filtered.駁回理由 = null;

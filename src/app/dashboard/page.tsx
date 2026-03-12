@@ -14,11 +14,7 @@ import { PROJECT_TYPES } from "@/config/project-types";
 import { MASTER_PAYOUT_DEFAULTS } from "@/config/master-payout-defaults";
 import { TABLE_KEYS, TABLE_LABELS, TABLE_COLUMNS } from "@/config/table-columns";
 import { SocialLinkIcons } from "@/components/SocialLinkIcons";
-import {
-  PARTNER_STATUS,
-  PARTNER_AGENT_EDITABLE_KEYS,
-  PARTNER_AGENT_PENDING_EDITABLE_KEYS,
-} from "@/lib/db/partner-approval";
+import { PARTNER_STATUS, isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
 
 /** 安全解析 Response：空 body 或非 JSON 時回傳 {}，避免 "Unexpected end of JSON input" */
 async function safeResJson(r: Response): Promise<Record<string, unknown>> {
@@ -355,18 +351,13 @@ export default function DashboardPage() {
     if (showEditPartner) fetchPartnerFormOptions();
   }, [showEditPartner, fetchPartnerFormOptions]);
 
+  /** 非董事長／管理者：除 KOL開發者（及審核欄位）外皆可編輯 */
   const partnerFieldEditable = useCallback(
     (key: string) => {
       if (canEditVisibility) return true;
       if (!canPartnerAgentSave || !editingPartnerSource) return false;
-      const st = editingPartnerSource.審核狀態 ?? PARTNER_STATUS.APPROVED;
-      if (st === PARTNER_STATUS.PENDING || st === PARTNER_STATUS.REJECTED) {
-        return (PARTNER_AGENT_PENDING_EDITABLE_KEYS as readonly string[]).includes(key);
-      }
-      if (st === PARTNER_STATUS.APPROVED) {
-        return (PARTNER_AGENT_EDITABLE_KEYS as readonly string[]).includes(key);
-      }
-      return false;
+      if (isPartnerAgentBlockedKey(key)) return false;
+      return true;
     },
     [canEditVisibility, canPartnerAgentSave, editingPartnerSource]
   );
@@ -1850,27 +1841,35 @@ export default function DashboardPage() {
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">KOL開發者（來自 Users）</label>
-                    <select
-                      value={createPartnerForm.KOL開發者}
-                      onChange={(e) => setCreatePartnerForm((f) => ({ ...f, KOL開發者: e.target.value }))}
-                      className="w-full rounded-lg border border-white/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
-                    >
-                      <option value="">— 請選擇 —</option>
-                      {createPartnerForm.KOL開發者 &&
-                        !(partnerFormOptions?.users ?? []).some(
-                          (u) => u.name === createPartnerForm.KOL開發者 || u.email === createPartnerForm.KOL開發者
-                        ) && (
-                          <option value={createPartnerForm.KOL開發者}>
-                            {createPartnerForm.KOL開發者}（目前值）
+                    <label className="mb-1 block text-xs font-semibold text-slate-400">
+                      KOL開發者（來自 Users）{!canEditVisibility && "— 僅董事長／管理者可指定"}
+                    </label>
+                    {canEditVisibility ? (
+                      <select
+                        value={createPartnerForm.KOL開發者}
+                        onChange={(e) => setCreatePartnerForm((f) => ({ ...f, KOL開發者: e.target.value }))}
+                        className="w-full rounded-lg border border-white/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                      >
+                        <option value="">— 請選擇 —</option>
+                        {createPartnerForm.KOL開發者 &&
+                          !(partnerFormOptions?.users ?? []).some(
+                            (u) => u.name === createPartnerForm.KOL開發者 || u.email === createPartnerForm.KOL開發者
+                          ) && (
+                            <option value={createPartnerForm.KOL開發者}>
+                              {createPartnerForm.KOL開發者}（目前值）
+                            </option>
+                          )}
+                        {(partnerFormOptions?.users ?? []).map((u) => (
+                          <option key={u.email} value={u.name}>
+                            {u.name} ({u.email})
                           </option>
-                        )}
-                      {(partnerFormOptions?.users ?? []).map((u) => (
-                        <option key={u.email} value={u.name}>
-                          {u.name} ({u.email})
-                        </option>
-                      ))}
-                    </select>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-500">
+                        核准後由董事長指定
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-semibold text-slate-400">合約開始日期</label>
@@ -2152,7 +2151,9 @@ export default function DashboardPage() {
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">KOL開發者（來自 Users）</label>
+                    <label className="mb-1 block text-xs font-semibold text-slate-400">
+                      KOL開發者（來自 Users）{!canEditVisibility && "— 僅董事長可改"}
+                    </label>
                     {partnerFieldEditable("KOL開發者") ? (
                       <select
                         value={editPartnerForm.KOL開發者}
@@ -2321,37 +2322,13 @@ export default function DashboardPage() {
                             Email: editPartnerForm.Email || undefined,
                             分級: editPartnerForm.分級 || undefined,
                         };
+                        // 經紀人不可改 KOL開發者：不送該欄位，API 亦會過濾
+                        const patchBody = { ...fullBody } as Record<string, unknown>;
+                        if (!canEditVisibility) delete patchBody.KOL開發者;
                         const res = await fetch("/api/partners", {
                           method: "PATCH",
                           headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify(
-                            canEditVisibility
-                              ? fullBody
-                              : {
-                                  PartnerID: editPartnerForm.PartnerID,
-                                  社群網站: editPartnerForm.社群網站 || undefined,
-                                  粉絲數: editPartnerForm.粉絲數 || undefined,
-                                  "頻道｜節目名稱": editPartnerForm["頻道｜節目名稱"] || undefined,
-                                  資料夾: editPartnerForm.資料夾 || undefined,
-                                  "是否有經營 私域群": editPartnerForm["是否有經營 私域群"],
-                                  Email: editPartnerForm.Email || undefined,
-                                  ...(status !== PARTNER_STATUS.APPROVED
-                                    ? {
-                                        合作夥伴名稱: editPartnerForm.合作夥伴名稱,
-                                        類別一: editPartnerForm.類別一 || undefined,
-                                        類別二: editPartnerForm.類別二 || undefined,
-                                        類別三: editPartnerForm.類別三 || undefined,
-                                        經紀人: editPartnerForm.經紀人 || undefined,
-                                        KOL開發者: editPartnerForm.KOL開發者 || undefined,
-                                        合約開始日期: editPartnerForm.合約開始日期 || undefined,
-                                        廣告經銷夥伴: editPartnerForm.廣告經銷夥伴,
-                                        節目製作夥伴: editPartnerForm.節目製作夥伴,
-                                        課程製作夥伴: editPartnerForm.課程製作夥伴,
-                                        分級: editPartnerForm.分級 || undefined,
-                                      }
-                                    : {}),
-                                }
-                          ),
+                          body: JSON.stringify(patchBody),
                         });
                         const data = (await safeResJson(res)) as { ok?: boolean; error?: string; partner?: PartnerRow };
                         if (!res.ok || !data.ok || !data.partner) {
