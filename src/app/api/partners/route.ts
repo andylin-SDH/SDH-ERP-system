@@ -143,21 +143,26 @@ export async function PATCH(request: NextRequest) {
     const creator = String(row.建立者 ?? "").trim().toLowerCase();
     const me = auth.user.email.trim().toLowerCase();
     const isCreator = creator === me;
-    const agentMatch =
-      String(row.經紀人 ?? "").trim().toLowerCase() === me ||
-      String(row.經紀人 ?? "").trim() === auth.user.name;
-
     if (status === PARTNER_STATUS.APPROVED) {
-      if (!agentMatch && !isCreator) {
-        return NextResponse.json({ ok: false, error: "僅負責經紀人或建立者可修改" }, { status: 403 });
-      }
+      /**
+       * 非管理者編輯已核准 KOL：儲存後改回「待審核」，須董事長再次核准才會回到主列表（不可任意變更上架內容）
+       * 管理者仍可直接更新且維持已核准
+       */
       const filtered = filterAgentPatchPayload(rest);
       if (Object.keys(filtered).length === 0) {
         return NextResponse.json({ ok: false, error: "無可更新的欄位（KOL開發者僅董事長可改）" }, { status: 400 });
       }
+      filtered.審核狀態 = PARTNER_STATUS.PENDING;
+      filtered.駁回理由 = null;
+      filtered.待審核送出者 = auth.user.email;
       const partner = await updatePartner(PartnerID, filtered);
       if (!partner) return NextResponse.json({ ok: false, error: "更新失敗" }, { status: 404 });
-      return NextResponse.json({ ok: true, partner });
+      return NextResponse.json({
+        ok: true,
+        partner,
+        reAudit: true,
+        message: "已送出待審核，董事長核准後會再次出現在已上架列表",
+      });
     }
 
     // 待審核 / 已駁回：僅建立者可改，且核准後需董事長操作

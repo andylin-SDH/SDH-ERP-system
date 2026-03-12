@@ -331,17 +331,18 @@ export default function DashboardPage() {
     }
   }, []);
 
-  /** 經紀人是否可儲存編輯（已核准部分欄位 / 待審核建立者可改） */
+  /**
+   * 是否顯示儲存／可編輯欄位
+   * - 已核准：任一同登入者可編輯（除 KOL開發者）
+   * - 待審核／已駁回：僅建立者可編輯
+   */
   const canPartnerAgentSave = useMemo(() => {
     if (!me || !editingPartnerSource) return false;
     const row = editingPartnerSource;
     const status = row.審核狀態 ?? PARTNER_STATUS.APPROVED;
+    if (status === PARTNER_STATUS.APPROVED) return true;
     const meEmail = me.email.trim().toLowerCase();
     const creator = String(row.建立者 ?? "").trim().toLowerCase();
-    const agent = String(row.經紀人 ?? "").trim();
-    const agentMatch =
-      agent.toLowerCase() === meEmail || agent === me.name;
-    if (status === PARTNER_STATUS.APPROVED && (agentMatch || creator === meEmail)) return true;
     if ((status === PARTNER_STATUS.PENDING || status === PARTNER_STATUS.REJECTED) && creator === meEmail) return true;
     return false;
   }, [me, editingPartnerSource]);
@@ -1970,7 +1971,7 @@ export default function DashboardPage() {
             <div className="flex max-h-[90vh] flex-col">
               <header className="flex items-center justify-between border-b border-white/10 bg-slate-800/50 px-6 py-4">
                 <h2 className="text-xl font-bold tracking-tight text-white">
-                  {canEditVisibility ? "編輯合作夥伴 / KOL" : "合作夥伴詳情"}
+                  {canEditVisibility || canPartnerAgentSave ? "編輯合作夥伴 / KOL" : "合作夥伴詳情"}
                 </h2>
                 <button
                   type="button"
@@ -1987,6 +1988,12 @@ export default function DashboardPage() {
               <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4 text-sm text-slate-100">
                 {partnerEditError && (
                   <p className="mb-2 rounded-lg bg-amber-500/20 px-3 py-2 text-xs font-medium text-amber-400">{partnerEditError}</p>
+                )}
+                {showEditPartner && !canEditVisibility && !canPartnerAgentSave && editingPartnerSource && (
+                  <p className="mb-2 rounded-lg border border-white/10 bg-slate-800/50 px-3 py-2 text-xs text-slate-400">
+                    此筆為待審核／已駁回時，僅<strong className="text-slate-300">建立者</strong>可編輯與儲存；已核准的 KOL
+                    任一同登入者可編輯（KOL開發者僅董事長可改）。
+                  </p>
                 )}
                 <div className="grid gap-4 md:grid-cols-2">
                   <div>
@@ -2274,7 +2281,16 @@ export default function DashboardPage() {
                 </div>
               </div>
               {(canEditVisibility || canPartnerAgentSave) && (
-                <footer className="flex justify-end gap-3 border-t border-white/10 bg-slate-800/50 px-6 py-4">
+                <footer className="flex flex-col gap-2 border-t border-white/10 bg-slate-800/50 px-6 py-4">
+                  {!canEditVisibility &&
+                    editingPartnerSource &&
+                    (editingPartnerSource.審核狀態 ?? PARTNER_STATUS.APPROVED) === PARTNER_STATUS.APPROVED && (
+                    <p className="text-xs text-amber-400/90">
+                      儲存後此筆會回到<strong className="text-amber-300"> 待審核 </strong>
+                      ，須董事長核准後才會再次出現在已上架列表（無法直接變更上架內容）。
+                    </p>
+                  )}
+                  <div className="flex justify-end gap-3">
                   <button
                     type="button"
                     onClick={() => {
@@ -2330,7 +2346,13 @@ export default function DashboardPage() {
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify(patchBody),
                         });
-                        const data = (await safeResJson(res)) as { ok?: boolean; error?: string; partner?: PartnerRow };
+                        const data = (await safeResJson(res)) as {
+                          ok?: boolean;
+                          error?: string;
+                          partner?: PartnerRow;
+                          reAudit?: boolean;
+                          message?: string;
+                        };
                         if (!res.ok || !data.ok || !data.partner) {
                           setPartnerEditError(data.error ?? "更新失敗");
                           setSavingPartner(false);
@@ -2345,11 +2367,15 @@ export default function DashboardPage() {
                           });
                           setPartnersPending((prev) => prev.filter((p) => p.PartnerID !== updated.PartnerID));
                         } else {
-                          setPartnersPending((prev) =>
-                            prev.some((p) => p.PartnerID === updated.PartnerID)
-                              ? prev.map((p) => (p.PartnerID === updated.PartnerID ? updated : p))
-                              : prev
-                          );
+                          /** 已上架再編輯會變回待審核：從主列表移除，進待審核 */
+                          setPartners((prev) => prev.filter((p) => p.PartnerID !== updated.PartnerID));
+                          setPartnersPending((prev) => {
+                            const exists = prev.some((p) => p.PartnerID === updated.PartnerID);
+                            if (exists) return prev.map((p) => (p.PartnerID === updated.PartnerID ? updated : p));
+                            return [updated, ...prev];
+                          });
+                          if (data.reAudit && data.message) window.alert(data.message);
+                          setPartnersTab("pending");
                         }
                         setShowEditPartner(false);
                         setExpandedPartnerId(null);
@@ -2364,6 +2390,7 @@ export default function DashboardPage() {
                   >
                     {savingPartner ? "儲存中..." : "儲存"}
                   </button>
+                  </div>
                 </footer>
               )}
             </div>
@@ -2707,6 +2734,7 @@ export default function DashboardPage() {
                                       PartnerID: pt.PartnerID,
                                       審核狀態: PARTNER_STATUS.APPROVED,
                                       駁回理由: null,
+                                      待審核送出者: null,
                                     }),
                                   });
                                   const data = (await safeResJson(res)) as { ok?: boolean; partner?: PartnerRow };

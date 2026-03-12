@@ -10,7 +10,7 @@ import { PARTNER_STATUS, normalizePartnerStatus } from "@/lib/db/partner-approva
 
 /** 與目前 DB 中文欄位一致；若任一名稱不符 PostgREST 會整段失敗 */
 const PARTNER_SELECT =
-  '"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "經紀人", "KOL開發者", "合約開始日期", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級", "審核狀態", "建立者", "駁回理由"';
+  '"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "經紀人", "KOL開發者", "合約開始日期", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級", "審核狀態", "建立者", "駁回理由", "待審核送出者"';
 
 function rowToPartner(r: Record<string, unknown>): PartnerRow {
   // 舊表 partners（migration 000）為 partner_id / partner_name 等，一併對應
@@ -43,6 +43,7 @@ function rowToPartner(r: Record<string, unknown>): PartnerRow {
     審核狀態: normalizePartnerStatus(r["審核狀態"] as string),
     建立者: (r["建立者"] as string) || undefined,
     駁回理由: (r["駁回理由"] as string) || undefined,
+    待審核送出者: (r["待審核送出者"] as string) || undefined,
   };
 }
 
@@ -140,6 +141,8 @@ export interface UpdatePartnerInput {
   /** 僅董事長/管理者可寫入 */
   審核狀態?: string;
   駁回理由?: string | null;
+  /** 已上架後再編輯送審者 email */
+  待審核送出者?: string | null;
 }
 
 export async function updatePartner(PartnerID: string, payload: UpdatePartnerInput): Promise<PartnerRow | null> {
@@ -163,6 +166,7 @@ export async function updatePartner(PartnerID: string, payload: UpdatePartnerInp
   if (payload.分級 !== undefined) update["分級"] = payload.分級 ?? null;
   if (payload.審核狀態 !== undefined) update["審核狀態"] = payload.審核狀態 ?? null;
   if (payload.駁回理由 !== undefined) update["駁回理由"] = payload.駁回理由 ?? null;
+  if (payload.待審核送出者 !== undefined) update["待審核送出者"] = payload.待審核送出者 ?? null;
 
   if (Object.keys(update).length === 0) return null;
 
@@ -224,12 +228,17 @@ export async function getPartnersPendingWithError(
       .select(PARTNER_SELECT)
       .in("審核狀態", [PARTNER_STATUS.PENDING, PARTNER_STATUS.REJECTED])
       .order("PartnerID");
-    if (!isAdmin && email) {
-      q = q.eq("建立者", userEmail);
-    }
     const { data, error } = await q;
     if (!error && data) {
-      return { partners: data.map(rowToPartner), error: null };
+      let list = data.map(rowToPartner);
+      if (!isAdmin && email) {
+        list = list.filter((p) => {
+          const creator = String(p.建立者 ?? "").trim().toLowerCase();
+          const submitter = String(p.待審核送出者 ?? "").trim().toLowerCase();
+          return creator === email || submitter === email;
+        });
+      }
+      return { partners: list, error: null };
     }
     // fallback：全表後篩
     const full = await getPartnersWithError();
@@ -238,7 +247,8 @@ export async function getPartnersPendingWithError(
       if (st !== PARTNER_STATUS.PENDING && st !== PARTNER_STATUS.REJECTED) return false;
       if (isAdmin) return true;
       const creator = String(p.建立者 ?? "").trim().toLowerCase();
-      return creator === email;
+      const submitter = String(p.待審核送出者 ?? "").trim().toLowerCase();
+      return creator === email || submitter === email;
     });
     return { partners: pending, error: full.error };
   } catch (e) {

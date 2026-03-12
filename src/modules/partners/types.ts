@@ -30,4 +30,6 @@ export interface PartnerRow {
   建立者?: string;
   /** 駁回時填寫 */
   駁回理由?: string;
+  /** 已核准後再編輯並送審者的 email */
+  待審核送出者?: string;
 }
