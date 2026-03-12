@@ -17,6 +17,8 @@ export interface PartnerRow {
   經紀人?: string;
   /** KOL 開發者 */
   KOL開發者?: string;
+  /** 合約開始日期（可存 yyyy-MM-dd 或文字） */
+  合約開始日期?: string;
   廣告經銷夥伴?: boolean;
   節目製作夥伴?: boolean;
   課程製作夥伴?: boolean;

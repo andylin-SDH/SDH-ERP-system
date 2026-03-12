@@ -51,3 +51,11 @@ supabase/migrations/000_required_tables.sql
 ```sql
 ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS "KOL開發者" text;
 ```
+
+## partners 新增欄位 合約開始日期
+
+`supabase/migrations/021_partners_合約開始日期.sql` 或：
+
+```sql
+ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS "合約開始日期" text;
+```

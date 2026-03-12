@@ -163,6 +163,7 @@ export default function DashboardPage() {
     資料夾: string;
     經紀人: string;
     KOL開發者: string;
+    合約開始日期: string;
     廣告經銷夥伴: boolean;
     節目製作夥伴: boolean;
     課程製作夥伴: boolean;
@@ -181,6 +182,7 @@ export default function DashboardPage() {
     資料夾: "",
     經紀人: "",
     KOL開發者: "",
+    合約開始日期: "",
     廣告經銷夥伴: false,
     節目製作夥伴: false,
     課程製作夥伴: false,
@@ -204,6 +206,7 @@ export default function DashboardPage() {
     資料夾: string;
     經紀人: string;
     KOL開發者: string;
+    合約開始日期: string;
     廣告經銷夥伴: boolean;
     節目製作夥伴: boolean;
     課程製作夥伴: boolean;
@@ -222,6 +225,7 @@ export default function DashboardPage() {
     資料夾: "",
     經紀人: "",
     KOL開發者: "",
+    合約開始日期: "",
     廣告經銷夥伴: false,
     節目製作夥伴: false,
     課程製作夥伴: false,
@@ -391,7 +395,7 @@ export default function DashboardPage() {
    */
   const partnerListCols = useMemo(
     () =>
-      ["合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "資料夾", "經紀人", "KOL開發者", "分級"].filter((k) =>
+      ["合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "資料夾", "經紀人", "KOL開發者", "合約開始日期", "分級"].filter((k) =>
         partnersVisibleCols.includes(k)
       ),
     [partnersVisibleCols]
@@ -1722,6 +1726,16 @@ export default function DashboardPage() {
                     />
                   </div>
                   <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-400">合約開始日期</label>
+                    <input
+                      type="text"
+                      placeholder="例：2025-01-01"
+                      value={createPartnerForm.合約開始日期}
+                      onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 合約開始日期: e.target.value }))}
+                      className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                    />
+                  </div>
+                  <div>
                     <label className="mb-1 block text-xs font-semibold text-slate-400">Email</label>
                     <input
                       type="email"
@@ -1971,6 +1985,20 @@ export default function DashboardPage() {
                     )}
                   </div>
                   <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-400">合約開始日期</label>
+                    {canEditVisibility ? (
+                      <input
+                        type="text"
+                        placeholder="例：2025-01-01"
+                        value={editPartnerForm.合約開始日期}
+                        onChange={(e) => setEditPartnerForm((f) => ({ ...f, 合約開始日期: e.target.value }))}
+                        className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                      />
+                    ) : (
+                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">{editPartnerForm.合約開始日期 || "—"}</p>
+                    )}
+                  </div>
+                  <div>
                     <label className="mb-1 block text-xs font-semibold text-slate-400">Email</label>
                     {canEditVisibility ? (
                       <input
@@ -2091,6 +2119,7 @@ export default function DashboardPage() {
                             資料夾: editPartnerForm.資料夾 || undefined,
                             經紀人: editPartnerForm.經紀人 || undefined,
                             KOL開發者: editPartnerForm.KOL開發者 || undefined,
+                            合約開始日期: editPartnerForm.合約開始日期 || undefined,
                             廣告經銷夥伴: editPartnerForm.廣告經銷夥伴,
                             節目製作夥伴: editPartnerForm.節目製作夥伴,
                             課程製作夥伴: editPartnerForm.課程製作夥伴,
@@ -2189,6 +2218,7 @@ export default function DashboardPage() {
                         資料夾: "",
                         經紀人: me?.name ?? "",
                         KOL開發者: "",
+                        合約開始日期: "",
                         廣告經銷夥伴: false,
                         節目製作夥伴: false,
                         課程製作夥伴: false,
@@ -2259,6 +2289,7 @@ export default function DashboardPage() {
                             資料夾: String(pt.資料夾 ?? ""),
                             經紀人: String(pt.經紀人 ?? ""),
                             KOL開發者: String(pt.KOL開發者 ?? ""),
+                            合約開始日期: String(pt.合約開始日期 ?? ""),
                             廣告經銷夥伴: Boolean(pt.廣告經銷夥伴),
                             節目製作夥伴: Boolean(pt.節目製作夥伴),
                             課程製作夥伴: Boolean(pt.課程製作夥伴),
