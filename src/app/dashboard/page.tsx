@@ -240,7 +240,28 @@ export default function DashboardPage() {
   /** 合作夥伴主列表：已上架 | 待審核 */
   const [partnersTab, setPartnersTab] = useState<"approved" | "pending">("approved");
   const [partnersPending, setPartnersPending] = useState<PartnerRow[]>([]);
+  /** 已上架 KOL 的變更申請（不從主列表消失） */
+  const [partnerChangeRequests, setPartnerChangeRequests] = useState<
+    Array<{
+      id: string;
+      PartnerID: string;
+      變更內容: Record<string, unknown>;
+      變更前快照?: Record<string, unknown>;
+      審核狀態: string;
+      建立者?: string;
+      駁回理由?: string;
+      created_at?: string;
+    }>
+  >([]);
   const [partnersPendingLoading, setPartnersPendingLoading] = useState(false);
+  const [showChangeRequestDiff, setShowChangeRequestDiff] = useState<{
+    id: string;
+    PartnerID: string;
+    變更內容: Record<string, unknown>;
+    變更前快照?: Record<string, unknown>;
+    審核狀態: string;
+    駁回理由?: string;
+  } | null>(null);
   /** 編輯 Modal 開啟時的來源列（判斷經紀人可否儲存） */
   const [editingPartnerSource, setEditingPartnerSource] = useState<PartnerRow | null>(null);
   /** 新增／編輯 KOL 表單：自動 PartnerID、類別與 KOL開發者下拉 */
@@ -324,8 +345,22 @@ export default function DashboardPage() {
     setPartnersPendingLoading(true);
     try {
       const res = await fetch("/api/partners?pending=1", { cache: "no-store" });
-      const data = (await safeResJson(res)) as { partners?: PartnerRow[] };
+      const data = (await safeResJson(res)) as {
+        partners?: PartnerRow[];
+        changeRequests?: Array<{
+          id: string;
+          PartnerID: string;
+          變更內容: Record<string, unknown>;
+          變更前快照?: Record<string, unknown>;
+          審核狀態: string;
+          建立者?: string;
+          駁回理由?: string;
+          created_at?: string;
+        }>;
+      };
       if (res.ok && Array.isArray(data.partners)) setPartnersPending(data.partners);
+      if (res.ok && Array.isArray(data.changeRequests)) setPartnerChangeRequests(data.changeRequests);
+      else if (res.ok) setPartnerChangeRequests([]);
     } finally {
       setPartnersPendingLoading(false);
     }
@@ -1991,8 +2026,9 @@ export default function DashboardPage() {
                 )}
                 {showEditPartner && !canEditVisibility && !canPartnerAgentSave && editingPartnerSource && (
                   <p className="mb-2 rounded-lg border border-white/10 bg-slate-800/50 px-3 py-2 text-xs text-slate-400">
-                    此筆為待審核／已駁回時，僅<strong className="text-slate-300">建立者</strong>可編輯與儲存；已核准的 KOL
-                    任一同登入者可編輯（KOL開發者僅董事長可改）。
+                    待審核新申請僅<strong className="text-slate-300">建立者</strong>可編輯；已上架 KOL 修改會送
+                    <strong className="text-amber-400"> 變更審核 </strong>
+                    ，主列表不變，核准後才更新。
                   </p>
                 )}
                 <div className="grid gap-4 md:grid-cols-2">
@@ -2286,8 +2322,8 @@ export default function DashboardPage() {
                     editingPartnerSource &&
                     (editingPartnerSource.審核狀態 ?? PARTNER_STATUS.APPROVED) === PARTNER_STATUS.APPROVED && (
                     <p className="text-xs text-amber-400/90">
-                      儲存後此筆會回到<strong className="text-amber-300"> 待審核 </strong>
-                      ，須董事長核准後才會再次出現在已上架列表（無法直接變更上架內容）。
+                      儲存後會送出<strong className="text-amber-300"> 變更審核 </strong>
+                      ，主列表資料維持不變；董事長核准後才會套用修改。
                     </p>
                   )}
                   <div className="flex justify-end gap-3">
@@ -2350,6 +2386,7 @@ export default function DashboardPage() {
                           ok?: boolean;
                           error?: string;
                           partner?: PartnerRow;
+                          changeRequest?: { id: string };
                           reAudit?: boolean;
                           message?: string;
                         };
@@ -2359,7 +2396,12 @@ export default function DashboardPage() {
                           return;
                         }
                         const updated = data.partner!;
-                        if (updated.審核狀態 === PARTNER_STATUS.APPROVED) {
+                        if (data.changeRequest && data.reAudit) {
+                          /** 已上架 KOL：變更進審核，主表不變 */
+                          if (data.message) window.alert(data.message);
+                          fetchPartnersPending();
+                          setPartnersTab("pending");
+                        } else if (updated.審核狀態 === PARTNER_STATUS.APPROVED) {
                           setPartners((prev) => {
                             const exists = prev.some((p) => p.PartnerID === updated.PartnerID);
                             if (exists) return prev.map((p) => (p.PartnerID === updated.PartnerID ? updated : p));
@@ -2367,8 +2409,6 @@ export default function DashboardPage() {
                           });
                           setPartnersPending((prev) => prev.filter((p) => p.PartnerID !== updated.PartnerID));
                         } else {
-                          /** 已上架再編輯會變回待審核：從主列表移除，進待審核 */
-                          setPartners((prev) => prev.filter((p) => p.PartnerID !== updated.PartnerID));
                           setPartnersPending((prev) => {
                             const exists = prev.some((p) => p.PartnerID === updated.PartnerID);
                             if (exists) return prev.map((p) => (p.PartnerID === updated.PartnerID ? updated : p));
@@ -2393,6 +2433,56 @@ export default function DashboardPage() {
                   </div>
                 </footer>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 變更申請差異（舊值 / 新值 標色） */}
+      {showChangeRequestDiff && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-amber-500/30 bg-[#151922] shadow-xl">
+            <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+              <h3 className="text-lg font-bold text-white">
+                變更差異 — {showChangeRequestDiff.PartnerID}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowChangeRequestDiff(null)}
+                className="rounded-lg border border-white/20 px-3 py-1 text-sm text-slate-300 hover:bg-white/10"
+              >
+                關閉
+              </button>
+            </header>
+            <div className="max-h-[65vh] overflow-y-auto p-4 text-sm">
+              <p className="mb-3 text-xs text-slate-500">
+                <span className="mr-3 rounded bg-red-500/20 px-2 py-0.5 text-red-300">變更前</span>
+                <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-300">變更後</span>
+              </p>
+              <table className="w-full border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-white/10 text-xs text-slate-400">
+                    <th className="py-2 pr-2">欄位</th>
+                    <th className="py-2 pr-2">變更前</th>
+                    <th className="py-2">變更後</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(showChangeRequestDiff.變更內容).map(([key, newVal]) => {
+                    const oldVal = showChangeRequestDiff.變更前快照?.[key];
+                    const label = TABLE_COLUMNS.partners.find((c) => c.key === key)?.label ?? key;
+                    const oldStr = oldVal === undefined || oldVal === null ? "—" : String(oldVal);
+                    const newStr = newVal === undefined || newVal === null ? "—" : String(newVal);
+                    return (
+                      <tr key={key} className="border-b border-white/5 align-top">
+                        <td className="py-2 pr-2 font-medium text-slate-300">{label}</td>
+                        <td className="py-2 pr-2 rounded bg-red-500/15 text-red-100">{oldStr}</td>
+                        <td className="py-2 rounded bg-emerald-500/15 text-emerald-100">{newStr}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -2432,9 +2522,9 @@ export default function DashboardPage() {
                   }`}
                 >
                   待審核
-                  {partnersPending.length > 0 && (
+                  {(partnersPending.length > 0 || partnerChangeRequests.length > 0) && (
                     <span className="ml-1 rounded-full bg-slate-800 px-1.5 py-0.5 text-[10px] text-amber-300">
-                      {partnersPending.length}
+                      {partnersPending.length + partnerChangeRequests.length}
                     </span>
                   )}
                 </button>
@@ -2686,9 +2776,106 @@ export default function DashboardPage() {
             <div className="max-h-[60vh] overflow-y-auto rounded-xl border border-white/10">
               {partnersPendingLoading ? (
                 <p className="px-4 py-8 text-center text-slate-500">載入中…</p>
-              ) : partnersPending.length === 0 ? (
+              ) : partnersPending.length === 0 && partnerChangeRequests.length === 0 ? (
                 <p className="px-4 py-8 text-center text-slate-500">目前沒有待審核或已駁回的申請</p>
               ) : (
+                <>
+                {partnerChangeRequests.length > 0 && (
+                  <div className="mb-6">
+                    <h3 className="mb-2 px-2 text-sm font-bold text-amber-300">已上架 KOL 變更申請（主列表仍為舊資料，核准後才更新）</h3>
+                    <table className="min-w-full divide-y divide-white/10 rounded-xl border border-amber-500/30">
+                      <thead className="bg-slate-900/90">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-300">類型</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-300">PartnerID</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-300">狀態</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-300">駁回理由</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-300">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/10">
+                        {partnerChangeRequests.map((cr) => (
+                          <tr key={cr.id} className="bg-amber-950/20">
+                            <td className="px-4 py-2 text-xs font-semibold text-amber-400">變更審核</td>
+                            <td className="px-4 py-2 text-sm text-white">{cr.PartnerID}</td>
+                            <td className="px-4 py-2 text-sm">
+                              <span className={cr.審核狀態 === PARTNER_STATUS.REJECTED ? "text-red-400" : "text-amber-400"}>
+                                {cr.審核狀態 === PARTNER_STATUS.REJECTED ? "審核未通過" : cr.審核狀態}
+                              </span>
+                            </td>
+                            <td className="max-w-xs truncate px-4 py-2 text-xs text-slate-400" title={cr.駁回理由}>
+                              {cr.駁回理由 ?? "—"}
+                            </td>
+                            <td className="px-4 py-2">
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  className="rounded-lg border border-cyan-500/50 bg-cyan-500/10 px-2 py-1 text-xs font-bold text-cyan-300 hover:bg-cyan-500/20"
+                                  onClick={() => setShowChangeRequestDiff(cr)}
+                                >
+                                  查看差異
+                                </button>
+                                {canEditVisibility && cr.審核狀態 === PARTNER_STATUS.PENDING && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="rounded-lg bg-emerald-600 px-2 py-1 text-xs font-bold text-white hover:bg-emerald-500"
+                                      onClick={async () => {
+                                        const res = await fetch("/api/partners/change-requests", {
+                                          method: "PATCH",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({ id: cr.id, action: "approve" }),
+                                        });
+                                        const d = (await safeResJson(res)) as { ok?: boolean; partner?: PartnerRow; error?: string };
+                                        if (res.ok && d.ok && d.partner) {
+                                          setPartnerChangeRequests((prev) => prev.filter((r) => r.id !== cr.id));
+                                          setPartners((prev) => {
+                                            const pid = d.partner!.PartnerID;
+                                            return prev.some((p) => p.PartnerID === pid)
+                                              ? prev.map((p) => (p.PartnerID === pid ? d.partner! : p))
+                                              : prev;
+                                          });
+                                        } else window.alert(d.error ?? "核准失敗");
+                                      }}
+                                    >
+                                      核准套用
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="rounded-lg bg-red-600/80 px-2 py-1 text-xs font-bold text-white hover:bg-red-500"
+                                      onClick={() => {
+                                        const reason = window.prompt("駁回理由（可留空）", "");
+                                        if (reason === null) return;
+                                        fetch("/api/partners/change-requests", {
+                                          method: "PATCH",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({
+                                            id: cr.id,
+                                            action: "reject",
+                                            駁回理由: reason.trim() || null,
+                                          }),
+                                        })
+                                          .then((r) => safeResJson(r))
+                                          .then((d) => {
+                                            const x = d as { ok?: boolean; error?: string };
+                                            if (x.ok) fetchPartnersPending();
+                                            else window.alert(x.error ?? "駁回失敗");
+                                          });
+                                      }}
+                                    >
+                                      駁回
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {partnersPending.length > 0 && (
                 <table className="min-w-full divide-y divide-white/10">
                   <thead className="sticky top-0 z-10 bg-slate-900">
                     <tr>
@@ -2846,6 +3033,8 @@ export default function DashboardPage() {
                     ))}
                   </tbody>
                 </table>
+                )}
+                </>
               )}
             </div>
           )}

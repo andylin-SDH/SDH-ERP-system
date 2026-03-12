@@ -70,6 +70,10 @@ ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS "合約開始日期" text;
 
 未執行前：經紀人 POST 可能因 insert 含未知欄位而失敗；GET 主列表仍會 fallback 全表後在記憶體篩選。
 
+## partner_change_requests（已上架 KOL 變更審核）
+
+`supabase/migrations/024_partner_change_requests.sql`：已核准 KOL 修改不直接改主表，改寫入此表；董事長核准後才合併回 `partners`；駁回顯示「審核未通過」。
+
 ## partners 待審核送出者（已上架再編輯送審）
 
 `supabase/migrations/023_partners_待審核送出者.sql`：已核准 KOL 被非管理者修改後會改回待審核，此欄記錄是誰送審，待審核列表才能篩給該人。
