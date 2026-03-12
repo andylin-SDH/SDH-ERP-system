@@ -395,7 +395,8 @@ export default function DashboardPage() {
    */
   const partnerListCols = useMemo(
     () =>
-      ["合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "資料夾", "經紀人", "KOL開發者", "合約開始日期", "分級"].filter((k) =>
+      /** KOL開發者、合約開始日期不顯示在主列表，僅在新增/編輯 Modal 與展開詳情維護 */
+      ["合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "資料夾", "經紀人", "分級"].filter((k) =>
         partnersVisibleCols.includes(k)
       ),
     [partnersVisibleCols]
