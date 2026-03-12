@@ -49,6 +49,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "是否有經營 私域群", label: "是否有經營 私域群" },
     { key: "資料夾", label: "資料夾" },
     { key: "經紀人", label: "經紀人" },
+    { key: "KOL開發者", label: "KOL開發者" },
     { key: "廣告經銷夥伴", label: "廣告經銷夥伴" },
     { key: "節目製作夥伴", label: "節目製作夥伴" },
     { key: "課程製作夥伴", label: "課程製作夥伴" },

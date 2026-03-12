@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
       "是否有經營 私域群": Boolean(body?.["是否有經營 私域群"]),
       資料夾: body?.資料夾,
       經紀人: body?.經紀人,
+      KOL開發者: body?.KOL開發者,
       廣告經銷夥伴: Boolean(body?.廣告經銷夥伴),
       節目製作夥伴: Boolean(body?.節目製作夥伴),
       課程製作夥伴: Boolean(body?.課程製作夥伴),

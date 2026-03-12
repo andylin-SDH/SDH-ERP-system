@@ -9,7 +9,7 @@ import type { PartnerRow } from "@/modules/partners/types";
 
 /** 與目前 DB 中文欄位一致；若任一名稱不符 PostgREST 會整段失敗 */
 const PARTNER_SELECT =
-  '"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "經紀人", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級"';
+  '"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "經紀人", "KOL開發者", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級"';
 
 function rowToPartner(r: Record<string, unknown>): PartnerRow {
   // 舊表 partners（migration 000）為 partner_id / partner_name 等，一併對應
@@ -32,6 +32,7 @@ function rowToPartner(r: Record<string, unknown>): PartnerRow {
     資料夾: (r["資料夾"] as string) || undefined,
     經紀人:
       (r["經紀人"] as string) || (r.responsible_agent as string) || undefined,
+    KOL開發者: (r["KOL開發者"] as string) || undefined,
     廣告經銷夥伴: (r["廣告經銷夥伴"] as boolean) ?? false,
     節目製作夥伴: (r["節目製作夥伴"] as boolean) ?? false,
     課程製作夥伴: (r["課程製作夥伴"] as boolean) ?? false,
@@ -52,6 +53,7 @@ export interface NewPartnerInput {
   "是否有經營 私域群"?: boolean;
   資料夾?: string;
   經紀人?: string;
+  KOL開發者?: string;
   廣告經銷夥伴?: boolean;
   節目製作夥伴?: boolean;
   課程製作夥伴?: boolean;
@@ -77,6 +79,7 @@ export async function createPartner(payload: NewPartnerInput): Promise<PartnerRo
     "是否有經營 私域群": Boolean(payload["是否有經營 私域群"]),
     資料夾: payload.資料夾 ?? null,
     經紀人: payload.經紀人 ?? null,
+    KOL開發者: payload.KOL開發者 ?? null,
     廣告經銷夥伴: Boolean(payload.廣告經銷夥伴),
     節目製作夥伴: Boolean(payload.節目製作夥伴),
     課程製作夥伴: Boolean(payload.課程製作夥伴),
@@ -107,6 +110,7 @@ export interface UpdatePartnerInput {
   "是否有經營 私域群"?: boolean;
   資料夾?: string;
   經紀人?: string;
+  KOL開發者?: string;
   廣告經銷夥伴?: boolean;
   節目製作夥伴?: boolean;
   課程製作夥伴?: boolean;
@@ -126,6 +130,7 @@ export async function updatePartner(PartnerID: string, payload: UpdatePartnerInp
   if (payload["是否有經營 私域群"] !== undefined) update["是否有經營 私域群"] = Boolean(payload["是否有經營 私域群"]);
   if (payload.資料夾 !== undefined) update["資料夾"] = payload.資料夾 ?? null;
   if (payload.經紀人 !== undefined) update["經紀人"] = payload.經紀人 ?? null;
+  if (payload.KOL開發者 !== undefined) update["KOL開發者"] = payload.KOL開發者 ?? null;
   if (payload.廣告經銷夥伴 !== undefined) update["廣告經銷夥伴"] = Boolean(payload.廣告經銷夥伴);
   if (payload.節目製作夥伴 !== undefined) update["節目製作夥伴"] = Boolean(payload.節目製作夥伴);
   if (payload.課程製作夥伴 !== undefined) update["課程製作夥伴"] = Boolean(payload.課程製作夥伴);

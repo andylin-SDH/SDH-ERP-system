@@ -39,3 +39,15 @@ supabase/migrations/000_required_tables.sql
 1. 建立 view：`CREATE VIEW invoices AS SELECT * FROM "發票";`（欄位需對應）
 2. 或直接建 `invoices`、`finance` 表，欄位依 finance.ts 預期
 3. 或改程式改用 `發票`、`財務`
+
+## partners 新增欄位 KOL開發者
+
+執行 migration：
+
+`supabase/migrations/020_partners_KOL開發者.sql`
+
+或在 SQL Editor 手動：
+
+```sql
+ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS "KOL開發者" text;
+```
