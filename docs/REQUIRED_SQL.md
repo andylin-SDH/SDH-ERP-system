@@ -59,3 +59,13 @@ ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS "KOL開發者" text;
 ```sql
 ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS "合約開始日期" text;
 ```
+
+## partners KOL 審核流程（待審核 → 董事長核准後才上主列表）
+
+執行 `supabase/migrations/022_partners_審核.sql`，會新增：
+
+- `審核狀態`：`待審核` | `已核准` | `已駁回`（既有列會被設成 `已核准`）
+- `建立者`：送出申請的使用者 email
+- `駁回理由`：駁回時選填
+
+未執行前：經紀人 POST 可能因 insert 含未知欄位而失敗；GET 主列表仍會 fallback 全表後在記憶體篩選。

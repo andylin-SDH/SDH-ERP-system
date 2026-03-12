@@ -24,4 +24,10 @@ export interface PartnerRow {
   課程製作夥伴?: boolean;
   Email?: string;
   分級?: string;
+  /** 待審核 | 已核准 | 已駁回；主列表僅顯示已核准 */
+  審核狀態?: string;
+  /** 送出申請者 email */
+  建立者?: string;
+  /** 駁回時填寫 */
+  駁回理由?: string;
 }
