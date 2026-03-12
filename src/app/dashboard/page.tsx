@@ -895,7 +895,45 @@ export default function DashboardPage() {
                         const selected = visibilityRules[tableKey] ?? [];
                         return (
                           <div key={tableKey} className="rounded-lg border border-white/5 bg-slate-900/40 p-3">
-                            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-amber-400/90">{TABLE_LABELS[tableKey] ?? tableKey}</p>
+                            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-xs font-semibold uppercase tracking-wider text-amber-400/90">{TABLE_LABELS[tableKey] ?? tableKey}</p>
+                              {tableKey === "partners" && (
+                                <button
+                                  type="button"
+                                  disabled={savingVisibilityRules}
+                                  className="rounded border border-white/15 bg-white/5 px-2 py-1 text-[10px] font-semibold text-slate-400 transition hover:bg-white/10 hover:text-amber-400 disabled:opacity-50"
+                                  onClick={async () => {
+                                    setVisibilityRulesError(null);
+                                    setSavingVisibilityRules(true);
+                                    try {
+                                      const fullRules: Record<string, string[]> = {};
+                                      for (const tk of TABLE_KEYS) {
+                                        if (tk === "partners") {
+                                          fullRules[tk] = [];
+                                          continue;
+                                        }
+                                        const v = visibilityRules[tk];
+                                        const arr = Array.isArray(v) ? v : [];
+                                        fullRules[tk] = arr.map((f) => String(f).trim()).filter(Boolean);
+                                      }
+                                      const res = await fetch("/api/visibility-rules", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rules: fullRules }) });
+                                      const data = (await safeResJson(res)) as { ok?: boolean; error?: string; rules?: Record<string, string[]> };
+                                      if (!res.ok || !data.ok) {
+                                        setVisibilityRulesError(data.error ?? "儲存失敗");
+                                        setSavingVisibilityRules(false);
+                                        return;
+                                      }
+                                      setVisibilityRules(data.rules ?? fullRules);
+                                    } catch (err) {
+                                      setVisibilityRulesError(err instanceof Error ? err.message : "儲存失敗");
+                                    }
+                                    setSavingVisibilityRules(false);
+                                  }}
+                                >
+                                  合作夥伴改為全部顯示（不篩選）
+                                </button>
+                              )}
+                            </div>
                             <div className="flex flex-wrap gap-x-4 gap-y-2">
                               {cols.map(({ key, label }) => (
                                 <label key={key} className="flex cursor-pointer items-center gap-1.5">

@@ -15,7 +15,10 @@ export async function GET(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   try {
     const rules = await getVisibilityRules();
-    return NextResponse.json({ ok: true, rules });
+    return NextResponse.json(
+      { ok: true, rules },
+      { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } }
+    );
   } catch (e) {
     console.error("GET /api/visibility-rules error:", e);
     return NextResponse.json(
