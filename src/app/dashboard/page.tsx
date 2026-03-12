@@ -2456,8 +2456,11 @@ export default function DashboardPage() {
             </header>
             <div className="max-h-[65vh] overflow-y-auto p-4 text-sm">
               <p className="mb-3 text-xs text-slate-500">
-                <span className="mr-3 rounded bg-red-500/20 px-2 py-0.5 text-red-300">變更前</span>
-                <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-300">變更後</span>
+                僅<strong className="text-amber-400">有差異</strong>的欄位會以
+                <span className="mx-1 rounded bg-red-500/20 px-1.5 py-0.5 text-red-300">變更前</span>
+                /
+                <span className="mx-1 rounded bg-emerald-500/20 px-1.5 py-0.5 text-emerald-300">變更後</span>
+                標色；其餘未變更的不列入。
               </p>
               <table className="w-full border-collapse text-left">
                 <thead>
@@ -2468,19 +2471,38 @@ export default function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(showChangeRequestDiff.變更內容).map(([key, newVal]) => {
-                    const oldVal = showChangeRequestDiff.變更前快照?.[key];
-                    const label = TABLE_COLUMNS.partners.find((c) => c.key === key)?.label ?? key;
-                    const oldStr = oldVal === undefined || oldVal === null ? "—" : String(oldVal);
-                    const newStr = newVal === undefined || newVal === null ? "—" : String(newVal);
-                    return (
-                      <tr key={key} className="border-b border-white/5 align-top">
-                        <td className="py-2 pr-2 font-medium text-slate-300">{label}</td>
-                        <td className="py-2 pr-2 rounded bg-red-500/15 text-red-100">{oldStr}</td>
-                        <td className="py-2 rounded bg-emerald-500/15 text-emerald-100">{newStr}</td>
+                  {(() => {
+                    const rows = Object.entries(showChangeRequestDiff.變更內容)
+                      .map(([key, newVal]) => {
+                        const oldVal = showChangeRequestDiff.變更前快照?.[key];
+                        const label = TABLE_COLUMNS.partners.find((c) => c.key === key)?.label ?? key;
+                        const oldStr = oldVal === undefined || oldVal === null ? "—" : String(oldVal);
+                        const newStr = newVal === undefined || newVal === null ? "—" : String(newVal);
+                        const same =
+                          oldStr === newStr ||
+                          (typeof oldVal === "boolean" &&
+                            typeof newVal === "boolean" &&
+                            oldVal === newVal);
+                        return { key, label, oldStr, newStr, same };
+                      })
+                      .filter((r) => !r.same);
+                    if (rows.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={3} className="py-6 text-center text-slate-500">
+                            此申請與目前上架資料比對無差異（或僅送出未改動欄位）。
+                          </td>
+                        </tr>
+                      );
+                    }
+                    return rows.map((r) => (
+                      <tr key={r.key} className="border-b border-white/5 align-top">
+                        <td className="py-2 pr-2 font-medium text-slate-300">{r.label}</td>
+                        <td className="py-2 pr-2 rounded bg-red-500/15 text-red-100">{r.oldStr}</td>
+                        <td className="py-2 rounded bg-emerald-500/15 text-emerald-100">{r.newStr}</td>
                       </tr>
-                    );
-                  })}
+                    ));
+                  })()}
                 </tbody>
               </table>
             </div>

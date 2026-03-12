@@ -18,3 +18,5 @@ CREATE INDEX IF NOT EXISTS idx_partner_change_requests_status
 COMMENT ON TABLE public.partner_change_requests IS '已核准 KOL 的變更申請；通過後合併回 partners';
 COMMENT ON COLUMN public.partner_change_requests."變更內容" IS 'PATCH 欄位與新值';
 COMMENT ON COLUMN public.partner_change_requests."變更前快照" IS '送審當下舊值，供審核頁 diff 標色';
+
+-- 若 PATCH 仍 500：在 SQL Editor 確認 SELECT * FROM partner_change_requests 可執行；API 須設定 SUPABASE_SERVICE_ROLE_KEY

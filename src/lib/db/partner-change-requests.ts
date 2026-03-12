@@ -3,6 +3,7 @@
  */
 
 import { getSupabase } from "@/lib/supabase/server";
+import { log } from "@/lib/log";
 import { PARTNER_STATUS } from "@/lib/db/partner-approval";
 import { updatePartner, type UpdatePartnerInput, getPartnersWithError } from "@/lib/db/partners";
 import type { PartnerRow } from "@/modules/partners/types";
@@ -37,28 +38,53 @@ export async function upsertPendingChangeRequest(
   變更內容: Record<string, unknown>,
   建立者: string,
   變更前快照: Record<string, unknown>
-): Promise<PartnerChangeRequestRow | null> {
+): Promise<{ row: PartnerChangeRequestRow | null; error: string | null }> {
   const supabase = getSupabase();
-  // 同 PartnerID 只保留一筆：刪除既有待審核／已駁回（新申請取代）
-  await supabase
-    .from("partner_change_requests")
-    .delete()
-    .eq("PartnerID", PartnerID);
+  try {
+    // 同 PartnerID 只保留一筆：刪除既有（新申請取代）
+    const { error: delErr } = await supabase
+      .from("partner_change_requests")
+      .delete()
+      .eq("PartnerID", PartnerID);
+    if (delErr) {
+      log("partner_change_requests", "delete 失敗（表可能不存在）", { error: delErr.message });
+      if (delErr.message.includes("relation") || delErr.message.includes("does not exist")) {
+        return { row: null, error: "資料表 partner_change_requests 不存在，請在 Supabase 執行 migration 024。" };
+      }
+    }
 
-  const { data, error } = await supabase
-    .from("partner_change_requests")
-    .insert({
+    // PostgREST 對中文欄位：insert 用與 migration 相同的雙引號欄位名對應的 key
+    const insertPayload: Record<string, unknown> = {
       PartnerID,
-      變更內容,
-      變更前快照,
+      變更內容: 變更內容 as object,
+      變更前快照: 變更前快照 as object,
       審核狀態: PARTNER_STATUS.PENDING,
       建立者,
-    })
-    .select("*")
-    .single();
+    };
 
-  if (error || !data) return null;
-  return rowToRequest(data as Record<string, unknown>);
+    const { data, error } = await supabase
+      .from("partner_change_requests")
+      .insert(insertPayload)
+      .select("*")
+      .maybeSingle();
+
+    if (error) {
+      log("partner_change_requests", "insert 失敗", { error: error.message, code: error.code });
+      return { row: null, error: error.message };
+    }
+    if (!data) {
+      return {
+        row: null,
+        error:
+          "寫入後未回傳資料（常見原因：RLS 未開放 insert，或表未建立）。請在 Supabase 執行 024 並為 partner_change_requests 加上 RLS policy。",
+      };
+    }
+    return { row: rowToRequest(data as Record<string, unknown>), error: null };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log("partner_change_requests", "upsert 例外", { error: msg });
+    return { row: null, error: msg };
+  }
 }
 
 export async function listChangeRequestsPending(

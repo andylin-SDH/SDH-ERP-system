@@ -166,7 +166,7 @@ export async function PATCH(request: NextRequest) {
       }
       const keys = Object.keys(filtered);
       const 變更前快照 = buildSnapshotForKeys(row, keys);
-      const req = await upsertPendingChangeRequest(
+      const { row: req, error: reqErr } = await upsertPendingChangeRequest(
         PartnerID,
         filtered as Record<string, unknown>,
         auth.user.email,
@@ -177,7 +177,8 @@ export async function PATCH(request: NextRequest) {
           {
             ok: false,
             error:
-              "變更申請寫入失敗，請確認已執行 migration 024_partner_change_requests",
+              reqErr ??
+              "變更申請寫入失敗，請確認已執行 migration 024，並檢查 RLS 是否允許 insert。",
           },
           { status: 500 }
         );
