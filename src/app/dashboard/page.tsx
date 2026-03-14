@@ -1501,7 +1501,7 @@ export default function DashboardPage() {
             <div className="space-y-6">
               {/* 分潤成數預設 */}
               <div className="rounded-xl border border-white/10 bg-slate-800/30 p-4">
-                <div className="mb-3 flex items-center justify-between">
+                <div className="mb-4 flex items-center justify-between">
                   <h3 className="font-semibold text-amber-400">分潤成數預設</h3>
                   <button
                     type="button"
@@ -1520,22 +1520,47 @@ export default function DashboardPage() {
                     {savingConfig === "payout" ? "儲存中" : "儲存"}
                   </button>
                 </div>
-                <div className="flex flex-wrap gap-x-6 gap-y-2">
-                  {(["專案BDPM分潤成數", "專案引薦人分潤成數", "專案管理員分潤成數", "執行管理員分潤成數", "KOL開發者分潤成數", "經紀人分潤成數", "主管分潤成數"] as const).map((k) => (
-                    <div key={k} className="flex items-center gap-2">
-                      <span className="text-xs text-slate-400">{k}</span>
-                      <input
-                        type="text"
-                        value={payoutDefaults[k] ?? ""}
-                        onChange={(e) => setSystemConfig((c) => {
-                          const base = c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} };
-                          return { ...base, master_payout_defaults: { ...base.master_payout_defaults, [k]: e.target.value } };
-                        })}
-                        className="w-16 rounded border border-white/20 bg-white/5 px-2 py-1 text-xs text-white focus:border-amber-500/50 focus:outline-none"
-                        placeholder="10%"
-                      />
+                <div className="space-y-4">
+                  <div>
+                    <p className="mb-2 text-xs font-medium text-slate-500">分潤模式 A（製作案、活動案）</p>
+                    <div className="flex flex-wrap gap-x-6 gap-y-2">
+                      {(["專案BDPM分潤成數", "專案引薦人分潤成數", "專案管理員分潤成數", "執行管理員分潤成數"] as const).map((k) => (
+                        <div key={k} className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400">{k}</span>
+                          <input
+                            type="text"
+                            value={payoutDefaults[k] ?? ""}
+                            onChange={(e) => setSystemConfig((c) => {
+                              const base = c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} };
+                              return { ...base, master_payout_defaults: { ...base.master_payout_defaults, [k]: e.target.value } };
+                            })}
+                            className="w-16 rounded border border-white/20 bg-white/5 px-2 py-1 text-xs text-white focus:border-amber-500/50 focus:outline-none"
+                            placeholder="10%"
+                          />
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
+                  <div>
+                    <p className="mb-2 text-xs font-medium text-slate-500">分潤模式 B（廣告案）</p>
+                    <div className="flex flex-wrap gap-x-6 gap-y-2">
+                      {(["專案引薦人分潤成數", "經紀人分潤成數", "主管分潤成數", "KOL開發者分潤成數"] as const).map((k) => (
+                        <div key={k} className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400">{k}</span>
+                          <input
+                            type="text"
+                            value={payoutDefaults[k] ?? ""}
+                            onChange={(e) => setSystemConfig((c) => {
+                              const base = c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} };
+                              return { ...base, master_payout_defaults: { ...base.master_payout_defaults, [k]: e.target.value } };
+                            })}
+                            className="w-16 rounded border border-white/20 bg-white/5 px-2 py-1 text-xs text-white focus:border-amber-500/50 focus:outline-none"
+                            placeholder="2.5%"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
