@@ -313,9 +313,9 @@ export default function DashboardPage() {
     [systemConfig?.roles]
   );
 
-  /** 使用者姓名列表（用於專案引薦人 / 專案管理員 / 執行管理員 下拉選單） */
+  /** 使用者姓名列表（對應 Users；用於分潤模式 A/B 的專案BDPM、專案引薦人、專案管理員、執行管理員 下拉選單） */
   const userNames = useMemo(
-    () => [...new Set(users.map((u) => u.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-TW")),
+    () => [...new Set(users.map((u) => (u.name && u.name.trim()) || u.email || "").filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-TW")),
     [users]
   );
 

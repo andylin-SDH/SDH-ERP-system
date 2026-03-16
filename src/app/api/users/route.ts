@@ -1,16 +1,16 @@
 /**
  * 使用者 API
- * GET /api/users - 使用者列表（限董事長/管理者）
+ * GET /api/users - 使用者列表（需登入，供分潤/專案人員下拉選單）
  * POST /api/users - 新增使用者（限董事長/管理者）
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { getUsers, createUser, updateUser } from "@/modules/users";
 import type { CreateUserInput, UpdateUserInput } from "@/lib/db/users";
-import { requireAdmin } from "@/lib/auth/api";
+import { requireAdmin, requireAuth } from "@/lib/auth/api";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const users = await getUsers();

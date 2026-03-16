@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createMaster, getMasterList, updateMaster, type NewMasterInput, type UpdateMasterInput } from "@/lib/db/master";
 import { getSystemConfig } from "@/lib/db/system-config";
+import { syncPayoutForProject } from "@/lib/db/payout";
 import { requireAdmin, requireAuth } from "@/lib/auth/api";
 
 export async function GET(request: NextRequest) {
@@ -64,6 +65,11 @@ export async function POST(request: NextRequest) {
     };
 
     const master = await createMaster(payload);
+    try {
+      await syncPayoutForProject(master, master_payout_defaults);
+    } catch (e) {
+      console.error("syncPayoutForProject after POST /api/master", e);
+    }
     return NextResponse.json({ ok: true, master });
   } catch (error) {
     console.error("POST /api/master error:", error);
@@ -112,6 +118,14 @@ export async function PATCH(request: NextRequest) {
     };
 
     const master = await updateMaster(payload);
+    if (master) {
+      const { master_payout_defaults } = await getSystemConfig();
+      try {
+        await syncPayoutForProject(master, master_payout_defaults);
+      } catch (e) {
+        console.error("syncPayoutForProject after PATCH /api/master", e);
+      }
+    }
     return NextResponse.json({ ok: true, master });
   } catch (error) {
     console.error("PATCH /api/master error:", error);
