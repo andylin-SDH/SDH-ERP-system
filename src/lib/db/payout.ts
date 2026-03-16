@@ -101,7 +101,8 @@ export async function syncPayoutForProject(
   const 專案名稱 = master.專案名稱 ?? null;
   const 專案總金額未稅 = master.專案總金額未稅 ?? null;
   const 專案營收 = master.專案營收 ?? null;
-  const amount = parseAmount(專案總金額未稅);
+  // 分潤金額一律以「專案營收」為基準；若尚未填寫專案營收，退回用專案總金額未稅
+  const amount = parseAmount(專案營收 ?? 專案總金額未稅);
   const 專案類型 = (master.專案類型 ?? "").trim();
 
   await deletePayoutBy專案ID(專案ID);
