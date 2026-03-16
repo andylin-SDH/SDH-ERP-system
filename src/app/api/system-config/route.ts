@@ -31,7 +31,7 @@ export async function PUT(request: NextRequest) {
     if (!key) {
       return NextResponse.json({ ok: false, error: "缺少 key" }, { status: 400 });
     }
-    if (!["master_payout_defaults", "project_types", "role_visibility", "roles"].includes(key)) {
+    if (!["master_payout_defaults", "project_types", "role_visibility", "roles", "role_permissions"].includes(key)) {
       return NextResponse.json({ ok: false, error: "不允許的 key" }, { status: 400 });
     }
     await updateSystemConfig(key, body.value);

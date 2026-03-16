@@ -1,7 +1,7 @@
 /**
  * 大總表 API
  * GET：回傳所有大總表資料（需登入）
- * POST：新增一筆大總表（限董事長/管理者）
+ * POST：新增一筆大總表（需登入，任何人可建立專案）
  * PATCH：更新大總表（限董事長/管理者）
  */
 
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as Partial<NewMasterInput> | null;
@@ -35,7 +35,12 @@ export async function POST(request: NextRequest) {
     if (!專案ID) {
       return NextResponse.json({ ok: false, error: "專案ID 為必填" }, { status: 400 });
     }
-    const { master_payout_defaults } = await getSystemConfig();
+    const { master_payout_defaults, role_permissions } = await getSystemConfig();
+    const role = auth.user.role;
+    const canCreate = role_permissions.master.create.includes(role);
+    if (!canCreate) {
+      return NextResponse.json({ ok: false, error: "您沒有建立專案的權限" }, { status: 403 });
+    }
 
     const payload: NewMasterInput = {
       專案ID,
@@ -81,7 +86,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as Partial<UpdateMasterInput> | null;
@@ -89,7 +94,12 @@ export async function PATCH(request: NextRequest) {
     if (!id) {
       return NextResponse.json({ ok: false, error: "id 為必填" }, { status: 400 });
     }
-
+    const { role_permissions } = await getSystemConfig();
+    const role = auth.user.role;
+    const canUpdate = role_permissions.master.update.includes(role);
+    if (!canUpdate) {
+      return NextResponse.json({ ok: false, error: "您沒有編輯專案的權限" }, { status: 403 });
+    }
     const payload: UpdateMasterInput = {
       id,
       專案名稱: (body?.專案名稱 as string) ?? null,

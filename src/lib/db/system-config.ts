@@ -13,11 +13,32 @@ export type PayoutDefaults = Record<string, string>;
 export type ProjectTypes = string[];
 export type RoleVisibility = Record<string, { sections: string[]; fullAccess?: boolean }>;
 
+export type RolePermissions = {
+  master: {
+    create: string[];
+    update: string[];
+    delete: string[];
+  };
+};
+
+function getDefaultRolePermissions(roles: string[]): RolePermissions {
+  const uniqueRoles = [...new Set(roles)];
+  const adminRoles = uniqueRoles.filter((r) => r === "董事長" || r === "管理者");
+  return {
+    master: {
+      create: uniqueRoles,
+      update: adminRoles.length ? adminRoles : uniqueRoles,
+      delete: adminRoles.length ? adminRoles : uniqueRoles,
+    },
+  };
+}
+
 export async function getSystemConfig(): Promise<{
   master_payout_defaults: PayoutDefaults;
   project_types: ProjectTypes;
   role_visibility: RoleVisibility;
   roles: string[];
+  role_permissions: RolePermissions;
 }> {
   const { data } = await getSupabase().from("system_config").select("key, value");
   const map = new Map<string, unknown>();
@@ -30,8 +51,20 @@ export async function getSystemConfig(): Promise<{
   const projectRaw = map.get("project_types") as string[] | undefined;
   const roleRaw = map.get("role_visibility") as RoleVisibility | undefined;
   const rolesRaw = map.get("roles") as string[] | undefined;
+  const permsRaw = map.get("role_permissions") as RolePermissions | undefined;
 
   const roles = Array.isArray(rolesRaw) && rolesRaw.length > 0 ? rolesRaw : [...ROLES];
+  const defaultPerms = getDefaultRolePermissions(roles);
+
+  const mergedPerms: RolePermissions = permsRaw && permsRaw.master
+    ? {
+        master: {
+          create: (permsRaw.master.create?.length ? permsRaw.master.create : defaultPerms.master.create).filter((r) => roles.includes(r)),
+          update: (permsRaw.master.update?.length ? permsRaw.master.update : defaultPerms.master.update).filter((r) => roles.includes(r)),
+          delete: (permsRaw.master.delete?.length ? permsRaw.master.delete : defaultPerms.master.delete).filter((r) => roles.includes(r)),
+        },
+      }
+    : defaultPerms;
 
   return {
     master_payout_defaults: payoutRaw && Object.keys(payoutRaw).length > 0
@@ -40,6 +73,7 @@ export async function getSystemConfig(): Promise<{
     project_types: Array.isArray(projectRaw) && projectRaw.length > 0 ? projectRaw : [...PROJECT_TYPES],
     role_visibility: roleRaw && Object.keys(roleRaw).length > 0 ? roleRaw : toRoleVisibilityForStorage(ROLE_VISIBILITY),
     roles,
+    role_permissions: mergedPerms,
   };
 }
 

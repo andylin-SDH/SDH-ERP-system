@@ -313,13 +313,32 @@ export default function DashboardPage() {
     [systemConfig?.roles]
   );
 
+  /** 專案權限設定：預設 create = 所有角色；update/delete = 董事長 + 管理者，可在 UI 調整 */
+  const rolePermissions = useMemo(() => {
+    const roles = displayRoles;
+    const defaultCreate = roles;
+    const defaultAdmin = roles.filter((r) => r === "董事長" || r === "管理者");
+    const defaultUpdateDelete = defaultAdmin.length ? defaultAdmin : roles;
+    const fromConfig = (systemConfig as unknown as { role_permissions?: { master?: { create?: string[]; update?: string[]; delete?: string[] } } })?.role_permissions;
+    const masterPerms = fromConfig?.master ?? {};
+    const norm = (arr: string[] | undefined, fallback: string[]) =>
+      (arr && arr.length ? arr : fallback).filter((r) => roles.includes(r));
+    return {
+      master: {
+        create: norm(masterPerms.create, defaultCreate),
+        update: norm(masterPerms.update, defaultUpdateDelete),
+        delete: norm(masterPerms.delete, defaultUpdateDelete),
+      },
+    };
+  }, [displayRoles, systemConfig]);
+
   /** 使用者姓名列表（對應 Users；用於分潤模式 A/B 的專案BDPM、專案引薦人、專案管理員、執行管理員 下拉選單） */
   const userNames = useMemo(
     () => [...new Set(users.map((u) => (u.name && u.name.trim()) || u.email || "").filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-TW")),
     [users]
   );
 
-  /** 董事長／管理者可為使用者設定可見範圍 */
+  /** 董事長／管理者可為使用者設定可見範圍、調整系統設定 */
   const canEditVisibility = me && ["董事長", "管理者"].includes(me.role);
 
   const fetchPartnerFormOptions = useCallback(async () => {
@@ -1134,42 +1153,42 @@ export default function DashboardPage() {
                   </span>
                 </div>
                 <button
-                type="button"
-                onClick={() => {
-                  const today = new Date().toISOString().slice(0, 10);
-                  setCreateForm({
-                    專案ID: generateProjectId(),
-                    專案名稱: "",
-                    專案類型: "",
-                    專案狀態: "",
-                    狀態確認日期: "",
-                    開案日期: today,
-                    專案總金額未稅: "",
-                    專案營收: "",
-                    專案成本: "",
-                    KOL費用未稅: "",
-                    KOL名稱: "",
-                    專案費用類型: "",
-                    廠商名稱: "",
-                    專案資料夾: "",
-                    專案BDPM: "",
-                    專案BDPM分潤成數: payoutDefaults.專案BDPM分潤成數,
-                    專案引薦人: "",
-                    專案引薦人分潤成數: payoutDefaults.專案引薦人分潤成數,
-                    專案管理員: "",
-                    專案管理員分潤成數: payoutDefaults.專案管理員分潤成數,
-                    執行管理員: "",
-                    執行管理員分潤成數: payoutDefaults.執行管理員分潤成數,
-                    專案內容: "",
-                    備註: "",
-                  });
-                  setCreateError(null);
-                  setShowCreateMaster(true);
-                }}
-                className="rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400"
-              >
-                新增專案
-              </button>
+                  type="button"
+                  onClick={() => {
+                    const today = new Date().toISOString().slice(0, 10);
+                    setCreateForm({
+                      專案ID: generateProjectId(),
+                      專案名稱: "",
+                      專案類型: "",
+                      專案狀態: "",
+                      狀態確認日期: "",
+                      開案日期: today,
+                      專案總金額未稅: "",
+                      專案營收: "",
+                      專案成本: "",
+                      KOL費用未稅: "",
+                      KOL名稱: "",
+                      專案費用類型: "",
+                      廠商名稱: "",
+                      專案資料夾: "",
+                      專案BDPM: "",
+                      專案BDPM分潤成數: payoutDefaults.專案BDPM分潤成數,
+                      專案引薦人: "",
+                      專案引薦人分潤成數: payoutDefaults.專案引薦人分潤成數,
+                      專案管理員: "",
+                      專案管理員分潤成數: payoutDefaults.專案管理員分潤成數,
+                      執行管理員: "",
+                      執行管理員分潤成數: payoutDefaults.執行管理員分潤成數,
+                      專案內容: "",
+                      備註: "",
+                    });
+                    setCreateError(null);
+                    setShowCreateMaster(true);
+                  }}
+                  className="rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400"
+                >
+                  新增專案
+                </button>
               </div>
             </div>
             <div className="overflow-x-auto rounded-xl border border-white/10 ring-1 ring-white/5">
@@ -1602,6 +1621,92 @@ export default function DashboardPage() {
                       if (v && !projectTypesOptions.includes(v)) { setSystemConfig((c) => ({ ...(c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} }), project_types: [...projectTypesOptions, v] })); (e.target as HTMLInputElement).value = ""; }
                     }}
                   />
+                </div>
+              </div>
+
+              {/* 4. 專案權限設定 */}
+              <div className="rounded-xl border border-white/10 bg-slate-800/30 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="font-semibold text-amber-400">專案權限設定</h3>
+                  <button
+                    type="button"
+                    disabled={savingConfig === "role_permissions"}
+                    onClick={async () => {
+                      setSavingConfig("role_permissions");
+                      try {
+                        const res = await fetch("/api/system-config", {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ key: "role_permissions", value: rolePermissions }),
+                        });
+                        const data = (await safeResJson(res)) as {
+                          ok?: boolean;
+                          config?: { role_permissions?: { master?: { create?: string[]; update?: string[]; delete?: string[] } } };
+                        };
+                        if (res.ok && data.ok && data.config) {
+                          setSystemConfig((c) => (c ? { ...c, role_permissions: data.config!.role_permissions } : c));
+                        }
+                      } catch {
+                        /* ignore */
+                      }
+                      setSavingConfig(null);
+                    }}
+                    className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-400 transition hover:bg-amber-500/30 disabled:opacity-60"
+                  >
+                    {savingConfig === "role_permissions" ? "儲存中" : "儲存"}
+                  </button>
+                </div>
+                <p className="mb-2 text-xs text-slate-500">
+                  勾選各角色可執行的操作。未勾選即沒有該操作權限。
+                </p>
+                <div className="space-y-2">
+                  {[
+                    { key: "create" as const, label: "新增專案" },
+                    { key: "update" as const, label: "編輯專案" },
+                    { key: "delete" as const, label: "刪除專案" },
+                  ].map(({ key, label }) => (
+                    <div key={key} className="flex items-center gap-3">
+                      <span className="w-20 text-xs font-medium text-slate-400">{label}</span>
+                      <div className="flex flex-wrap gap-2">
+                        {displayRoles.map((role) => {
+                          const checked = rolePermissions.master[key].includes(role);
+                          return (
+                            <label key={role} className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2.5 py-1 text-xs text-slate-200">
+                              <input
+                                type="checkbox"
+                                className="h-3.5 w-3.5 rounded border-white/40 bg-slate-900 text-amber-500"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const nextList = checked
+                                    ? rolePermissions.master[key].filter((r) => r !== role)
+                                    : [...rolePermissions.master[key], role];
+                                  setSystemConfig((c) => {
+                                    const base = c ?? {
+                                      master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS },
+                                      project_types: [...PROJECT_TYPES],
+                                      role_visibility: {},
+                                      roles: [...displayRoles],
+                                    };
+                                    const current = (base as unknown as { role_permissions?: { master?: { create?: string[]; update?: string[]; delete?: string[] } } }).role_permissions ?? rolePermissions;
+                                    return {
+                                      ...base,
+                                      role_permissions: {
+                                        master: {
+                                          ...current.master,
+                                          [key]: nextList,
+                                        },
+                                      },
+                                    };
+                                  });
+                                }}
+                              />
+                              <span>{role}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
