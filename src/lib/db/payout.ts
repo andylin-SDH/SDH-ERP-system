@@ -1,6 +1,6 @@
 /**
  * 分潤表 資料層（Supabase）
- * 表名：分潤表；DB 欄位為「角色」，對外以「分潤類型」呈現
+ * 表名：分潤表（DB 欄位為「分潤類型」）
  */
 
 import { getSupabase } from "@/lib/supabase/server";
@@ -43,7 +43,7 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
     .from("分潤表")
     .select("*")
     .order("專案ID")
-    .order("角色");
+    .order("分潤類型");
 
   if (error) {
     if (error.code === "42P01") {
@@ -67,12 +67,12 @@ export async function deletePayoutBy專案ID(專案ID: string): Promise<void> {
   }
 }
 
-/** 一筆分潤列（寫入 DB 用；欄位「角色」對應前端的「分潤類型」） */
+/** 一筆分潤列（寫入 DB 用） */
 export interface PayoutInsertRow {
   專案ID: string;
   專案名稱: string | null;
   專案總金額未稅: string | null;
-  角色: string;
+  分潤類型: string;
   分潤成數: string | null;
   分潤金額: string | null;
   領取人: string | null;
@@ -112,7 +112,7 @@ export async function syncPayoutForProject(
         專案ID,
         專案名稱,
         專案總金額未稅,
-        角色: "專案引薦人",
+        分潤類型: "專案引薦人",
         分潤成數: defaults.專案引薦人分潤成數 ?? null,
         分潤金額: String(Math.round(amount * rate引薦人)),
         領取人: 專案引薦人,
@@ -122,19 +122,19 @@ export async function syncPayoutForProject(
     const kol = master.KOL名稱?.trim()
       ? partners.find((p) => (p.合作夥伴名稱 ?? "").trim() === (master.KOL名稱 ?? "").trim())
       : null;
-    const roles: Array<{ key: keyof PayoutDefaults; 角色: string; 領取人: string | null }> = [
-      { key: "經紀人分潤成數", 角色: "經紀人", 領取人: kol?.經紀人 ?? null },
-      { key: "主管分潤成數", 角色: "主管", 領取人: kol?.主管 ?? null },
-      { key: "KOL開發者分潤成數", 角色: "KOL開發者", 領取人: kol?.KOL開發者 ?? null },
+    const roles: Array<{ key: keyof PayoutDefaults; 分潤類型: string; 領取人: string | null }> = [
+      { key: "經紀人分潤成數", 分潤類型: "經紀人", 領取人: kol?.經紀人 ?? null },
+      { key: "主管分潤成數", 分潤類型: "主管", 領取人: kol?.主管 ?? null },
+      { key: "KOL開發者分潤成數", 分潤類型: "KOL開發者", 領取人: kol?.KOL開發者 ?? null },
     ];
-    for (const { key, 角色, 領取人 } of roles) {
+    for (const { key, 分潤類型, 領取人 } of roles) {
       if (!領取人) continue;
       const rate = parsePayoutRate(defaults[key]);
       rows.push({
         專案ID,
         專案名稱,
         專案總金額未稅,
-        角色,
+        分潤類型,
         分潤成數: defaults[key] ?? null,
         分潤金額: String(Math.round(amount * rate)),
         領取人,
@@ -143,16 +143,16 @@ export async function syncPayoutForProject(
   } else {
     const modeARoles: Array<{
       key: keyof PayoutDefaults;
-      角色: string;
+      分潤類型: string;
       領取人: string | null;
       成數FromMaster: string | null;
     }> = [
-      { key: "專案BDPM分潤成數", 角色: "專案BDPM", 領取人: master.專案BDPM ?? null, 成數FromMaster: master.專案BDPM分潤成數 ?? null },
-      { key: "專案引薦人分潤成數", 角色: "專案引薦人", 領取人: master.專案引薦人 ?? null, 成數FromMaster: master.專案引薦人分潤成數 ?? null },
-      { key: "專案管理員分潤成數", 角色: "專案管理員", 領取人: master.專案管理員 ?? null, 成數FromMaster: master.專案管理員分潤成數 ?? null },
-      { key: "執行管理員分潤成數", 角色: "執行管理員", 領取人: master.執行管理員 ?? null, 成數FromMaster: master.執行管理員分潤成數 ?? null },
+      { key: "專案BDPM分潤成數", 分潤類型: "專案BDPM", 領取人: master.專案BDPM ?? null, 成數FromMaster: master.專案BDPM分潤成數 ?? null },
+      { key: "專案引薦人分潤成數", 分潤類型: "專案引薦人", 領取人: master.專案引薦人 ?? null, 成數FromMaster: master.專案引薦人分潤成數 ?? null },
+      { key: "專案管理員分潤成數", 分潤類型: "專案管理員", 領取人: master.專案管理員 ?? null, 成數FromMaster: master.專案管理員分潤成數 ?? null },
+      { key: "執行管理員分潤成數", 分潤類型: "執行管理員", 領取人: master.執行管理員 ?? null, 成數FromMaster: master.執行管理員分潤成數 ?? null },
     ];
-    for (const { key, 角色, 領取人, 成數FromMaster } of modeARoles) {
+    for (const { key, 分潤類型, 領取人, 成數FromMaster } of modeARoles) {
       if (!領取人) continue;
       const rateStr = 成數FromMaster ?? defaults[key];
       const rate = parsePayoutRate(rateStr);
@@ -160,7 +160,7 @@ export async function syncPayoutForProject(
         專案ID,
         專案名稱,
         專案總金額未稅,
-        角色,
+        分潤類型,
         分潤成數: rateStr ?? null,
         分潤金額: String(Math.round(amount * rate)),
         領取人,
