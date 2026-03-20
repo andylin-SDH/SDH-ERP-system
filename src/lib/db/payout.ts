@@ -62,7 +62,9 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
   const missingRevenueIds = [...new Set(list.filter((r) => !r.專案營收 && r.專案ID).map((r) => r.專案ID!))];
   if (missingRevenueIds.length === 0) return list;
 
-  const { data: masters, error: masterErr } = await supabase
+  // NOTE: Supabase 的型別推斷在中文欄位 select 時可能出現 ParserError
+  // 這裡用 any 來避免 build 失敗，實際 runtime 仍會回傳資料列
+  const { data: masters, error: masterErr } = await (supabase as any)
     .from("大總表")
     .select("專案ID, 專案營收")
     .in("專案ID", missingRevenueIds);
@@ -70,9 +72,8 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
 
   const revenueByProjectId = new Map<string, string>();
   for (const m of masters ?? []) {
-    const row = m as Record<string, unknown>;
-    const pid = String(row.專案ID ?? "").trim();
-    const revenue = String(row.專案營收 ?? "").trim();
+    const pid = String(m?.專案ID ?? "").trim();
+    const revenue = String(m?.專案營收 ?? "").trim();
     if (pid) revenueByProjectId.set(pid, revenue);
   }
 
