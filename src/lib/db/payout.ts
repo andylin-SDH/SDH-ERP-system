@@ -56,7 +56,30 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
     throw error;
   }
 
-  return (data ?? []).map((r) => rowToPayout(r as Record<string, unknown>));
+  const list = (data ?? []).map((r) => rowToPayout(r as Record<string, unknown>));
+
+  // 舊資料可能尚未回填「專案營收」；讀取時用 專案ID 從大總表補值
+  const missingRevenueIds = [...new Set(list.filter((r) => !r.專案營收 && r.專案ID).map((r) => r.專案ID!))];
+  if (missingRevenueIds.length === 0) return list;
+
+  const { data: masters, error: masterErr } = await supabase
+    .from("大總表")
+    .select("專案ID, 專案營收")
+    .in("專案ID", missingRevenueIds);
+  if (masterErr) return list;
+
+  const revenueByProjectId = new Map<string, string>();
+  for (const m of masters ?? []) {
+    const row = m as Record<string, unknown>;
+    const pid = String(row.專案ID ?? "").trim();
+    const revenue = String(row.專案營收 ?? "").trim();
+    if (pid) revenueByProjectId.set(pid, revenue);
+  }
+
+  return list.map((r) => ({
+    ...r,
+    專案營收: r.專案營收 ?? (r.專案ID ? revenueByProjectId.get(r.專案ID) : undefined),
+  }));
 }
 
 /** 刪除某專案的所有分潤列 */
