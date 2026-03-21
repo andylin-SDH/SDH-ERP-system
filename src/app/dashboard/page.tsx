@@ -304,7 +304,7 @@ export default function DashboardPage() {
     project_types: string[];
     role_visibility: Record<string, { sections: string[] }>;
     roles?: string[];
-    payout_dedupe_rules?: { roles: string[]; keep: string }[];
+    payout_dedupe_rules?: { mode_a: { roles: string[]; keep: string }[]; mode_b: { roles: string[]; keep: string }[] };
   } | null>(null);
   const [newRoleName, setNewRoleName] = useState("");
   const [savingConfig, setSavingConfig] = useState<string | null>(null);
@@ -330,9 +330,12 @@ export default function DashboardPage() {
     [systemConfig]
   );
 
-  /** 分潤規則：當多角色為同一人時只算一個，可於系統設定調整 */
+  /** 分潤規則：分模式 A/B，當多角色為同一人時只算一個 */
   const payoutDedupeRules = useMemo(
-    () => (systemConfig?.payout_dedupe_rules?.length ? systemConfig.payout_dedupe_rules : [{ roles: ["經紀人", "主管"], keep: "經紀人" }]),
+    () =>
+      systemConfig?.payout_dedupe_rules?.mode_a !== undefined && systemConfig?.payout_dedupe_rules?.mode_b !== undefined
+        ? systemConfig.payout_dedupe_rules
+        : { mode_a: [] as { roles: string[]; keep: string }[], mode_b: [{ roles: ["經紀人", "主管"], keep: "經紀人" }] },
     [systemConfig?.payout_dedupe_rules]
   );
 
@@ -747,7 +750,7 @@ export default function DashboardPage() {
             setVisibilityRules(r.rules ?? {});
           }
           if (cfgRes.status === "fulfilled" && (cfgRes.value as { ok?: boolean }).ok) {
-            const c = (cfgRes.value as { config?: { master_payout_defaults: Record<string, string>; project_types: string[]; role_visibility: Record<string, { sections: string[] }>; roles?: string[]; payout_dedupe_rules?: { roles: string[]; keep: string }[] } }).config;
+            const c = (cfgRes.value as { config?: { master_payout_defaults: Record<string, string>; project_types: string[]; role_visibility: Record<string, { sections: string[] }>; roles?: string[]; payout_dedupe_rules?: { mode_a: { roles: string[]; keep: string }[]; mode_b: { roles: string[]; keep: string }[] } } }).config;
             if (c) setSystemConfig(c);
           }
           if (invRes.status === "fulfilled" && (invRes.value as { ok?: boolean }).ok)
@@ -1627,7 +1630,7 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* 分潤規則：同一人不重複計算 */}
+              {/* 分潤規則：同一人不重複計算（分模式 A / B） */}
               <div className="rounded-xl border border-white/10 bg-slate-800/30 p-4">
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="font-semibold text-amber-400">分潤規則（同一人不重複計算）</h3>
@@ -1642,7 +1645,7 @@ export default function DashboardPage() {
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ key: "payout_dedupe_rules", value: payoutDedupeRules }),
                         });
-                        const data = (await safeResJson(res)) as { ok?: boolean; config?: { payout_dedupe_rules?: { roles: string[]; keep: string }[] } };
+                        const data = (await safeResJson(res)) as { ok?: boolean; config?: { payout_dedupe_rules?: { mode_a: { roles: string[]; keep: string }[]; mode_b: { roles: string[]; keep: string }[] } } };
                         if (res.ok && data.ok && data.config)
                           setSystemConfig((c) => (c ? { ...c, payout_dedupe_rules: data.config!.payout_dedupe_rules } : null));
                       } catch {}
@@ -1653,76 +1656,85 @@ export default function DashboardPage() {
                     {savingConfig === "payout_dedupe_rules" ? "儲存中" : "儲存"}
                   </button>
                 </div>
-                <p className="mb-3 text-xs text-slate-500">當多個角色為同一人時，只計算指定角色，避免重複分潤。適用於模式 B（廣告案）的經紀人、主管、KOL開發者等。</p>
-                <div className="space-y-2">
-                  {payoutDedupeRules.map((rule, idx) => (
-                    <div key={idx} className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-slate-900/50 px-3 py-2">
-                      <span className="text-xs text-slate-400">當</span>
-                      <span className="font-medium text-slate-300">{rule.roles.join("、")}</span>
-                      <span className="text-xs text-slate-400">為同一人時 → 只計算</span>
-                      <span className="font-semibold text-amber-400">{rule.keep}</span>
+                <p className="mb-4 text-xs text-slate-500">當多個角色為同一人時，只計算指定角色，避免重複分潤。</p>
+
+                {[
+                  {
+                    mode: "mode_a" as const,
+                    label: "模式 A（製作案、活動案）",
+                    roles: ["專案BDPM", "專案引薦人", "專案管理員", "執行管理員"] as const,
+                  },
+                  {
+                    mode: "mode_b" as const,
+                    label: "模式 B（廣告業配）",
+                    roles: ["專案引薦人", "經紀人", "主管", "KOL開發者"] as const,
+                  },
+                ].map(({ mode, label, roles }) => (
+                  <div key={mode} className="mb-4 last:mb-0">
+                    <p className="mb-2 text-xs font-medium text-slate-400">{label}</p>
+                    <div className="space-y-2">
+                      {payoutDedupeRules[mode].map((rule, idx) => (
+                        <div key={idx} className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-slate-900/50 px-3 py-2">
+                          <span className="text-xs text-slate-400">當</span>
+                          <span className="font-medium text-slate-300">{rule.roles.join("、")}</span>
+                          <span className="text-xs text-slate-400">為同一人時 → 只計算</span>
+                          <span className="font-semibold text-amber-400">{rule.keep}</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSystemConfig((c) => {
+                                const base = c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} };
+                                const next = { ...payoutDedupeRules, [mode]: payoutDedupeRules[mode].filter((_, i) => i !== idx) };
+                                return { ...base, payout_dedupe_rules: next };
+                              })
+                            }
+                            className="ml-auto text-slate-500 hover:text-red-400"
+                            title="刪除此規則"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-slate-500">新增：</span>
+                      <select id={`new-dedupe-keep-${mode}`} className="rounded border border-white/20 bg-slate-900/60 px-2 py-1 text-xs text-white">
+                        {roles.map((r) => (
+                          <option key={r} value={r}>只計算 {r}</option>
+                        ))}
+                      </select>
+                      <span className="text-xs text-slate-500">當</span>
+                      {roles.map((r) => (
+                        <label key={r} className="flex items-center gap-1 text-xs text-slate-300">
+                          <input type="checkbox" className="rounded border-white/20" id={`new-dedupe-role-${mode}-${r}`} />
+                          {r}
+                        </label>
+                      ))}
+                      <span className="text-xs text-slate-500">為同一人時</span>
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
+                          const keepSelect = document.getElementById(`new-dedupe-keep-${mode}`) as HTMLSelectElement | null;
+                          const selectedRoles = roles.filter((r) => (document.getElementById(`new-dedupe-role-${mode}-${r}`) as HTMLInputElement | null)?.checked);
+                          const keep = (keepSelect?.value ?? roles[0]) as (typeof roles)[number];
+                          if (selectedRoles.length < 2 || !selectedRoles.includes(keep)) return;
                           setSystemConfig((c) => {
                             const base = c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} };
-                            return { ...base, payout_dedupe_rules: payoutDedupeRules.filter((_, i) => i !== idx) };
-                          })
-                        }
-                        className="ml-auto text-slate-500 hover:text-red-400"
-                        title="刪除此規則"
+                            const next = { ...payoutDedupeRules, [mode]: [...payoutDedupeRules[mode], { roles: selectedRoles, keep }] };
+                            return { ...base, payout_dedupe_rules: next };
+                          });
+                          roles.forEach((r) => {
+                            const el = document.getElementById(`new-dedupe-role-${mode}-${r}`) as HTMLInputElement | null;
+                            if (el) el.checked = false;
+                          });
+                        }}
+                        className="rounded bg-amber-500/20 px-2 py-1 text-xs font-medium text-amber-400 transition hover:bg-amber-500/30"
                       >
-                        ×
+                        新增
                       </button>
                     </div>
-                  ))}
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-slate-500">新增規則：</span>
-                  <select
-                    id="new-dedupe-keep"
-                    className="rounded border border-white/20 bg-slate-900/60 px-2 py-1 text-xs text-white"
-                  >
-                    {["專案引薦人", "經紀人", "主管", "KOL開發者"].map((r) => (
-                      <option key={r} value={r}>只計算 {r}</option>
-                    ))}
-                  </select>
-                  <span className="text-xs text-slate-500">當</span>
-                  {["專案引薦人", "經紀人", "主管", "KOL開發者"].map((r) => (
-                    <label key={r} className="flex items-center gap-1 text-xs text-slate-300">
-                      <input
-                        type="checkbox"
-                        className="rounded border-white/20"
-                        id={`new-dedupe-role-${r}`}
-                        data-role={r}
-                      />
-                      {r}
-                    </label>
-                  ))}
-                  <span className="text-xs text-slate-500">為同一人時</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const keepSelect = document.getElementById("new-dedupe-keep") as HTMLSelectElement | null;
-                      const roles = (["專案引薦人", "經紀人", "主管", "KOL開發者"] as const).filter(
-                        (r) => (document.getElementById(`new-dedupe-role-${r}`) as HTMLInputElement | null)?.checked
-                      );
-                      const keep = (keepSelect?.value ?? "經紀人") as "經紀人" | "專案引薦人" | "主管" | "KOL開發者";
-                      if (roles.length < 2 || !roles.includes(keep)) return;
-                      setSystemConfig((c) => {
-                        const base = c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} };
-                        return { ...base, payout_dedupe_rules: [...payoutDedupeRules, { roles, keep }] };
-                      });
-                      (["專案引薦人", "經紀人", "主管", "KOL開發者"] as const).forEach((r) => {
-                        const el = document.getElementById(`new-dedupe-role-${r}`) as HTMLInputElement | null;
-                        if (el) el.checked = false;
-                      });
-                    }}
-                    className="rounded bg-amber-500/20 px-2 py-1 text-xs font-medium text-amber-400 transition hover:bg-amber-500/30"
-                  >
-                    新增
-                  </button>
-                </div>
+                  </div>
+                ))}
               </div>
 
               {/* 3. 專案類型 */}

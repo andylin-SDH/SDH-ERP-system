@@ -9,7 +9,7 @@ import { parsePayoutRate, parseAmount } from "@/lib/payout-utils";
 import { isPayoutModeB } from "@/config/master-payout-defaults";
 import type { MasterRow } from "@/lib/db/master";
 import { getPartners } from "@/lib/db/partners";
-import type { PayoutDedupeRule } from "@/lib/db/system-config";
+import type { PayoutDedupeRule, PayoutDedupeRulesByMode } from "@/lib/db/system-config";
 
 export interface PayoutRow {
   id?: string;
@@ -147,7 +147,7 @@ function applyDedupeRules(
 export async function syncPayoutForProject(
   master: MasterRow,
   defaults: PayoutDefaults,
-  dedupeRules: PayoutDedupeRule[] = []
+  dedupeRules: PayoutDedupeRulesByMode = { mode_a: [], mode_b: [] }
 ): Promise<void> {
   const 專案ID = master.專案ID ?? "";
   const 專案名稱 = master.專案名稱 ?? null;
@@ -228,6 +228,7 @@ export async function syncPayoutForProject(
     }
   }
 
-  const filteredRows = applyDedupeRules(rows, dedupeRules);
+  const rulesToApply = isPayoutModeB(專案類型) ? dedupeRules.mode_b : dedupeRules.mode_a;
+  const filteredRows = applyDedupeRules(rows, rulesToApply);
   if (filteredRows.length > 0) await insertPayoutRows(filteredRows);
 }

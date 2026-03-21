@@ -16,6 +16,8 @@ export type RoleVisibility = Record<string, { sections: string[]; fullAccess?: b
 /** 分潤規則：當多個角色為同一人時，只保留指定角色 */
 export type PayoutDedupeRule = { roles: string[]; keep: string };
 
+export type PayoutDedupeRulesByMode = { mode_a: PayoutDedupeRule[]; mode_b: PayoutDedupeRule[] };
+
 export type RolePermissions = {
   master: {
     create: string[];
@@ -36,8 +38,11 @@ function getDefaultRolePermissions(roles: string[]): RolePermissions {
   };
 }
 
-/** 預設分潤規則：經紀人與主管同一人時只算經紀人 */
-export const DEFAULT_PAYOUT_DEDUPE_RULES: PayoutDedupeRule[] = [{ roles: ["經紀人", "主管"], keep: "經紀人" }];
+/** 預設分潤規則：模式 B 經紀人與主管同一人時只算經紀人 */
+export const DEFAULT_PAYOUT_DEDUPE_RULES: PayoutDedupeRulesByMode = {
+  mode_a: [],
+  mode_b: [{ roles: ["經紀人", "主管"], keep: "經紀人" }],
+};
 
 export async function getSystemConfig(): Promise<{
   master_payout_defaults: PayoutDefaults;
@@ -45,7 +50,7 @@ export async function getSystemConfig(): Promise<{
   role_visibility: RoleVisibility;
   roles: string[];
   role_permissions: RolePermissions;
-  payout_dedupe_rules: PayoutDedupeRule[];
+  payout_dedupe_rules: PayoutDedupeRulesByMode;
 }> {
   const { data } = await getSupabase().from("system_config").select("key, value");
   const map = new Map<string, unknown>();
@@ -59,7 +64,7 @@ export async function getSystemConfig(): Promise<{
   const roleRaw = map.get("role_visibility") as RoleVisibility | undefined;
   const rolesRaw = map.get("roles") as string[] | undefined;
   const permsRaw = map.get("role_permissions") as RolePermissions | undefined;
-  const dedupeRaw = map.get("payout_dedupe_rules") as PayoutDedupeRule[] | undefined;
+  const dedupeRaw = map.get("payout_dedupe_rules") as PayoutDedupeRulesByMode | PayoutDedupeRule[] | undefined;
 
   const roles = Array.isArray(rolesRaw) && rolesRaw.length > 0 ? rolesRaw : [...ROLES];
   const defaultPerms = getDefaultRolePermissions(roles);
@@ -74,9 +79,19 @@ export async function getSystemConfig(): Promise<{
       }
     : defaultPerms;
 
-  const dedupeRules = Array.isArray(dedupeRaw) && dedupeRaw.length > 0
-    ? dedupeRaw.filter((r) => Array.isArray(r.roles) && r.roles.length >= 2 && r.keep && r.roles.includes(r.keep))
-    : [...DEFAULT_PAYOUT_DEDUPE_RULES];
+  const normalizeDedupe = (v: PayoutDedupeRule[] | undefined): PayoutDedupeRule[] =>
+    Array.isArray(v)
+      ? v.filter((r) => Array.isArray(r.roles) && r.roles.length >= 2 && r.keep && r.roles.includes(r.keep))
+      : [];
+  const dedupeRules: PayoutDedupeRulesByMode =
+    dedupeRaw && typeof dedupeRaw === "object" && !Array.isArray(dedupeRaw) && "mode_a" in dedupeRaw && "mode_b" in dedupeRaw
+      ? {
+          mode_a: normalizeDedupe((dedupeRaw as PayoutDedupeRulesByMode).mode_a),
+          mode_b: normalizeDedupe((dedupeRaw as PayoutDedupeRulesByMode).mode_b),
+        }
+      : Array.isArray(dedupeRaw) && dedupeRaw.length > 0
+        ? { mode_a: [], mode_b: normalizeDedupe(dedupeRaw as PayoutDedupeRule[]) }
+        : { ...DEFAULT_PAYOUT_DEDUPE_RULES };
 
   return {
     master_payout_defaults: payoutRaw && Object.keys(payoutRaw).length > 0
