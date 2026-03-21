@@ -801,7 +801,20 @@ export default function DashboardPage() {
         {me && tabSections.length > 0 && (
           <>
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-800/40 px-4 py-3">
-              <div className="flex flex-wrap gap-2">
+              {/* 小螢幕：下拉選單 */}
+              <div className="w-full md:hidden">
+                <select
+                  value={activeSection ?? ""}
+                  onChange={(e) => setActiveSection(e.target.value || null)}
+                  className="w-full rounded-xl border border-white/20 bg-slate-900/80 px-4 py-2.5 text-sm font-medium text-white focus:border-amber-500/60 focus:outline-none"
+                >
+                  {tabSections.map((sec) => (
+                    <option key={sec} value={sec}>{TABLE_LABELS[sec] ?? sec}</option>
+                  ))}
+                </select>
+              </div>
+              {/* 大螢幕：按鈕列 */}
+              <div className="hidden flex-1 flex-wrap items-center gap-2 md:flex">
                 {tabSections.map((sec) => (
                   <button
                     key={sec}
@@ -834,7 +847,7 @@ export default function DashboardPage() {
                   </button>
                 ))}
               </div>
-              <p className="text-[11px] text-slate-500">
+              <p className="hidden text-[11px] text-slate-500 md:block">
                 目前區塊：<span className="font-semibold text-amber-400">{TABLE_LABELS[activeSection ?? ""] ?? activeSection ?? "—"}</span>
               </p>
             </div>
@@ -1136,7 +1149,7 @@ export default function DashboardPage() {
 
         {/* 大總表 */}
         {activeSection === "master" && (
-          <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-6 shadow-xl ring-1 ring-white/5">
+          <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-xl font-bold tracking-tight text-white">大總表</h2>
               <div className="flex flex-wrap items-center gap-3">
@@ -2669,7 +2682,7 @@ export default function DashboardPage() {
 
         {/* 合作夥伴 / KOL */}
         {activeSection === "partners" && (
-        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-6 shadow-xl ring-1 ring-white/5">
+        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
           {partnersLoadError && (
             <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
               <p className="font-semibold text-amber-300">合作夥伴列表載入異常（已嘗試備援查詢）</p>
@@ -3226,7 +3239,7 @@ export default function DashboardPage() {
 
         {/* 任務 */}
         {activeSection === "tasks" && (
-        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-6 shadow-xl ring-1 ring-white/5">
+        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-xl font-bold tracking-tight text-white">任務</h2>
             <input
@@ -3234,10 +3247,36 @@ export default function DashboardPage() {
               value={tasksSearch}
               onChange={(e) => setTasksSearch(e.target.value)}
               placeholder="搜尋專案名稱、任務、負責人…"
-              className="w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
+              className="w-full min-w-0 max-w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
             />
           </div>
-          <div className="overflow-hidden rounded-xl border border-white/10">
+          {/* 小螢幕：任務卡片 */}
+          <div className="space-y-3 md:hidden">
+            {filteredTasks.length === 0 ? (
+              <p className="rounded-xl border border-white/10 px-4 py-8 text-center text-slate-500">尚無任務資料（請在大總表展開專案後新增任務）</p>
+            ) : searchedTasks.length === 0 ? (
+              <p className="rounded-xl border border-white/10 px-4 py-8 text-center text-slate-500">沒有符合搜尋結果</p>
+            ) : (
+              searchedTasks.map((t, i) => (
+                <div
+                  key={t.任務ID ?? i}
+                  className="cursor-pointer rounded-xl border border-white/10 bg-slate-800/40 p-4 transition hover:bg-white/5"
+                  onClick={() => setSelectedTask(t)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-white">{t.任務 ?? "—"}</p>
+                      <p className="mt-0.5 text-xs text-slate-400">{t.專案名稱 ?? "—"}</p>
+                    </div>
+                    <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${t.任務完成 ? "bg-amber-500/25 text-amber-400" : "bg-slate-700/60 text-slate-400"}`}>{t.任務完成 ? "已完成" : "進行中"}</span>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">負責人：{t.任務負責人 ?? "—"}</p>
+                </div>
+              ))
+            )}
+          </div>
+          {/* 大螢幕：表格 */}
+          <div className="hidden overflow-x-auto rounded-xl border border-white/10 md:block">
             <table className="min-w-full divide-y divide-white/10">
               <thead className="bg-slate-800/80">
                 <tr>
@@ -3346,7 +3385,7 @@ export default function DashboardPage() {
 
         {/* 分潤表 */}
         {activeSection === "payout" && (
-        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-6 shadow-xl ring-1 ring-white/5">
+        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-xl font-bold tracking-tight text-white">分潤表</h2>
             <input
@@ -3354,55 +3393,81 @@ export default function DashboardPage() {
               value={payoutSearch}
               onChange={(e) => setPayoutSearch(e.target.value)}
               placeholder="搜尋專案ID、類型、領取人…"
-              className="w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
+              className="w-full min-w-0 max-w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
             />
           </div>
-          <div className="overflow-hidden rounded-xl border border-white/10">
-            {filteredPayout.length === 0 ? (
-              <p className="px-4 py-8 text-center text-slate-500">尚無分潤表資料</p>
-            ) : (
-              <table className="min-w-full divide-y divide-white/10">
-                <thead className="bg-slate-800/80">
-                  <tr>
-                    {payoutVisibleCols.map((k) => (
-                      <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-slate-300"}>
-                        {TABLE_COLUMNS.payout.find((c) => c.key === k)?.label ?? k}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/10 bg-slate-800/10">
-                  {searchedPayout.length === 0 ? (
+          {filteredPayout.length === 0 ? (
+            <p className="rounded-xl border border-white/10 px-4 py-8 text-center text-slate-500">尚無分潤表資料</p>
+          ) : (
+            <>
+              {/* 小螢幕：卡片式收納顯示 */}
+              <div className="space-y-3 md:hidden">
+                {searchedPayout.length === 0 ? (
+                  <p className="rounded-xl border border-white/10 px-4 py-8 text-center text-slate-500">沒有符合搜尋結果</p>
+                ) : (
+                  searchedPayout.map((row, i) => {
+                    const r = row as unknown as Record<string, unknown>;
+                    return (
+                      <div key={row.id ?? i} className="rounded-xl border border-white/10 bg-slate-800/40 p-4">
+                        <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                          <span className="truncate text-sm font-medium text-amber-400" title={String(r.專案ID ?? "")}>{String(r.專案ID ?? "—")}</span>
+                          <span className="text-sm font-semibold text-white">{formatAmount(String(r.分潤金額 ?? ""))}</span>
+                        </div>
+                        <div className="mt-2 space-y-1 text-xs text-slate-400">
+                          <p><span className="text-slate-500">專案名稱</span> {String(r.專案名稱 ?? "—")}</p>
+                          <p><span className="text-slate-500">分潤類型</span> {String(r.分潤類型 ?? "—")} · {String(r.分潤成數 ?? "—")}</p>
+                          <p><span className="text-slate-500">領取人</span> {String(r.領取人 ?? "—")}</p>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+              {/* 大螢幕：表格 */}
+              <div className="hidden overflow-x-auto rounded-xl border border-white/10 md:block">
+                <table className="min-w-full divide-y divide-white/10">
+                  <thead className="bg-slate-800/80">
                     <tr>
-                      <td colSpan={payoutVisibleCols.length || 7} className="px-4 py-8 text-center text-base font-medium text-slate-500">
-                        沒有符合搜尋結果
-                      </td>
+                      {payoutVisibleCols.map((k) => (
+                        <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-slate-300"}>
+                          {TABLE_COLUMNS.payout.find((c) => c.key === k)?.label ?? k}
+                        </th>
+                      ))}
                     </tr>
-                  ) : (
-                    searchedPayout.map((row, i) => (
-                      <tr key={row.id ?? i} className="hover:bg-white/5">
-                        {payoutVisibleCols.map((k) => {
-                          const val = (row as unknown as Record<string, unknown>)[k];
-                          const str = String(val ?? "—");
-                          return (
-                            <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm ${k === "專案ID" ? "font-medium text-slate-500" : "font-medium text-slate-300"}`}>
-                              {str}
-                            </td>
-                          );
-                        })}
+                  </thead>
+                  <tbody className="divide-y divide-white/10 bg-slate-800/10">
+                    {searchedPayout.length === 0 ? (
+                      <tr>
+                        <td colSpan={payoutVisibleCols.length || 7} className="px-4 py-8 text-center text-base font-medium text-slate-500">
+                          沒有符合搜尋結果
+                        </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            )}
-          </div>
+                    ) : (
+                      searchedPayout.map((row, i) => (
+                        <tr key={row.id ?? i} className="hover:bg-white/5">
+                          {payoutVisibleCols.map((k) => {
+                            const val = (row as unknown as Record<string, unknown>)[k];
+                            const str = String(val ?? "—");
+                            return (
+                              <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm ${k === "專案ID" ? "font-medium text-slate-500" : "font-medium text-slate-300"}`}>
+                                {str}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </section>
         )}
 
         {/* 財務（DB：財務） */}
         {activeSection === "finance" && (
-        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-6 shadow-xl ring-1 ring-white/5">
+        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-xl font-bold tracking-tight text-white">財務</h2>
             <input
@@ -3410,10 +3475,10 @@ export default function DashboardPage() {
               value={financeSearch}
               onChange={(e) => setFinanceSearch(e.target.value)}
               placeholder="搜尋專案ID、利潤、狀態…"
-              className="w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
+              className="w-full min-w-0 max-w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
             />
           </div>
-          <div className="overflow-hidden rounded-xl border border-white/10">
+          <div className="overflow-x-auto rounded-xl border border-white/10">
             {finance.length === 0 ? (
               <p className="px-4 py-8 text-center text-slate-500">尚無財務資料</p>
             ) : (
@@ -3453,7 +3518,7 @@ export default function DashboardPage() {
 
         {/* 發票（DB：發票） */}
         {activeSection === "invoices" && (
-        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-6 shadow-xl ring-1 ring-white/5">
+        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-xl font-bold tracking-tight text-white">發票</h2>
             <input
@@ -3461,10 +3526,10 @@ export default function DashboardPage() {
               value={invoicesSearch}
               onChange={(e) => setInvoicesSearch(e.target.value)}
               placeholder="搜尋專案ID、發票號碼、廠商…"
-              className="w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
+              className="w-full min-w-0 max-w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
             />
           </div>
-          <div className="overflow-hidden rounded-xl border border-white/10">
+          <div className="overflow-x-auto rounded-xl border border-white/10">
             {invoices.length === 0 ? (
               <p className="px-4 py-8 text-center text-slate-500">尚無發票資料</p>
             ) : (
