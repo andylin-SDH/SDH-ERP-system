@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     if (!專案ID) {
       return NextResponse.json({ ok: false, error: "專案ID 為必填" }, { status: 400 });
     }
-    const { master_payout_defaults, role_permissions } = await getSystemConfig();
+    const { master_payout_defaults, role_permissions, payout_dedupe_rules } = await getSystemConfig();
     const role = auth.user.role;
     const canCreate = role_permissions.master.create.includes(role);
     if (!canCreate) {
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
 
     const master = await createMaster(payload);
     try {
-      await syncPayoutForProject(master, master_payout_defaults);
+      await syncPayoutForProject(master, master_payout_defaults, payout_dedupe_rules ?? []);
     } catch (e) {
       console.error("syncPayoutForProject after POST /api/master", e);
     }
@@ -129,9 +129,9 @@ export async function PATCH(request: NextRequest) {
 
     const master = await updateMaster(payload);
     if (master) {
-      const { master_payout_defaults } = await getSystemConfig();
+      const { master_payout_defaults, payout_dedupe_rules } = await getSystemConfig();
       try {
-        await syncPayoutForProject(master, master_payout_defaults);
+        await syncPayoutForProject(master, master_payout_defaults, payout_dedupe_rules ?? []);
       } catch (e) {
         console.error("syncPayoutForProject after PATCH /api/master", e);
       }

@@ -13,6 +13,9 @@ export type PayoutDefaults = Record<string, string>;
 export type ProjectTypes = string[];
 export type RoleVisibility = Record<string, { sections: string[]; fullAccess?: boolean }>;
 
+/** 分潤規則：當多個角色為同一人時，只保留指定角色 */
+export type PayoutDedupeRule = { roles: string[]; keep: string };
+
 export type RolePermissions = {
   master: {
     create: string[];
@@ -33,12 +36,16 @@ function getDefaultRolePermissions(roles: string[]): RolePermissions {
   };
 }
 
+/** 預設分潤規則：經紀人與主管同一人時只算經紀人 */
+export const DEFAULT_PAYOUT_DEDUPE_RULES: PayoutDedupeRule[] = [{ roles: ["經紀人", "主管"], keep: "經紀人" }];
+
 export async function getSystemConfig(): Promise<{
   master_payout_defaults: PayoutDefaults;
   project_types: ProjectTypes;
   role_visibility: RoleVisibility;
   roles: string[];
   role_permissions: RolePermissions;
+  payout_dedupe_rules: PayoutDedupeRule[];
 }> {
   const { data } = await getSupabase().from("system_config").select("key, value");
   const map = new Map<string, unknown>();
@@ -52,6 +59,7 @@ export async function getSystemConfig(): Promise<{
   const roleRaw = map.get("role_visibility") as RoleVisibility | undefined;
   const rolesRaw = map.get("roles") as string[] | undefined;
   const permsRaw = map.get("role_permissions") as RolePermissions | undefined;
+  const dedupeRaw = map.get("payout_dedupe_rules") as PayoutDedupeRule[] | undefined;
 
   const roles = Array.isArray(rolesRaw) && rolesRaw.length > 0 ? rolesRaw : [...ROLES];
   const defaultPerms = getDefaultRolePermissions(roles);
@@ -66,6 +74,10 @@ export async function getSystemConfig(): Promise<{
       }
     : defaultPerms;
 
+  const dedupeRules = Array.isArray(dedupeRaw) && dedupeRaw.length > 0
+    ? dedupeRaw.filter((r) => Array.isArray(r.roles) && r.roles.length >= 2 && r.keep && r.roles.includes(r.keep))
+    : [...DEFAULT_PAYOUT_DEDUPE_RULES];
+
   return {
     master_payout_defaults: payoutRaw && Object.keys(payoutRaw).length > 0
       ? { ...MASTER_PAYOUT_DEFAULTS, ...payoutRaw }
@@ -74,6 +86,7 @@ export async function getSystemConfig(): Promise<{
     role_visibility: roleRaw && Object.keys(roleRaw).length > 0 ? roleRaw : toRoleVisibilityForStorage(ROLE_VISIBILITY),
     roles,
     role_permissions: mergedPerms,
+    payout_dedupe_rules: dedupeRules,
   };
 }
 

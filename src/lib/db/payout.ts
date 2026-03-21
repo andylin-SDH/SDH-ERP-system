@@ -9,6 +9,7 @@ import { parsePayoutRate, parseAmount } from "@/lib/payout-utils";
 import { isPayoutModeB } from "@/config/master-payout-defaults";
 import type { MasterRow } from "@/lib/db/master";
 import { getPartners } from "@/lib/db/partners";
+import type { PayoutDedupeRule } from "@/lib/db/system-config";
 
 export interface PayoutRow {
   id?: string;
@@ -115,11 +116,38 @@ export async function insertPayoutRows(rows: PayoutInsertRow[]): Promise<void> {
 type PayoutDefaults = Record<string, string>;
 
 /**
+ * 套用「同一人不重複計算」規則：當多角色為同一人時，只保留指定角色
+ */
+function applyDedupeRules(
+  rows: PayoutInsertRow[],
+  rules: PayoutDedupeRule[]
+): PayoutInsertRow[] {
+  if (rules.length === 0) return rows;
+  let result = [...rows];
+  for (const rule of rules) {
+    const roleSet = new Set(rule.roles);
+    if (!roleSet.has(rule.keep) || rule.roles.length < 2) continue;
+    result = result.filter((row) => {
+      if (!roleSet.has(row.分潤類型)) return true;
+      const recipient = (row.領取人 ?? "").trim();
+      if (!recipient) return true;
+      const sameRecipient = result.filter(
+        (r) => roleSet.has(r.分潤類型) && (r.領取人 ?? "").trim() === recipient
+      );
+      if (sameRecipient.length < 2) return true;
+      return row.分潤類型 === rule.keep;
+    });
+  }
+  return result;
+}
+
+/**
  * 依大總表一筆專案與成數預設，產生分潤列並同步至分潤表（先刪該專案舊列再插入）
  */
 export async function syncPayoutForProject(
   master: MasterRow,
-  defaults: PayoutDefaults
+  defaults: PayoutDefaults,
+  dedupeRules: PayoutDedupeRule[] = []
 ): Promise<void> {
   const 專案ID = master.專案ID ?? "";
   const 專案名稱 = master.專案名稱 ?? null;
@@ -200,5 +228,6 @@ export async function syncPayoutForProject(
     }
   }
 
-  if (rows.length > 0) await insertPayoutRows(rows);
+  const filteredRows = applyDedupeRules(rows, dedupeRules);
+  if (filteredRows.length > 0) await insertPayoutRows(filteredRows);
 }
