@@ -1707,7 +1707,7 @@ export default function DashboardPage() {
                       const roles = (["專案引薦人", "經紀人", "主管", "KOL開發者"] as const).filter(
                         (r) => (document.getElementById(`new-dedupe-role-${r}`) as HTMLInputElement | null)?.checked
                       );
-                      const keep = keepSelect?.value ?? "經紀人";
+                      const keep = (keepSelect?.value ?? "經紀人") as "經紀人" | "專案引薦人" | "主管" | "KOL開發者";
                       if (roles.length < 2 || !roles.includes(keep)) return;
                       setSystemConfig((c) => {
                         const base = c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} };
