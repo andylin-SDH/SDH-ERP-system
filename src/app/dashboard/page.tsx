@@ -35,6 +35,26 @@ function calc專案營收(總金額: string, 成本: string, kol費用: string):
   return String(a - b - c);
 }
 
+/** 分潤表欄位顯示順序（所有人一致）：分潤金額 → 分潤成數、專案名稱 → 其餘 */
+const PAYOUT_DISPLAY_ORDER = [
+  "分潤金額",
+  "分潤成數",
+  "專案名稱",
+  "專案ID",
+  "專案營收",
+  "專案總金額未稅",
+  "分潤類型",
+  "領取人",
+] as const;
+
+function sortPayoutColumnsForDisplay(cols: string[]): string[] {
+  return [...cols].sort((a, b) => {
+    const ia = PAYOUT_DISPLAY_ORDER.indexOf(a as (typeof PAYOUT_DISPLAY_ORDER)[number]);
+    const ib = PAYOUT_DISPLAY_ORDER.indexOf(b as (typeof PAYOUT_DISPLAY_ORDER)[number]);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  });
+}
+
 /** 金額顯示用（數字型態，千分位） */
 function formatAmount(v: string | null | undefined): string {
   if (v == null || String(v).trim() === "") return "—";
@@ -195,6 +215,8 @@ export default function DashboardPage() {
   const [creatingPartner, setCreatingPartner] = useState(false);
   const [createPartnerError, setCreatePartnerError] = useState<string | null>(null);
   const [expandedPartnerId, setExpandedPartnerId] = useState<string | null>(null);
+  /** 分潤表卡片：展開更多詳情的 key（row.id 或 fallback 索引） */
+  const [expandedPayoutCardKey, setExpandedPayoutCardKey] = useState<string | null>(null);
   const [showEditPartner, setShowEditPartner] = useState(false);
   const [editPartnerForm, setEditPartnerForm] = useState<{
     PartnerID: string;
@@ -523,6 +545,8 @@ export default function DashboardPage() {
     [payoutList, filterRowsByVisibility]
   );
   const payoutVisibleCols = useMemo(() => getVisibleColumnKeys("payout"), [getVisibleColumnKeys]);
+  /** 分潤表實際欄順序：與權限／可見欄位一致，但全角色統一為「分潤金額優先」 */
+  const payoutColsForDisplay = useMemo(() => sortPayoutColumnsForDisplay(payoutVisibleCols), [payoutVisibleCols]);
   const financeVisibleCols = useMemo(() => getVisibleColumnKeys("finance"), [getVisibleColumnKeys]);
   const invoicesVisibleCols = useMemo(() => getVisibleColumnKeys("invoices"), [getVisibleColumnKeys]);
 
@@ -3400,24 +3424,76 @@ export default function DashboardPage() {
             <p className="rounded-xl border border-white/10 px-4 py-8 text-center text-slate-500">尚無分潤表資料</p>
           ) : (
             <>
-              {/* 小螢幕：卡片式收納顯示 */}
+              {/* 小螢幕：卡片式收納顯示（分潤金額為主、次要資訊、其他可摺疊） */}
               <div className="space-y-3 md:hidden">
                 {searchedPayout.length === 0 ? (
                   <p className="rounded-xl border border-white/10 px-4 py-8 text-center text-slate-500">沒有符合搜尋結果</p>
                 ) : (
                   searchedPayout.map((row, i) => {
                     const r = row as unknown as Record<string, unknown>;
+                    const cardKey = String(row.id ?? `payout-${i}`);
+                    const isExpanded = expandedPayoutCardKey === cardKey;
+                    const showAmt = payoutVisibleCols.includes("分潤金額");
+                    const showPct = payoutVisibleCols.includes("分潤成數");
+                    const showTitle = payoutVisibleCols.includes("專案名稱");
+                    const detailKeys = ["專案ID", "專案營收", "專案總金額未稅", "分潤類型", "領取人"] as const;
+                    const hasExpandable = detailKeys.some((k) => payoutVisibleCols.includes(k));
                     return (
-                      <div key={row.id ?? i} className="rounded-xl border border-white/10 bg-slate-800/40 p-4">
-                        <div className="flex items-center justify-between border-b border-white/10 pb-2">
-                          <span className="truncate text-sm font-medium text-amber-400" title={String(r.專案ID ?? "")}>{String(r.專案ID ?? "—")}</span>
-                          <span className="text-sm font-semibold text-white">{formatAmount(String(r.分潤金額 ?? ""))}</span>
-                        </div>
-                        <div className="mt-2 space-y-1 text-xs text-slate-400">
-                          <p><span className="text-slate-500">專案名稱</span> {String(r.專案名稱 ?? "—")}</p>
-                          <p><span className="text-slate-500">分潤類型</span> {String(r.分潤類型 ?? "—")} · {String(r.分潤成數 ?? "—")}</p>
-                          <p><span className="text-slate-500">領取人</span> {String(r.領取人 ?? "—")}</p>
-                        </div>
+                      <div key={cardKey} className="rounded-xl border border-white/10 bg-slate-800/40 p-4">
+                        {/* 主要：分潤金額（與 ③ 可見欄位一致，所有人同一套 UI） */}
+                        {showAmt && (
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="text-xs font-semibold uppercase tracking-wider text-amber-400/90">分潤金額</span>
+                            <span className="text-2xl font-bold tabular-nums text-amber-400">{formatAmount(String(r.分潤金額 ?? ""))}</span>
+                          </div>
+                        )}
+                        {/* 次要：分潤成數、專案名稱 */}
+                        {(showPct || showTitle) && (
+                          <div className={`space-y-1 border-b border-white/10 pb-3 ${showAmt ? "mt-3" : ""}`}>
+                            {showPct && (
+                              <p className="text-sm font-medium text-slate-300">
+                                <span className="text-slate-500">分潤成數</span> <span className="text-amber-400/90">{String(r.分潤成數 ?? "—")}</span>
+                              </p>
+                            )}
+                            {showTitle && (
+                              <p className="truncate text-sm text-slate-300" title={String(r.專案名稱 ?? "")}>
+                                <span className="text-slate-500">專案</span> {String(r.專案名稱 ?? "—")}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        {/* 可摺疊：其餘可見欄位 */}
+                        {hasExpandable && (
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedPayoutCardKey((k) => (k === cardKey ? null : cardKey))}
+                              className="flex w-full items-center justify-between rounded-lg py-1.5 text-xs text-slate-500 transition hover:bg-white/5 hover:text-slate-400"
+                            >
+                              <span>{isExpanded ? "收起詳情" : "展開詳情"}</span>
+                              <span className="text-slate-600">{isExpanded ? "▲" : "▼"}</span>
+                            </button>
+                            {isExpanded && (
+                              <div className="mt-2 space-y-1 rounded-lg bg-slate-900/50 px-3 py-2 text-xs text-slate-400">
+                                {payoutVisibleCols.includes("專案ID") && (
+                                  <p><span className="text-slate-500">專案ID</span> {String(r.專案ID ?? "—")}</p>
+                                )}
+                                {payoutVisibleCols.includes("專案營收") && (
+                                  <p><span className="text-slate-500">專案營收</span> {formatAmount(String(r.專案營收 ?? ""))}</p>
+                                )}
+                                {payoutVisibleCols.includes("專案總金額未稅") && (
+                                  <p><span className="text-slate-500">專案總金額未稅</span> {formatAmount(String(r.專案總金額未稅 ?? ""))}</p>
+                                )}
+                                {payoutVisibleCols.includes("分潤類型") && (
+                                  <p><span className="text-slate-500">分潤類型</span> {String(r.分潤類型 ?? "—")}</p>
+                                )}
+                                {payoutVisibleCols.includes("領取人") && (
+                                  <p><span className="text-slate-500">領取人</span> {String(r.領取人 ?? "—")}</p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })
@@ -3428,8 +3504,17 @@ export default function DashboardPage() {
                 <table className="min-w-full divide-y divide-white/10">
                   <thead className="bg-slate-800/80">
                     <tr>
-                      {payoutVisibleCols.map((k) => (
-                        <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-slate-300"}>
+                      {payoutColsForDisplay.map((k) => (
+                        <th
+                          key={k}
+                          className={
+                            k === "分潤金額"
+                              ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400"
+                              : k === "專案ID"
+                                ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400/80"
+                                : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-slate-300"
+                          }
+                        >
                           {TABLE_COLUMNS.payout.find((c) => c.key === k)?.label ?? k}
                         </th>
                       ))}
@@ -3438,18 +3523,23 @@ export default function DashboardPage() {
                   <tbody className="divide-y divide-white/10 bg-slate-800/10">
                     {searchedPayout.length === 0 ? (
                       <tr>
-                        <td colSpan={payoutVisibleCols.length || 7} className="px-4 py-8 text-center text-base font-medium text-slate-500">
+                        <td colSpan={payoutColsForDisplay.length || 7} className="px-4 py-8 text-center text-base font-medium text-slate-500">
                           沒有符合搜尋結果
                         </td>
                       </tr>
                     ) : (
                       searchedPayout.map((row, i) => (
                         <tr key={row.id ?? i} className="hover:bg-white/5">
-                          {payoutVisibleCols.map((k) => {
+                          {payoutColsForDisplay.map((k) => {
                             const val = (row as unknown as Record<string, unknown>)[k];
-                            const str = String(val ?? "—");
+                            const str = k === "分潤金額" ? formatAmount(String(val ?? "")) : String(val ?? "—");
                             return (
-                              <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm ${k === "專案ID" ? "font-medium text-slate-500" : "font-medium text-slate-300"}`}>
+                              <td
+                                key={k}
+                                className={`whitespace-nowrap px-4 py-3.5 text-sm ${
+                                  k === "分潤金額" ? "font-bold tabular-nums text-amber-400" : k === "專案ID" ? "font-medium text-slate-500" : "font-medium text-slate-300"
+                                }`}
+                              >
                                 {str}
                               </td>
                             );
