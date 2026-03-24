@@ -8,8 +8,10 @@ import { log } from "@/lib/log";
 import { parsePayoutRate, parseAmount } from "@/lib/payout-utils";
 import { isPayoutModeB } from "@/config/master-payout-defaults";
 import type { MasterRow } from "@/lib/db/master";
+import { getMasterList } from "@/lib/db/master";
 import { getPartners } from "@/lib/db/partners";
 import type { PayoutDedupeRule, PayoutDedupeRulesByMode } from "@/lib/db/system-config";
+import { getSystemConfig } from "@/lib/db/system-config";
 
 export interface PayoutRow {
   id?: string;
@@ -115,6 +117,12 @@ export async function insertPayoutRows(rows: PayoutInsertRow[]): Promise<void> {
 
 type PayoutDefaults = Record<string, string>;
 
+/** 領取人比對用：去空白、Unicode 正規化，避免「同一人」因格式不同而無法合併 */
+function normalizeRecipient(s: string | null | undefined): string {
+  if (s == null) return "";
+  return String(s).trim().normalize("NFKC");
+}
+
 /**
  * 套用「同一人不重複計算」規則：當多角色為同一人時，只保留指定角色
  */
@@ -126,13 +134,13 @@ function applyDedupeRules(
   let result = [...rows];
   for (const rule of rules) {
     const roleSet = new Set(rule.roles);
-    if (!roleSet.has(rule.keep) || rule.roles.length < 2) continue;
+    if (!rule.keep || !roleSet.has(rule.keep) || rule.roles.length < 2) continue;
     result = result.filter((row) => {
       if (!roleSet.has(row.分潤類型)) return true;
-      const recipient = (row.領取人 ?? "").trim();
+      const recipient = normalizeRecipient(row.領取人);
       if (!recipient) return true;
       const sameRecipient = result.filter(
-        (r) => roleSet.has(r.分潤類型) && (r.領取人 ?? "").trim() === recipient
+        (r) => roleSet.has(r.分潤類型) && normalizeRecipient(r.領取人) === recipient
       );
       if (sameRecipient.length < 2) return true;
       return row.分潤類型 === rule.keep;
@@ -231,4 +239,20 @@ export async function syncPayoutForProject(
   const rulesToApply = isPayoutModeB(專案類型) ? dedupeRules.mode_b : dedupeRules.mode_a;
   const filteredRows = applyDedupeRules(rows, rulesToApply);
   if (filteredRows.length > 0) await insertPayoutRows(filteredRows);
+}
+
+/**
+ * 依目前系統設定，將大總表所有專案重新同步至分潤表（儲存分潤規則／成數後呼叫）
+ */
+export async function syncAllPayoutsFromMaster(): Promise<void> {
+  const { master_payout_defaults, payout_dedupe_rules } = await getSystemConfig();
+  const masters = await getMasterList();
+  const dedupe = payout_dedupe_rules ?? { mode_a: [], mode_b: [] };
+  for (const master of masters) {
+    try {
+      await syncPayoutForProject(master, master_payout_defaults, dedupe);
+    } catch (e) {
+      log("payout.syncAll", "syncPayoutForProject 失敗", { 專案ID: master.專案ID, error: String(e) });
+    }
+  }
 }

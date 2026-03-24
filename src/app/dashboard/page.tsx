@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { User } from "@/lib/types";
@@ -54,6 +54,8 @@ function sortPayoutColumnsForDisplay(cols: string[]): string[] {
     return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
   });
 }
+
+const RENDER_CHUNK_SIZE = 120;
 
 /** 金額顯示用（數字型態，千分位） */
 function formatAmount(v: string | null | undefined): string {
@@ -320,6 +322,20 @@ export default function DashboardPage() {
   const [payoutSearch, setPayoutSearch] = useState("");
   const [financeSearch, setFinanceSearch] = useState("");
   const [invoicesSearch, setInvoicesSearch] = useState("");
+  /** 大資料量時分段渲染，降低首屏與互動卡頓 */
+  const [masterRenderCount, setMasterRenderCount] = useState(RENDER_CHUNK_SIZE);
+  const [partnersRenderCount, setPartnersRenderCount] = useState(RENDER_CHUNK_SIZE);
+  const [payoutRenderCount, setPayoutRenderCount] = useState(RENDER_CHUNK_SIZE);
+  const [tasksRenderCount, setTasksRenderCount] = useState(RENDER_CHUNK_SIZE);
+  const [financeRenderCount, setFinanceRenderCount] = useState(RENDER_CHUNK_SIZE);
+  const [invoicesRenderCount, setInvoicesRenderCount] = useState(RENDER_CHUNK_SIZE);
+  /** 讓輸入先回應，再延後套用篩選，降低卡頓 */
+  const deferredMasterSearch = useDeferredValue(masterSearch);
+  const deferredPartnersSearch = useDeferredValue(partnersSearch);
+  const deferredTasksSearch = useDeferredValue(tasksSearch);
+  const deferredPayoutSearch = useDeferredValue(payoutSearch);
+  const deferredFinanceSearch = useDeferredValue(financeSearch);
+  const deferredInvoicesSearch = useDeferredValue(invoicesSearch);
 
   const payoutDefaults = useMemo(
     () => systemConfig?.master_payout_defaults ?? MASTER_PAYOUT_DEFAULTS,
@@ -329,6 +345,14 @@ export default function DashboardPage() {
     () => systemConfig?.project_types ?? [...PROJECT_TYPES],
     [systemConfig]
   );
+  /** 欄位標籤快取：避免 render 期間大量 .find() */
+  const tableColumnLabels = useMemo(() => {
+    const byTable: Record<string, Record<string, string>> = {};
+    for (const [tableKey, cols] of Object.entries(TABLE_COLUMNS)) {
+      byTable[tableKey] = Object.fromEntries(cols.map((c) => [c.key, c.label]));
+    }
+    return byTable;
+  }, []);
 
   /** 分潤規則：分模式 A/B，當多角色為同一人時只算一個 */
   const payoutDedupeRules = useMemo(
@@ -576,32 +600,151 @@ export default function DashboardPage() {
   /** 套用關鍵字搜尋後的各 Table 資料 */
   const searchedMasterList = useMemo(
     () =>
-      filterRowsBySearch(filteredMasterList as unknown as Record<string, unknown>[], masterVisibleCols, masterSearch) as unknown as MasterRow[],
-    [filteredMasterList, masterVisibleCols, masterSearch, filterRowsBySearch]
+      filterRowsBySearch(filteredMasterList as unknown as Record<string, unknown>[], masterVisibleCols, deferredMasterSearch) as unknown as MasterRow[],
+    [filteredMasterList, masterVisibleCols, deferredMasterSearch, filterRowsBySearch]
   );
   const searchedPartners = useMemo(
     () =>
-      filterRowsBySearch(filteredPartners as unknown as Record<string, unknown>[], partnerListCols, partnersSearch) as unknown as PartnerRow[],
-    [filteredPartners, partnerListCols, partnersSearch, filterRowsBySearch]
+      filterRowsBySearch(filteredPartners as unknown as Record<string, unknown>[], partnerListCols, deferredPartnersSearch) as unknown as PartnerRow[],
+    [filteredPartners, partnerListCols, deferredPartnersSearch, filterRowsBySearch]
   );
   const searchedTasks = useMemo(
     () =>
-      filterRowsBySearch(filteredTasks as unknown as Record<string, unknown>[], tasksVisibleCols, tasksSearch) as unknown as TaskRow[],
-    [filteredTasks, tasksVisibleCols, tasksSearch, filterRowsBySearch]
+      filterRowsBySearch(filteredTasks as unknown as Record<string, unknown>[], tasksVisibleCols, deferredTasksSearch) as unknown as TaskRow[],
+    [filteredTasks, tasksVisibleCols, deferredTasksSearch, filterRowsBySearch]
   );
   const searchedPayout = useMemo(
     () =>
-      filterRowsBySearch(filteredPayout as unknown as Record<string, unknown>[], payoutVisibleCols, payoutSearch) as unknown as PayoutRow[],
-    [filteredPayout, payoutVisibleCols, payoutSearch, filterRowsBySearch]
+      filterRowsBySearch(filteredPayout as unknown as Record<string, unknown>[], payoutVisibleCols, deferredPayoutSearch) as unknown as PayoutRow[],
+    [filteredPayout, payoutVisibleCols, deferredPayoutSearch, filterRowsBySearch]
   );
   const searchedFinance = useMemo(
-    () => filterRowsBySearch(finance as unknown as Record<string, unknown>[], financeVisibleCols, financeSearch),
-    [finance, financeVisibleCols, financeSearch, filterRowsBySearch]
+    () => filterRowsBySearch(finance as unknown as Record<string, unknown>[], financeVisibleCols, deferredFinanceSearch),
+    [finance, financeVisibleCols, deferredFinanceSearch, filterRowsBySearch]
   );
   const searchedInvoices = useMemo(
-    () => filterRowsBySearch(invoices as unknown as Record<string, unknown>[], invoicesVisibleCols, invoicesSearch),
-    [invoices, invoicesVisibleCols, invoicesSearch, filterRowsBySearch]
+    () => filterRowsBySearch(invoices as unknown as Record<string, unknown>[], invoicesVisibleCols, deferredInvoicesSearch),
+    [invoices, invoicesVisibleCols, deferredInvoicesSearch, filterRowsBySearch]
   );
+  const visibleMasterRows = useMemo(
+    () => searchedMasterList.slice(0, masterRenderCount),
+    [searchedMasterList, masterRenderCount]
+  );
+  const visiblePartnersRows = useMemo(
+    () => searchedPartners.slice(0, partnersRenderCount),
+    [searchedPartners, partnersRenderCount]
+  );
+  const visiblePayoutRows = useMemo(
+    () => searchedPayout.slice(0, payoutRenderCount),
+    [searchedPayout, payoutRenderCount]
+  );
+  const visibleTasksRows = useMemo(
+    () => searchedTasks.slice(0, tasksRenderCount),
+    [searchedTasks, tasksRenderCount]
+  );
+  const visibleFinanceRows = useMemo(
+    () => searchedFinance.slice(0, financeRenderCount),
+    [searchedFinance, financeRenderCount]
+  );
+  const visibleInvoicesRows = useMemo(
+    () => searchedInvoices.slice(0, invoicesRenderCount),
+    [searchedInvoices, invoicesRenderCount]
+  );
+
+  useEffect(() => {
+    if (activeSection !== "master") return;
+    setMasterRenderCount(RENDER_CHUNK_SIZE);
+    if (searchedMasterList.length <= RENDER_CHUNK_SIZE) return;
+    let timer: number | undefined;
+    const tick = () => {
+      setMasterRenderCount((prev) => {
+        const next = Math.min(prev + RENDER_CHUNK_SIZE, searchedMasterList.length);
+        if (next < searchedMasterList.length) timer = window.setTimeout(tick, 0);
+        return next;
+      });
+    };
+    timer = window.setTimeout(tick, 0);
+    return () => { if (timer) window.clearTimeout(timer); };
+  }, [activeSection, searchedMasterList.length]);
+
+  useEffect(() => {
+    if (activeSection !== "partners" || partnersTab !== "approved") return;
+    setPartnersRenderCount(RENDER_CHUNK_SIZE);
+    if (searchedPartners.length <= RENDER_CHUNK_SIZE) return;
+    let timer: number | undefined;
+    const tick = () => {
+      setPartnersRenderCount((prev) => {
+        const next = Math.min(prev + RENDER_CHUNK_SIZE, searchedPartners.length);
+        if (next < searchedPartners.length) timer = window.setTimeout(tick, 0);
+        return next;
+      });
+    };
+    timer = window.setTimeout(tick, 0);
+    return () => { if (timer) window.clearTimeout(timer); };
+  }, [activeSection, partnersTab, searchedPartners.length]);
+
+  useEffect(() => {
+    if (activeSection !== "payout") return;
+    setPayoutRenderCount(RENDER_CHUNK_SIZE);
+    if (searchedPayout.length <= RENDER_CHUNK_SIZE) return;
+    let timer: number | undefined;
+    const tick = () => {
+      setPayoutRenderCount((prev) => {
+        const next = Math.min(prev + RENDER_CHUNK_SIZE, searchedPayout.length);
+        if (next < searchedPayout.length) timer = window.setTimeout(tick, 0);
+        return next;
+      });
+    };
+    timer = window.setTimeout(tick, 0);
+    return () => { if (timer) window.clearTimeout(timer); };
+  }, [activeSection, searchedPayout.length]);
+  useEffect(() => {
+    if (activeSection !== "tasks") return;
+    setTasksRenderCount(RENDER_CHUNK_SIZE);
+    if (searchedTasks.length <= RENDER_CHUNK_SIZE) return;
+    let timer: number | undefined;
+    const tick = () => {
+      setTasksRenderCount((prev) => {
+        const next = Math.min(prev + RENDER_CHUNK_SIZE, searchedTasks.length);
+        if (next < searchedTasks.length) timer = window.setTimeout(tick, 0);
+        return next;
+      });
+    };
+    timer = window.setTimeout(tick, 0);
+    return () => { if (timer) window.clearTimeout(timer); };
+  }, [activeSection, searchedTasks.length]);
+
+  useEffect(() => {
+    if (activeSection !== "finance") return;
+    setFinanceRenderCount(RENDER_CHUNK_SIZE);
+    if (searchedFinance.length <= RENDER_CHUNK_SIZE) return;
+    let timer: number | undefined;
+    const tick = () => {
+      setFinanceRenderCount((prev) => {
+        const next = Math.min(prev + RENDER_CHUNK_SIZE, searchedFinance.length);
+        if (next < searchedFinance.length) timer = window.setTimeout(tick, 0);
+        return next;
+      });
+    };
+    timer = window.setTimeout(tick, 0);
+    return () => { if (timer) window.clearTimeout(timer); };
+  }, [activeSection, searchedFinance.length]);
+
+  useEffect(() => {
+    if (activeSection !== "invoices") return;
+    setInvoicesRenderCount(RENDER_CHUNK_SIZE);
+    if (searchedInvoices.length <= RENDER_CHUNK_SIZE) return;
+    let timer: number | undefined;
+    const tick = () => {
+      setInvoicesRenderCount((prev) => {
+        const next = Math.min(prev + RENDER_CHUNK_SIZE, searchedInvoices.length);
+        if (next < searchedInvoices.length) timer = window.setTimeout(tick, 0);
+        return next;
+      });
+    };
+    timer = window.setTimeout(tick, 0);
+    return () => { if (timer) window.clearTimeout(timer); };
+  }, [activeSection, searchedInvoices.length]);
 
   useEffect(() => {
     // 切換選取專案時，重置編輯狀態並同步表單
@@ -1258,7 +1401,7 @@ export default function DashboardPage() {
                               : "min-w-[5rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-slate-300 whitespace-nowrap"
                         }
                       >
-                        {TABLE_COLUMNS.master.find((c) => c.key === k)?.label ?? k}
+                        {tableColumnLabels.master?.[k] ?? k}
                       </th>
                     ))}
                   </tr>
@@ -1277,7 +1420,7 @@ export default function DashboardPage() {
                       </td>
                     </tr>
                   ) : (
-                    searchedMasterList.map((row) => {
+                    visibleMasterRows.map((row) => {
                       const pid = row.專案ID ?? "";
                       const isExpanded = expandedProjectId === pid;
                       const projectTasks = filteredTasks.filter((t) => (t.專案ID ?? "").trim().toLowerCase() === pid.trim().toLowerCase());
@@ -1555,6 +1698,9 @@ export default function DashboardPage() {
                 </tbody>
               </table>
             </div>
+            {searchedMasterList.length > visibleMasterRows.length && (
+              <p className="mt-2 text-right text-xs text-slate-500">載入中 {visibleMasterRows.length} / {searchedMasterList.length}</p>
+            )}
           </section>
         )}
 
@@ -1656,7 +1802,7 @@ export default function DashboardPage() {
                     {savingConfig === "payout_dedupe_rules" ? "儲存中" : "儲存"}
                   </button>
                 </div>
-                <p className="mb-4 text-xs text-slate-500">當多個角色為同一人時，只計算指定角色，避免重複分潤。</p>
+                <p className="mb-4 text-xs text-slate-500">當多個角色為同一人時，只計算指定角色，避免重複分潤。點「儲存」後會依目前大總表<strong className="text-slate-400">自動重算並更新所有專案的分潤表</strong>。</p>
 
                 {[
                   {
@@ -2786,7 +2932,7 @@ export default function DashboardPage() {
                     const rows = Object.entries(showChangeRequestDiff.變更內容)
                       .map(([key, newVal]) => {
                         const oldVal = showChangeRequestDiff.變更前快照?.[key];
-                        const label = TABLE_COLUMNS.partners.find((c) => c.key === key)?.label ?? key;
+                        const label = tableColumnLabels.partners?.[key] ?? key;
                         const oldStr = oldVal === undefined || oldVal === null ? "—" : String(oldVal);
                         const newStr = newVal === undefined || newVal === null ? "—" : String(newVal);
                         const same =
@@ -2941,6 +3087,7 @@ export default function DashboardPage() {
           </div>
           {/* 已上架：原主列表 */}
           {partnersTab === "approved" && (
+          <>
           <div className="max-h-[60vh] overflow-y-auto overflow-x-auto rounded-xl border border-white/10">
             <table className="min-w-full divide-y divide-white/10">
               <thead className="sticky top-0 z-20 bg-slate-900">
@@ -2951,7 +3098,7 @@ export default function DashboardPage() {
                       key={k}
                       className="px-4 py-3.5 text-left text-sm font-semibold tracking-wider text-amber-300 border-b border-amber-400/60"
                     >
-                      {TABLE_COLUMNS.partners.find((c) => c.key === k)?.label ?? k}
+                      {tableColumnLabels.partners?.[k] ?? k}
                     </th>
                   ))}
                 </tr>
@@ -2970,7 +3117,7 @@ export default function DashboardPage() {
                     </td>
                   </tr>
                 ) : (
-                  searchedPartners.flatMap((pt, i) => {
+                  visiblePartnersRows.flatMap((pt, i) => {
                     const pid = pt.PartnerID ?? "";
                     const expanded = expandedPartnerId === pid;
                     return [
@@ -3104,6 +3251,10 @@ export default function DashboardPage() {
               </tbody>
             </table>
           </div>
+          {searchedPartners.length > visiblePartnersRows.length && (
+            <p className="mt-2 text-right text-xs text-slate-500">載入中 {visiblePartnersRows.length} / {searchedPartners.length}</p>
+          )}
+          </>
           )}
 
           {/* 待審核 */}
@@ -3398,7 +3549,7 @@ export default function DashboardPage() {
             ) : searchedTasks.length === 0 ? (
               <p className="rounded-xl border border-white/10 px-4 py-8 text-center text-slate-500">沒有符合搜尋結果</p>
             ) : (
-              searchedTasks.map((t, i) => (
+              visibleTasksRows.map((t, i) => (
                 <div
                   key={t.任務ID ?? i}
                   className="cursor-pointer rounded-xl border border-white/10 bg-slate-800/40 p-4 transition hover:bg-white/5"
@@ -3423,7 +3574,7 @@ export default function DashboardPage() {
                 <tr>
                   {tasksVisibleCols.map((k) => (
                     <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400" : k === "任務完成" ? "px-4 py-3.5 text-center text-xs font-bold uppercase tracking-wider text-slate-300" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-slate-300"}>
-                      {TABLE_COLUMNS.tasks.find((c) => c.key === k)?.label ?? k}
+                      {tableColumnLabels.tasks?.[k] ?? k}
                     </th>
                   ))}
                 </tr>
@@ -3442,7 +3593,7 @@ export default function DashboardPage() {
                     </td>
                   </tr>
                 ) : (
-                  searchedTasks.map((t, i) => (
+                  visibleTasksRows.map((t, i) => (
                     <tr
                       key={t.任務ID ?? i}
                       className="cursor-pointer transition hover:bg-white/5"
@@ -3521,6 +3672,9 @@ export default function DashboardPage() {
               </tbody>
             </table>
           </div>
+          {searchedTasks.length > visibleTasksRows.length && (
+            <p className="mt-2 text-right text-xs text-slate-500">載入中 {visibleTasksRows.length} / {searchedTasks.length}</p>
+          )}
         </section>
         )}
 
@@ -3546,7 +3700,7 @@ export default function DashboardPage() {
                 {searchedPayout.length === 0 ? (
                   <p className="rounded-xl border border-white/10 px-4 py-8 text-center text-slate-500">沒有符合搜尋結果</p>
                 ) : (
-                  searchedPayout.map((row, i) => {
+                  visiblePayoutRows.map((row, i) => {
                     const r = row as unknown as Record<string, unknown>;
                     const cardKey = String(row.id ?? `payout-${i}`);
                     const isExpanded = expandedPayoutCardKey === cardKey;
@@ -3632,7 +3786,7 @@ export default function DashboardPage() {
                                 : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-slate-300"
                           }
                         >
-                          {TABLE_COLUMNS.payout.find((c) => c.key === k)?.label ?? k}
+                          {tableColumnLabels.payout?.[k] ?? k}
                         </th>
                       ))}
                     </tr>
@@ -3645,7 +3799,7 @@ export default function DashboardPage() {
                         </td>
                       </tr>
                     ) : (
-                      searchedPayout.map((row, i) => (
+                      visiblePayoutRows.map((row, i) => (
                         <tr key={row.id ?? i} className="hover:bg-white/5">
                           {payoutColsForDisplay.map((k) => {
                             const val = (row as unknown as Record<string, unknown>)[k];
@@ -3667,6 +3821,9 @@ export default function DashboardPage() {
                   </tbody>
                 </table>
               </div>
+              {searchedPayout.length > visiblePayoutRows.length && (
+                <p className="mt-2 text-right text-xs text-slate-500">載入中 {visiblePayoutRows.length} / {searchedPayout.length}</p>
+              )}
             </>
           )}
         </section>
@@ -3694,7 +3851,7 @@ export default function DashboardPage() {
                   <tr>
                     {financeVisibleCols.map((k) => (
                       <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-slate-300"}>
-                        {TABLE_COLUMNS.finance.find((c) => c.key === k)?.label ?? k}
+                        {tableColumnLabels.finance?.[k] ?? k}
                       </th>
                     ))}
                   </tr>
@@ -3707,7 +3864,7 @@ export default function DashboardPage() {
                       </td>
                     </tr>
                   ) : (
-                    searchedFinance.map((row, i) => (
+                    visibleFinanceRows.map((row, i) => (
                       <tr key={i} className="hover:bg-white/5">
                         {financeVisibleCols.map((k) => {
                           const v = (row as unknown as Record<string, unknown>)[k];
@@ -3720,6 +3877,9 @@ export default function DashboardPage() {
               </table>
             )}
           </div>
+          {searchedFinance.length > visibleFinanceRows.length && (
+            <p className="mt-2 text-right text-xs text-slate-500">載入中 {visibleFinanceRows.length} / {searchedFinance.length}</p>
+          )}
         </section>
         )}
 
@@ -3745,7 +3905,7 @@ export default function DashboardPage() {
                   <tr>
                     {invoicesVisibleCols.map((k) => (
                       <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-slate-300"}>
-                        {TABLE_COLUMNS.invoices.find((c) => c.key === k)?.label ?? k}
+                        {tableColumnLabels.invoices?.[k] ?? k}
                       </th>
                     ))}
                   </tr>
@@ -3758,7 +3918,7 @@ export default function DashboardPage() {
                       </td>
                     </tr>
                   ) : (
-                    searchedInvoices.map((inv, i) => (
+                    visibleInvoicesRows.map((inv, i) => (
                       <tr key={i} className="hover:bg-white/5">
                         {invoicesVisibleCols.map((k) => {
                           const v = (inv as unknown as Record<string, unknown>)[k];
@@ -3775,6 +3935,9 @@ export default function DashboardPage() {
               </table>
             )}
           </div>
+          {searchedInvoices.length > visibleInvoicesRows.length && (
+            <p className="mt-2 text-right text-xs text-slate-500">載入中 {visibleInvoicesRows.length} / {searchedInvoices.length}</p>
+          )}
         </section>
         )}
           </>

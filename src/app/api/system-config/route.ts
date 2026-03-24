@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireAdmin } from "@/lib/auth/api";
 import { getSystemConfig, updateSystemConfig } from "@/lib/db/system-config";
+import { syncAllPayoutsFromMaster } from "@/lib/db/payout";
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
@@ -35,6 +36,14 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "不允許的 key" }, { status: 400 });
     }
     await updateSystemConfig(key, body.value);
+    // 分潤規則或成數變更後，重新同步所有專案的分潤表（否則僅在編輯大總表時才會套用）
+    if (key === "payout_dedupe_rules" || key === "master_payout_defaults") {
+      try {
+        await syncAllPayoutsFromMaster();
+      } catch (e) {
+        console.error("syncAllPayoutsFromMaster after system-config PUT", e);
+      }
+    }
     const config = await getSystemConfig();
     return NextResponse.json({ ok: true, config });
   } catch (err) {
