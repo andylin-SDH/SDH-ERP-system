@@ -847,11 +847,63 @@ export default function DashboardPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectedMaster, selectedTask]);
 
+  const refreshDashboardData = useCallback(
+    async (
+      targets: Array<"users" | "master" | "tasks" | "partners" | "myVisibility" | "visibilityRules" | "systemConfig" | "invoices" | "finance" | "payout"> = [
+        "users", "master", "tasks", "partners", "myVisibility", "visibilityRules", "systemConfig", "invoices", "finance", "payout",
+      ]
+    ) => {
+      const need = new Set(targets);
+      const reqs = [
+        need.has("users") ? fetch("/api/users", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
+        need.has("master") ? fetch("/api/master", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
+        need.has("tasks") ? fetch("/api/tasks", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
+        need.has("partners") ? fetch("/api/partners", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
+        need.has("myVisibility") ? fetch("/api/user-visibility/me", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
+        need.has("visibilityRules") ? fetch("/api/visibility-rules", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
+        need.has("systemConfig") ? fetch("/api/system-config", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
+        need.has("invoices") ? fetch("/api/invoices", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
+        need.has("finance") ? fetch("/api/finance", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
+        need.has("payout") ? fetch("/api/payout", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
+      ] as const;
+      const [u, m, t, pt, vis, rulesRes, cfgRes, invRes, finRes, payoutRes] = await Promise.allSettled(reqs);
+      if (u.status === "fulfilled" && u.value && (u.value as { ok?: boolean }).ok)
+        setUsers(((u.value as { users?: User[] }).users) ?? []);
+      if (m.status === "fulfilled" && m.value && (m.value as { ok?: boolean }).ok)
+        setMasterList(((m.value as { list?: MasterRow[] }).list) ?? []);
+      if (t.status === "fulfilled" && t.value && (t.value as { ok?: boolean }).ok)
+        setTasks(((t.value as { tasks?: TaskRow[] }).tasks) ?? []);
+      if (pt.status === "fulfilled" && pt.value && (pt.value as { ok?: boolean }).ok) {
+        const ptVal = pt.value as { partners?: PartnerRow[]; partnersError?: string };
+        setPartners(ptVal.partners ?? []);
+        setPartnersLoadError(ptVal.partnersError ?? null);
+      }
+      if (vis.status === "fulfilled" && vis.value && (vis.value as { ok?: boolean }).ok) {
+        const v = vis.value as { tables?: string[]; columns?: Record<string, string[]> };
+        setMyVisibility({ tables: v.tables ?? [], columns: v.columns ?? {} });
+      }
+      if (rulesRes.status === "fulfilled" && rulesRes.value && (rulesRes.value as { ok?: boolean }).ok) {
+        const r = rulesRes.value as { rules?: Record<string, string[]> };
+        setVisibilityRules(r.rules ?? {});
+      }
+      if (cfgRes.status === "fulfilled" && cfgRes.value && (cfgRes.value as { ok?: boolean }).ok) {
+        const c = (cfgRes.value as { config?: { master_payout_defaults: Record<string, string>; project_types: string[]; role_visibility: Record<string, { sections: string[] }>; roles?: string[]; payout_dedupe_rules?: { mode_a: { roles: string[]; keep: string }[]; mode_b: { roles: string[]; keep: string }[] } } }).config;
+        if (c) setSystemConfig(c);
+      }
+      if (invRes.status === "fulfilled" && invRes.value && (invRes.value as { ok?: boolean }).ok)
+        setInvoices(((invRes.value as { invoices?: InvoiceRow[] }).invoices) ?? []);
+      if (finRes.status === "fulfilled" && finRes.value && (finRes.value as { ok?: boolean }).ok)
+        setFinance(((finRes.value as { finance?: Record<string, string | undefined>[] }).finance) ?? []);
+      if (payoutRes.status === "fulfilled" && payoutRes.value && (payoutRes.value as { ok?: boolean }).ok)
+        setPayoutList(((payoutRes.value as { list?: PayoutRow[] }).list) ?? []);
+    },
+    []
+  );
+
   useEffect(() => {
-    // 第一階段：只驗證登入，不依賴任何表格資料
     fetch("/api/auth/session", { credentials: "include", cache: "no-store" })
       .then(safeResJson)
-      .then((session) => {
+      .then(async (session) => {
         const sess = session as { ok?: boolean; user?: User };
         if (!sess.ok || !sess.user) {
           setError("請先登入");
@@ -859,56 +911,14 @@ export default function DashboardPage() {
           return;
         }
         setMe(sess.user);
-        // 第二階段：已登入後才拉取表格資料 + 可見範圍
         setLoading(false);
-        Promise.allSettled([
-          fetch("/api/users", { cache: "no-store" }).then(safeResJson),
-          fetch("/api/master", { cache: "no-store" }).then(safeResJson),
-          fetch("/api/tasks", { cache: "no-store" }).then(safeResJson),
-          fetch("/api/partners", { cache: "no-store" }).then(safeResJson),
-          fetch("/api/user-visibility/me", { cache: "no-store" }).then(safeResJson),
-          fetch("/api/visibility-rules", { cache: "no-store" }).then(safeResJson),
-          fetch("/api/system-config", { cache: "no-store" }).then(safeResJson),
-          fetch("/api/invoices", { cache: "no-store" }).then(safeResJson),
-          fetch("/api/finance", { cache: "no-store" }).then(safeResJson),
-          fetch("/api/payout", { cache: "no-store" }).then(safeResJson),
-        ]).then(([u, m, t, pt, vis, rulesRes, cfgRes, invRes, finRes, payoutRes]) => {
-          if (u.status === "fulfilled" && (u.value as { ok?: boolean }).ok)
-            setUsers(((u.value as { users?: User[] }).users) ?? []);
-          if (m.status === "fulfilled" && (m.value as { ok?: boolean }).ok)
-            setMasterList(((m.value as { list?: MasterRow[] }).list) ?? []);
-          if (t.status === "fulfilled" && (t.value as { ok?: boolean }).ok)
-            setTasks(((t.value as { tasks?: TaskRow[] }).tasks) ?? []);
-          if (pt.status === "fulfilled" && (pt.value as { ok?: boolean }).ok) {
-            const ptVal = pt.value as { partners?: PartnerRow[]; partnersError?: string };
-            setPartners(ptVal.partners ?? []);
-            setPartnersLoadError(ptVal.partnersError ?? null);
-          }
-          if (vis.status === "fulfilled" && (vis.value as { ok?: boolean }).ok) {
-            const v = vis.value as { tables?: string[]; columns?: Record<string, string[]> };
-            setMyVisibility({ tables: v.tables ?? [], columns: v.columns ?? {} });
-          }
-          if (rulesRes.status === "fulfilled" && (rulesRes.value as { ok?: boolean }).ok) {
-            const r = rulesRes.value as { rules?: Record<string, string[]> };
-            setVisibilityRules(r.rules ?? {});
-          }
-          if (cfgRes.status === "fulfilled" && (cfgRes.value as { ok?: boolean }).ok) {
-            const c = (cfgRes.value as { config?: { master_payout_defaults: Record<string, string>; project_types: string[]; role_visibility: Record<string, { sections: string[] }>; roles?: string[]; payout_dedupe_rules?: { mode_a: { roles: string[]; keep: string }[]; mode_b: { roles: string[]; keep: string }[] } } }).config;
-            if (c) setSystemConfig(c);
-          }
-          if (invRes.status === "fulfilled" && (invRes.value as { ok?: boolean }).ok)
-            setInvoices(((invRes.value as { invoices?: InvoiceRow[] }).invoices) ?? []);
-          if (finRes.status === "fulfilled" && (finRes.value as { ok?: boolean }).ok)
-            setFinance(((finRes.value as { finance?: Record<string, string | undefined>[] }).finance) ?? []);
-          if (payoutRes.status === "fulfilled" && (payoutRes.value as { ok?: boolean }).ok)
-            setPayoutList(((payoutRes.value as { list?: PayoutRow[] }).list) ?? []);
-        });
+        await refreshDashboardData();
       })
       .catch(() => {
         setError("無法驗證登入狀態，請重新登入");
         setLoading(false);
       });
-  }, []);
+  }, [refreshDashboardData]);
 
   if (loading) {
     return (
@@ -1120,9 +1130,7 @@ export default function DashboardPage() {
                               nextRv[role] = rv[role] ?? ROLE_VISIBILITY[role] ?? { sections: ["tasks"] };
                             }
                             await fetch("/api/system-config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "role_visibility", value: nextRv }) });
-                            const res2 = await fetch("/api/system-config", { cache: "no-store" }).then(safeResJson);
-                            const c2 = (res2 as { config?: { role_visibility: Record<string, { sections: string[] }> } }).config;
-                            if (c2) setSystemConfig((prev) => prev ? { ...prev, role_visibility: c2.role_visibility } : null);
+                            await refreshDashboardData(["systemConfig"]);
                           }
                         } finally {
                           setSavingRoles(false);
@@ -1152,7 +1160,10 @@ export default function DashboardPage() {
                             }
                             const res = await fetch("/api/system-config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "role_visibility", value: rv }) });
                             const data = (await safeResJson(res)) as { ok?: boolean; config?: { role_visibility: Record<string, { sections: string[] }> } };
-                            if (res.ok && data.ok && data.config) setSystemConfig((c) => c ? { ...c, role_visibility: data.config!.role_visibility } : null);
+                            if (res.ok && data.ok && data.config) {
+                              setSystemConfig((c) => c ? { ...c, role_visibility: data.config!.role_visibility } : null);
+                              await refreshDashboardData(["systemConfig"]);
+                            }
                           } catch {}
                           setSavingConfig(null);
                         }}
@@ -1723,7 +1734,10 @@ export default function DashboardPage() {
                       try {
                         const res = await fetch("/api/system-config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "master_payout_defaults", value: payoutDefaults }) });
                         const data = (await safeResJson(res)) as { ok?: boolean; config?: { master_payout_defaults: Record<string, string> } };
-                        if (res.ok && data.ok && data.config) setSystemConfig((c) => c ? { ...c, master_payout_defaults: data.config!.master_payout_defaults } : null);
+                        if (res.ok && data.ok && data.config) {
+                          setSystemConfig((c) => c ? { ...c, master_payout_defaults: data.config!.master_payout_defaults } : null);
+                          await refreshDashboardData(["systemConfig", "master", "payout", "finance"]);
+                        }
                       } catch {}
                       setSavingConfig(null);
                     }}
@@ -1792,8 +1806,10 @@ export default function DashboardPage() {
                           body: JSON.stringify({ key: "payout_dedupe_rules", value: payoutDedupeRules }),
                         });
                         const data = (await safeResJson(res)) as { ok?: boolean; config?: { payout_dedupe_rules?: { mode_a: { roles: string[]; keep: string }[]; mode_b: { roles: string[]; keep: string }[] } } };
-                        if (res.ok && data.ok && data.config)
+                        if (res.ok && data.ok && data.config) {
                           setSystemConfig((c) => (c ? { ...c, payout_dedupe_rules: data.config!.payout_dedupe_rules } : null));
+                          await refreshDashboardData(["systemConfig", "payout"]);
+                        }
                       } catch {}
                       setSavingConfig(null);
                     }}
@@ -1895,7 +1911,10 @@ export default function DashboardPage() {
                       try {
                         const res = await fetch("/api/system-config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "project_types", value: projectTypesOptions }) });
                         const data = (await safeResJson(res)) as { ok?: boolean; config?: { project_types: string[] } };
-                        if (res.ok && data.ok && data.config) setSystemConfig((c) => c ? { ...c, project_types: data.config!.project_types } : null);
+                        if (res.ok && data.ok && data.config) {
+                          setSystemConfig((c) => c ? { ...c, project_types: data.config!.project_types } : null);
+                          await refreshDashboardData(["systemConfig", "master"]);
+                        }
                       } catch {}
                       setSavingConfig(null);
                     }}
@@ -1945,6 +1964,7 @@ export default function DashboardPage() {
                         };
                         if (res.ok && data.ok && data.config) {
                           setSystemConfig((c) => (c ? { ...c, role_permissions: data.config!.role_permissions } : c));
+                          await refreshDashboardData(["systemConfig"]);
                         }
                       } catch {
                         /* ignore */
@@ -3975,6 +3995,7 @@ export default function DashboardPage() {
                     return;
                   }
                   setMasterList((prev) => [data.master!, ...prev]);
+                  await refreshDashboardData(["master", "payout", "finance"]);
                   setCreating(false);
                   setShowCreateMaster(false);
                 } catch (err: unknown) {
@@ -4495,6 +4516,7 @@ export default function DashboardPage() {
                         }
                         setMasterList((prev) => prev.map((r) => (r.id === data.master!.id ? data.master! : r)));
                         setSelectedMaster(data.master);
+                        await refreshDashboardData(["master", "payout", "finance"]);
                         setIsEditingMaster(false);
                         setSavingMaster(false);
                       } catch (err) {
@@ -4764,6 +4786,7 @@ export default function DashboardPage() {
                   }
                   setTasks((prev) => prev.map((x) => (x.任務ID === selectedTask.任務ID ? data.task! : x)));
                   setSelectedTask(data.task);
+                  await refreshDashboardData(["tasks"]);
                   setEditTaskForm({
                     任務名稱: data.task.任務 ?? "",
                     任務狀態: data.task.狀態 ?? "",
