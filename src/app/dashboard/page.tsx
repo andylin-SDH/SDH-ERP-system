@@ -613,10 +613,83 @@ export default function DashboardPage() {
       filterRowsBySearch(filteredTasks as unknown as Record<string, unknown>[], tasksVisibleCols, deferredTasksSearch) as unknown as TaskRow[],
     [filteredTasks, tasksVisibleCols, deferredTasksSearch, filterRowsBySearch]
   );
+
+  /** 分潤表：依 system_config 的 dedupe 規則在「顯示層」做一次去重（確保 UI 與規則永遠同步） */
+  const masterTypeByProjectId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const row of masterList) {
+      const pid = String(row.專案ID ?? "").trim();
+      if (!pid) continue;
+      m.set(pid, String(row.專案類型 ?? "").trim());
+    }
+    return m;
+  }, [masterList]);
+
+  const dedupedPayoutForDisplay = useMemo(() => {
+    const normalizeRecipient = (s: unknown): string =>
+      (s == null ? "" : String(s))
+        .normalize("NFKC")
+        .replace(/[\u200B-\u200D\uFEFF]/g, "") // zero-width
+        .replace(/\s+/g, "") // remove all whitespace
+        .trim();
+    const normalizeRoleType = (s: unknown): string => (s == null ? "" : String(s)).normalize("NFKC").trim();
+
+    if (!filteredPayout.length) return filteredPayout;
+    const hasRules = payoutDedupeRules && ((payoutDedupeRules.mode_a?.length ?? 0) + (payoutDedupeRules.mode_b?.length ?? 0) > 0);
+    if (!hasRules) return filteredPayout;
+
+    // 依專案ID分組再套用對應模式規則
+    const groupByPid = new Map<string, PayoutRow[]>();
+    const pidOrder: string[] = [];
+    for (const r of filteredPayout) {
+      const pid = String(r.專案ID ?? "").trim();
+      if (!pid) continue;
+      if (!groupByPid.has(pid)) {
+        groupByPid.set(pid, []);
+        pidOrder.push(pid);
+      }
+      groupByPid.get(pid)!.push(r);
+    }
+
+    const out: PayoutRow[] = [];
+    for (const pid of pidOrder) {
+      const rows = groupByPid.get(pid) ?? [];
+      const projectType = masterTypeByProjectId.get(pid) ?? "";
+      const isModeB = isPayoutModeB(projectType);
+      const rulesToApply = isModeB ? payoutDedupeRules.mode_b : payoutDedupeRules.mode_a;
+      if (!rulesToApply.length) {
+        out.push(...rows);
+        continue;
+      }
+
+      let result = [...rows];
+      for (const rule of rulesToApply) {
+        const roleSet = new Set((rule.roles ?? []).map(normalizeRoleType).filter(Boolean));
+        const keep = normalizeRoleType(rule.keep);
+        if (!keep || !roleSet.has(keep) || (rule.roles?.length ?? 0) < 2) continue;
+
+        result = result.filter((row) => {
+          const type = normalizeRoleType(row.分潤類型);
+          if (!roleSet.has(type)) return true;
+          const recipient = normalizeRecipient(row.領取人);
+          if (!recipient) return true;
+
+          const sameRecipient = result.filter(
+            (r) => roleSet.has(normalizeRoleType(r.分潤類型)) && normalizeRecipient(r.領取人) === recipient
+          );
+          if (sameRecipient.length < 2) return true;
+          return normalizeRoleType(row.分潤類型) === keep;
+        });
+      }
+      out.push(...result);
+    }
+    return out;
+  }, [filteredPayout, masterTypeByProjectId, payoutDedupeRules]);
+
   const searchedPayout = useMemo(
     () =>
-      filterRowsBySearch(filteredPayout as unknown as Record<string, unknown>[], payoutVisibleCols, deferredPayoutSearch) as unknown as PayoutRow[],
-    [filteredPayout, payoutVisibleCols, deferredPayoutSearch, filterRowsBySearch]
+      filterRowsBySearch(dedupedPayoutForDisplay as unknown as Record<string, unknown>[], payoutVisibleCols, deferredPayoutSearch) as unknown as PayoutRow[],
+    [dedupedPayoutForDisplay, payoutVisibleCols, deferredPayoutSearch, filterRowsBySearch]
   );
   const searchedFinance = useMemo(
     () => filterRowsBySearch(finance as unknown as Record<string, unknown>[], financeVisibleCols, deferredFinanceSearch),
