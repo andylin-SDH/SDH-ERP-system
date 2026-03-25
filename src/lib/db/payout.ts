@@ -153,10 +153,22 @@ export async function insertPayoutRows(rows: PayoutInsertRow[]): Promise<void> {
 
 type PayoutDefaults = Record<string, string>;
 
-/** 領取人比對用：去空白、Unicode 正規化，避免「同一人」因格式不同而無法合併 */
+/**
+ * 領取人比對用：去空白 + Unicode 正規化 + 移除常見不可見字元
+ * 目的：避免「同一人」因 NBSP/零寬字元/全半形差異導致去重失敗
+ */
 function normalizeRecipient(s: string | null | undefined): string {
   if (s == null) return "";
-  return String(s).trim().normalize("NFKC");
+  return String(s)
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "") // zero-width
+    .replace(/\s+/g, "") // all whitespace
+    .trim();
+}
+
+function normalizeRoleType(s: string | null | undefined): string {
+  if (!s) return "";
+  return String(s).normalize("NFKC").trim();
 }
 
 /**
@@ -169,17 +181,19 @@ function applyDedupeRules(
   if (rules.length === 0) return rows;
   let result = [...rows];
   for (const rule of rules) {
-    const roleSet = new Set(rule.roles);
-    if (!rule.keep || !roleSet.has(rule.keep) || rule.roles.length < 2) continue;
+    const roleSet = new Set(rule.roles.map(normalizeRoleType).filter(Boolean));
+    const keep = normalizeRoleType(rule.keep);
+    if (!keep || !roleSet.has(keep) || rule.roles.length < 2) continue;
     result = result.filter((row) => {
-      if (!roleSet.has(row.分潤類型)) return true;
+      const type = normalizeRoleType(row.分潤類型);
+      if (!roleSet.has(type)) return true;
       const recipient = normalizeRecipient(row.領取人);
       if (!recipient) return true;
       const sameRecipient = result.filter(
-        (r) => roleSet.has(r.分潤類型) && normalizeRecipient(r.領取人) === recipient
+        (r) => roleSet.has(normalizeRoleType(r.分潤類型)) && normalizeRecipient(r.領取人) === recipient
       );
       if (sameRecipient.length < 2) return true;
-      return row.分潤類型 === rule.keep;
+      return normalizeRoleType(row.分潤類型) === keep;
     });
   }
   return result;
