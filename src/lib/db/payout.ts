@@ -61,29 +61,65 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
 
   const list = (data ?? []).map((r) => rowToPayout(r as Record<string, unknown>));
 
-  // 舊資料可能尚未回填「專案營收」；讀取時用 專案ID 從大總表補值
-  const missingRevenueIds = [...new Set(list.filter((r) => !r.專案營收 && r.專案ID).map((r) => r.專案ID!))];
-  if (missingRevenueIds.length === 0) return list;
+  // 為了確保「系統設定分潤規則（同一人不重複）」立刻在分潤表 UI 生效，
+  // 讀取時就先做兩件事：
+  // 1) 用 專案ID 從大總表補回 專案營收 + 專案類型（決定模式 A/B）
+  // 2) 依模式套用 dedupe 規則後回傳結果（避免前端剛刷新仍看到舊資料）
+
+  const projectIds = [...new Set(list.map((r) => String(r.專案ID ?? "").trim()).filter(Boolean))];
+  if (projectIds.length === 0) return list;
 
   // NOTE: Supabase 的型別推斷在中文欄位 select 時可能出現 ParserError
   // 這裡用 any 來避免 build 失敗，實際 runtime 仍會回傳資料列
   const { data: masters, error: masterErr } = await (supabase as any)
     .from("大總表")
-    .select("專案ID, 專案營收")
-    .in("專案ID", missingRevenueIds);
+    .select("專案ID, 專案營收, 專案類型")
+    .in("專案ID", projectIds);
   if (masterErr) return list;
 
   const revenueByProjectId = new Map<string, string>();
+  const modeBByProjectId = new Map<string, boolean>();
   for (const m of masters ?? []) {
     const pid = String(m?.專案ID ?? "").trim();
     const revenue = String(m?.專案營收 ?? "").trim();
-    if (pid) revenueByProjectId.set(pid, revenue);
+    const projectType = String(m?.專案類型 ?? "").trim();
+    if (!pid) continue;
+    if (revenue) revenueByProjectId.set(pid, revenue);
+    modeBByProjectId.set(pid, isPayoutModeB(projectType));
   }
 
-  return list.map((r) => ({
+  const listWithRevenue = list.map((r) => ({
     ...r,
-    專案營收: r.專案營收 ?? (r.專案ID ? revenueByProjectId.get(r.專案ID) : undefined),
+    專案營收: r.專案營收 ?? (r.專案ID ? revenueByProjectId.get(String(r.專案ID).trim()) : undefined),
   }));
+
+  const { payout_dedupe_rules } = await getSystemConfig();
+  const dedupeRulesByMode = payout_dedupe_rules ?? { mode_a: [], mode_b: [] };
+
+  // 依「專案」分組後套用規則
+  const groupByPid = new Map<string, PayoutRow[]>();
+  const pidOrder: string[] = [];
+  for (const r of listWithRevenue) {
+    const pid = String(r.專案ID ?? "").trim();
+    if (!pid) continue;
+    if (!groupByPid.has(pid)) {
+      groupByPid.set(pid, []);
+      pidOrder.push(pid);
+    }
+    groupByPid.get(pid)!.push(r);
+  }
+
+  const out: PayoutRow[] = [];
+  for (const pid of pidOrder) {
+    const rows = groupByPid.get(pid) ?? [];
+    const isModeB = modeBByProjectId.get(pid) ?? false;
+    const rulesToApply = isModeB ? dedupeRulesByMode.mode_b : dedupeRulesByMode.mode_a;
+    // applyDedupeRules 只看「分潤類型/領取人」，PayoutRow 與 PayoutInsertRow 結構相容
+    const filtered = applyDedupeRules(rows as unknown as any, rulesToApply) as unknown as PayoutRow[];
+    out.push(...filtered);
+  }
+
+  return out;
 }
 
 /** 刪除某專案的所有分潤列 */
