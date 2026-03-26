@@ -83,12 +83,26 @@ export async function getSystemConfig(): Promise<{
       : [];
   const dedupeRules: PayoutDedupeRulesByMode =
     dedupeRaw && typeof dedupeRaw === "object" && !Array.isArray(dedupeRaw) && "mode_a" in dedupeRaw && "mode_b" in dedupeRaw
-      ? {
-          mode_a: normalizeDedupe((dedupeRaw as PayoutDedupeRulesByMode).mode_a),
-          mode_b: normalizeDedupe((dedupeRaw as PayoutDedupeRulesByMode).mode_b),
-        }
+      ? (() => {
+          const d = dedupeRaw as PayoutDedupeRulesByMode;
+          return {
+            ...DEFAULT_PAYOUT_DEDUPE_RULES,
+            mode_a: normalizeDedupe(d.mode_a),
+            mode_b: normalizeDedupe(d.mode_b),
+            mode_a_merge_same_recipient: Boolean(d.mode_a_merge_same_recipient),
+            mode_b_merge_same_recipient: Boolean(d.mode_b_merge_same_recipient),
+            mode_a_priority:
+              Array.isArray(d.mode_a_priority) && d.mode_a_priority.length > 0
+                ? d.mode_a_priority.map(String)
+                : [...DEFAULT_PAYOUT_DEDUPE_RULES.mode_a_priority!],
+            mode_b_priority:
+              Array.isArray(d.mode_b_priority) && d.mode_b_priority.length > 0
+                ? d.mode_b_priority.map(String)
+                : [...DEFAULT_PAYOUT_DEDUPE_RULES.mode_b_priority!],
+          };
+        })()
       : Array.isArray(dedupeRaw) && dedupeRaw.length > 0
-        ? { mode_a: [], mode_b: normalizeDedupe(dedupeRaw as PayoutDedupeRule[]) }
+        ? { ...DEFAULT_PAYOUT_DEDUPE_RULES, mode_a: [], mode_b: normalizeDedupe(dedupeRaw as PayoutDedupeRule[]) }
         : { ...DEFAULT_PAYOUT_DEDUPE_RULES };
 
   return {

@@ -10,9 +10,9 @@ import { isPayoutModeB } from "@/config/master-payout-defaults";
 import type { MasterRow } from "@/lib/db/master";
 import { getMasterList } from "@/lib/db/master";
 import { getPartners } from "@/lib/db/partners";
-import type { PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
+import { DEFAULT_PAYOUT_DEDUPE_RULES, type PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
 import { getSystemConfig } from "@/lib/db/system-config";
-import { applyDedupeRules } from "@/lib/payout-dedupe";
+import { applyDedupeRules, applySameRecipientOneRow } from "@/lib/payout-dedupe";
 
 export interface PayoutRow {
   id?: string;
@@ -95,7 +95,7 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
   }));
 
   const { payout_dedupe_rules } = await getSystemConfig();
-  const dedupeRulesByMode = payout_dedupe_rules ?? { mode_a: [], mode_b: [] };
+  const dedupeRulesByMode = payout_dedupe_rules ?? DEFAULT_PAYOUT_DEDUPE_RULES;
 
   // 依「專案」分組後套用規則
   const groupByPid = new Map<string, PayoutRow[]>();
@@ -115,9 +115,11 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
     const rows = groupByPid.get(pid) ?? [];
     const isModeB = modeBByProjectId.get(pid) ?? false;
     const rulesToApply = isModeB ? dedupeRulesByMode.mode_b : dedupeRulesByMode.mode_a;
-    // applyDedupeRules 只看「分潤類型/領取人」，PayoutRow 與 PayoutInsertRow 結構相容
     const filtered = applyDedupeRules(rows as unknown as any, rulesToApply) as unknown as PayoutRow[];
-    out.push(...filtered);
+    const mergeOn = isModeB ? dedupeRulesByMode.mode_b_merge_same_recipient : dedupeRulesByMode.mode_a_merge_same_recipient;
+    const pri = isModeB ? dedupeRulesByMode.mode_b_priority : dedupeRulesByMode.mode_a_priority;
+    const merged = applySameRecipientOneRow(filtered, Boolean(mergeOn), pri ?? []);
+    out.push(...merged);
   }
 
   return out;
@@ -160,7 +162,7 @@ type PayoutDefaults = Record<string, string>;
 export async function syncPayoutForProject(
   master: MasterRow,
   defaults: PayoutDefaults,
-  dedupeRules: PayoutDedupeRulesByMode = { mode_a: [], mode_b: [] }
+  dedupeRules: PayoutDedupeRulesByMode = DEFAULT_PAYOUT_DEDUPE_RULES
 ): Promise<void> {
   const 專案ID = master.專案ID ?? "";
   const 專案名稱 = master.專案名稱 ?? null;
@@ -243,7 +245,10 @@ export async function syncPayoutForProject(
 
   const rulesToApply = isPayoutModeB(專案類型) ? dedupeRules.mode_b : dedupeRules.mode_a;
   const filteredRows = applyDedupeRules(rows, rulesToApply);
-  if (filteredRows.length > 0) await insertPayoutRows(filteredRows);
+  const mergeOn = isPayoutModeB(專案類型) ? dedupeRules.mode_b_merge_same_recipient : dedupeRules.mode_a_merge_same_recipient;
+  const pri = isPayoutModeB(專案類型) ? dedupeRules.mode_b_priority : dedupeRules.mode_a_priority;
+  const finalRows = applySameRecipientOneRow(filteredRows, Boolean(mergeOn), pri ?? []);
+  if (finalRows.length > 0) await insertPayoutRows(finalRows);
 }
 
 /**
@@ -252,7 +257,7 @@ export async function syncPayoutForProject(
 export async function syncAllPayoutsFromMaster(): Promise<void> {
   const { master_payout_defaults, payout_dedupe_rules } = await getSystemConfig();
   const masters = await getMasterList();
-  const dedupe = payout_dedupe_rules ?? { mode_a: [], mode_b: [] };
+  const dedupe = payout_dedupe_rules ?? DEFAULT_PAYOUT_DEDUPE_RULES;
   for (const master of masters) {
     try {
       await syncPayoutForProject(master, master_payout_defaults, dedupe);

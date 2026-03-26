@@ -79,3 +79,50 @@ export function applyDedupeRules<T extends { 分潤類型?: string | null; 領�
   }
   return result;
 }
+
+/**
+ * 同一專案內、同一領取人若有多列分潤，只保留一列：依 priority 中分潤類型的順序（越前面越優先）。
+ * 未出現在 priority 的類型排在最後；同優先時保留在原始列中較早出現的那一列。
+ */
+export function applySameRecipientOneRow<T extends { 分潤類型?: string | null; 領取人?: string | null }>(
+  rows: T[],
+  enabled: boolean,
+  priority: string[]
+): T[] {
+  if (!enabled || rows.length <= 1) return rows;
+  const priorityIndex = new Map<string, number>();
+  priority.forEach((p, i) => {
+    const k = canonicalPayoutRoleKey(p);
+    if (k) priorityIndex.set(k, i);
+  });
+  const defaultRank = 9999;
+  const rank = (row: T) => priorityIndex.get(canonicalPayoutRoleKey(row.分潤類型)) ?? defaultRank;
+
+  const byRecipient = new Map<string, number[]>();
+  rows.forEach((row, i) => {
+    const key = normalizeRecipientForDedupe(row.領取人) || "__empty__";
+    if (!byRecipient.has(key)) byRecipient.set(key, []);
+    byRecipient.get(key)!.push(i);
+  });
+
+  const keep = new Set<number>();
+  for (const indices of byRecipient.values()) {
+    if (indices.length <= 1) {
+      indices.forEach((i) => keep.add(i));
+      continue;
+    }
+    let best = indices[0];
+    let bestR = rank(rows[best]);
+    for (let k = 1; k < indices.length; k++) {
+      const i = indices[k];
+      const r = rank(rows[i]);
+      if (r < bestR) {
+        bestR = r;
+        best = i;
+      }
+    }
+    keep.add(best);
+  }
+
+  return rows.filter((_, i) => keep.has(i));
+}

@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createMaster, getMasterList, updateMaster, type NewMasterInput, type UpdateMasterInput } from "@/lib/db/master";
+import { DEFAULT_PAYOUT_DEDUPE_RULES } from "@/config/payout-dedupe-defaults";
 import { getSystemConfig } from "@/lib/db/system-config";
 import { syncPayoutForProject } from "@/lib/db/payout";
 import { requireAdmin, requireAuth } from "@/lib/auth/api";
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
 
     const master = await createMaster(payload);
     try {
-      await syncPayoutForProject(master, master_payout_defaults, payout_dedupe_rules ?? { mode_a: [], mode_b: [] });
+      await syncPayoutForProject(master, master_payout_defaults, payout_dedupe_rules ?? DEFAULT_PAYOUT_DEDUPE_RULES);
     } catch (e) {
       console.error("syncPayoutForProject after POST /api/master", e);
     }
@@ -131,7 +132,7 @@ export async function PATCH(request: NextRequest) {
     if (master) {
       const { master_payout_defaults, payout_dedupe_rules } = await getSystemConfig();
       try {
-        await syncPayoutForProject(master, master_payout_defaults, payout_dedupe_rules ?? { mode_a: [], mode_b: [] });
+        await syncPayoutForProject(master, master_payout_defaults, payout_dedupe_rules ?? DEFAULT_PAYOUT_DEDUPE_RULES);
       } catch (e) {
         console.error("syncPayoutForProject after PATCH /api/master", e);
       }
