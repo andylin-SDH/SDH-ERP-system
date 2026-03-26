@@ -12,7 +12,7 @@ import { getMasterList } from "@/lib/db/master";
 import { getPartners } from "@/lib/db/partners";
 import { DEFAULT_PAYOUT_DEDUPE_RULES, type PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
 import { getSystemConfig } from "@/lib/db/system-config";
-import { applyDedupeRules, applySameRecipientOneRow } from "@/lib/payout-dedupe";
+import { applyDedupeRules } from "@/lib/payout-dedupe";
 
 export interface PayoutRow {
   id?: string;
@@ -116,10 +116,7 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
     const isModeB = modeBByProjectId.get(pid) ?? false;
     const rulesToApply = isModeB ? dedupeRulesByMode.mode_b : dedupeRulesByMode.mode_a;
     const filtered = applyDedupeRules(rows as unknown as any, rulesToApply) as unknown as PayoutRow[];
-    const mergeOn = isModeB ? dedupeRulesByMode.mode_b_merge_same_recipient : dedupeRulesByMode.mode_a_merge_same_recipient;
-    const pri = isModeB ? dedupeRulesByMode.mode_b_priority : dedupeRulesByMode.mode_a_priority;
-    const merged = applySameRecipientOneRow(filtered, Boolean(mergeOn), pri ?? []);
-    out.push(...merged);
+    out.push(...filtered);
   }
 
   return out;
@@ -245,10 +242,7 @@ export async function syncPayoutForProject(
 
   const rulesToApply = isPayoutModeB(專案類型) ? dedupeRules.mode_b : dedupeRules.mode_a;
   const filteredRows = applyDedupeRules(rows, rulesToApply);
-  const mergeOn = isPayoutModeB(專案類型) ? dedupeRules.mode_b_merge_same_recipient : dedupeRules.mode_a_merge_same_recipient;
-  const pri = isPayoutModeB(專案類型) ? dedupeRules.mode_b_priority : dedupeRules.mode_a_priority;
-  const finalRows = applySameRecipientOneRow(filteredRows, Boolean(mergeOn), pri ?? []);
-  if (finalRows.length > 0) await insertPayoutRows(finalRows);
+  if (filteredRows.length > 0) await insertPayoutRows(filteredRows);
 }
 
 /**

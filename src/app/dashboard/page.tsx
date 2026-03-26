@@ -9,7 +9,7 @@ import type { PartnerRow } from "@/modules/partners";
 import type { MasterRow } from "@/lib/db/master";
 import type { InvoiceRow } from "@/modules/finance";
 import type { PayoutRow } from "@/lib/db/payout";
-import { applyDedupeRules, applySameRecipientOneRow } from "@/lib/payout-dedupe";
+import { applyDedupeRules } from "@/lib/payout-dedupe";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
 import { PROJECT_TYPES } from "@/config/project-types";
 import { MASTER_PAYOUT_DEFAULTS, isPayoutModeB } from "@/config/master-payout-defaults";
@@ -636,10 +636,7 @@ export default function DashboardPage() {
     if (!filteredPayout.length) return filteredPayout;
     const anyPairwise =
       (payoutDedupeRules.mode_a?.length ?? 0) + (payoutDedupeRules.mode_b?.length ?? 0) > 0;
-    const anyMerge = Boolean(
-      payoutDedupeRules.mode_a_merge_same_recipient || payoutDedupeRules.mode_b_merge_same_recipient
-    );
-    if (!anyPairwise && !anyMerge) return filteredPayout;
+    if (!anyPairwise) return filteredPayout;
 
     const groupByPid = new Map<string, PayoutRow[]>();
     const pidOrder: string[] = [];
@@ -659,11 +656,8 @@ export default function DashboardPage() {
       const projectType = masterTypeByProjectId.get(pid) ?? "";
       const isModeB = isPayoutModeB(projectType);
       const rulesToApply = isModeB ? payoutDedupeRules.mode_b : payoutDedupeRules.mode_a;
-      const mergeOn = isModeB ? payoutDedupeRules.mode_b_merge_same_recipient : payoutDedupeRules.mode_a_merge_same_recipient;
-      const pri = isModeB ? payoutDedupeRules.mode_b_priority : payoutDedupeRules.mode_a_priority;
       let work = rows;
       if (rulesToApply.length) work = applyDedupeRules(work, rulesToApply);
-      work = applySameRecipientOneRow(work, Boolean(mergeOn), pri ?? []);
       out.push(...work);
     }
     return out;
@@ -1875,8 +1869,7 @@ export default function DashboardPage() {
                   </button>
                 </div>
                 <p className="mb-4 text-xs text-slate-500">
-                  可設定「成對角色」規則，或開啟「同一領取人只保留一列」並調整分潤類型優先序（皆存在{" "}
-                  <code className="text-slate-400">system_config</code> 的 <code className="text-slate-400">payout_dedupe_rules</code>，無須改資料表）。
+                  設定「成對角色」規則：當指定角色為同一人時，只保留你選擇的角色（例如「專案BDPM、專案管理員同一人時只計算專案BDPM」）。
                   點「儲存」後會依目前大總表<strong className="text-slate-400">自動重算並更新所有專案的分潤表</strong>。
                 </p>
 
@@ -1954,92 +1947,6 @@ export default function DashboardPage() {
                       >
                         新增
                       </button>
-                    </div>
-                    <div className="mt-3 rounded-lg border border-dashed border-white/10 bg-slate-900/30 p-3">
-                      <label className="flex cursor-pointer items-start gap-2">
-                        <input
-                          type="checkbox"
-                          className="mt-0.5 rounded border-white/20"
-                          checked={Boolean(
-                            mode === "mode_a"
-                              ? payoutDedupeRules.mode_a_merge_same_recipient
-                              : payoutDedupeRules.mode_b_merge_same_recipient
-                          )}
-                          onChange={(e) => {
-                            const field =
-                              mode === "mode_a" ? "mode_a_merge_same_recipient" : "mode_b_merge_same_recipient";
-                            setSystemConfig((c) => {
-                              const base =
-                                c ?? {
-                                  master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS },
-                                  project_types: [...PROJECT_TYPES],
-                                  role_visibility: {},
-                                };
-                              return { ...base, payout_dedupe_rules: { ...payoutDedupeRules, [field]: e.target.checked } };
-                            });
-                          }}
-                        />
-                        <span className="text-xs text-slate-300">
-                          同一專案內，同一領取人<strong className="text-amber-400/90">只保留一列分潤</strong>
-                          （先套用上方成對規則，再依下方「分潤類型」優先序保留一列）
-                        </span>
-                      </label>
-                      <p className="mb-2 mt-2 text-xs text-slate-500">分潤類型優先序（數字愈小愈優先；同順位保留較早出現的那一列）</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {(mode === "mode_a" ? payoutDedupeRules.mode_a_priority : payoutDedupeRules.mode_b_priority)?.map(
-                          (role, pi, arr) => (
-                            <span
-                              key={`${mode}-pri-${pi}-${role}`}
-                              className="inline-flex items-center gap-1 rounded-md bg-slate-800/80 px-2 py-1 text-xs text-slate-200"
-                            >
-                              <span className="tabular-nums text-slate-500">{pi + 1}</span>
-                              {role}
-                              <button
-                                type="button"
-                                className="text-slate-500 hover:text-amber-400 disabled:opacity-30"
-                                disabled={pi === 0}
-                                onClick={() => {
-                                  const key = mode === "mode_a" ? "mode_a_priority" : "mode_b_priority";
-                                  const list = [...(payoutDedupeRules[key] ?? [])];
-                                  [list[pi - 1], list[pi]] = [list[pi], list[pi - 1]];
-                                  setSystemConfig((c) => {
-                                    const base =
-                                      c ?? {
-                                        master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS },
-                                        project_types: [...PROJECT_TYPES],
-                                        role_visibility: {},
-                                      };
-                                    return { ...base, payout_dedupe_rules: { ...payoutDedupeRules, [key]: list } };
-                                  });
-                                }}
-                              >
-                                ↑
-                              </button>
-                              <button
-                                type="button"
-                                className="text-slate-500 hover:text-amber-400 disabled:opacity-30"
-                                disabled={pi >= arr.length - 1}
-                                onClick={() => {
-                                  const key = mode === "mode_a" ? "mode_a_priority" : "mode_b_priority";
-                                  const list = [...(payoutDedupeRules[key] ?? [])];
-                                  [list[pi], list[pi + 1]] = [list[pi + 1], list[pi]];
-                                  setSystemConfig((c) => {
-                                    const base =
-                                      c ?? {
-                                        master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS },
-                                        project_types: [...PROJECT_TYPES],
-                                        role_visibility: {},
-                                      };
-                                    return { ...base, payout_dedupe_rules: { ...payoutDedupeRules, [key]: list } };
-                                  });
-                                }}
-                              >
-                                ↓
-                              </button>
-                            </span>
-                          )
-                        )}
-                      </div>
                     </div>
                   </div>
                 ))}
