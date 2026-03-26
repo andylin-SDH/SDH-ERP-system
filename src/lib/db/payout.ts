@@ -10,8 +10,9 @@ import { isPayoutModeB } from "@/config/master-payout-defaults";
 import type { MasterRow } from "@/lib/db/master";
 import { getMasterList } from "@/lib/db/master";
 import { getPartners } from "@/lib/db/partners";
-import type { PayoutDedupeRule, PayoutDedupeRulesByMode } from "@/lib/db/system-config";
+import type { PayoutDedupeRulesByMode } from "@/lib/db/system-config";
 import { getSystemConfig } from "@/lib/db/system-config";
+import { applyDedupeRules } from "@/lib/payout-dedupe";
 
 export interface PayoutRow {
   id?: string;
@@ -152,52 +153,6 @@ export async function insertPayoutRows(rows: PayoutInsertRow[]): Promise<void> {
 }
 
 type PayoutDefaults = Record<string, string>;
-
-/**
- * 領取人比對用：去空白 + Unicode 正規化 + 移除常見不可見字元
- * 目的：避免「同一人」因 NBSP/零寬字元/全半形差異導致去重失敗
- */
-function normalizeRecipient(s: string | null | undefined): string {
-  if (s == null) return "";
-  return String(s)
-    .normalize("NFKC")
-    .replace(/[\u200B-\u200D\uFEFF]/g, "") // zero-width
-    .replace(/\s+/g, "") // all whitespace
-    .trim();
-}
-
-function normalizeRoleType(s: string | null | undefined): string {
-  if (!s) return "";
-  return String(s).normalize("NFKC").trim();
-}
-
-/**
- * 套用「同一人不重複計算」規則：當多角色為同一人時，只保留指定角色
- */
-function applyDedupeRules(
-  rows: PayoutInsertRow[],
-  rules: PayoutDedupeRule[]
-): PayoutInsertRow[] {
-  if (rules.length === 0) return rows;
-  let result = [...rows];
-  for (const rule of rules) {
-    const roleSet = new Set(rule.roles.map(normalizeRoleType).filter(Boolean));
-    const keep = normalizeRoleType(rule.keep);
-    if (!keep || !roleSet.has(keep) || rule.roles.length < 2) continue;
-    result = result.filter((row) => {
-      const type = normalizeRoleType(row.分潤類型);
-      if (!roleSet.has(type)) return true;
-      const recipient = normalizeRecipient(row.領取人);
-      if (!recipient) return true;
-      const sameRecipient = result.filter(
-        (r) => roleSet.has(normalizeRoleType(r.分潤類型)) && normalizeRecipient(r.領取人) === recipient
-      );
-      if (sameRecipient.length < 2) return true;
-      return normalizeRoleType(row.分潤類型) === keep;
-    });
-  }
-  return result;
-}
 
 /**
  * 依大總表一筆專案與成數預設，產生分潤列並同步至分潤表（先刪該專案舊列再插入）

@@ -9,6 +9,7 @@ import type { PartnerRow } from "@/modules/partners";
 import type { MasterRow } from "@/lib/db/master";
 import type { InvoiceRow } from "@/modules/finance";
 import type { PayoutRow } from "@/lib/db/payout";
+import { applyDedupeRules } from "@/lib/payout-dedupe";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
 import { PROJECT_TYPES } from "@/config/project-types";
 import { MASTER_PAYOUT_DEFAULTS, isPayoutModeB } from "@/config/master-payout-defaults";
@@ -626,19 +627,10 @@ export default function DashboardPage() {
   }, [masterList]);
 
   const dedupedPayoutForDisplay = useMemo(() => {
-    const normalizeRecipient = (s: unknown): string =>
-      (s == null ? "" : String(s))
-        .normalize("NFKC")
-        .replace(/[\u200B-\u200D\uFEFF]/g, "") // zero-width
-        .replace(/\s+/g, "") // remove all whitespace
-        .trim();
-    const normalizeRoleType = (s: unknown): string => (s == null ? "" : String(s)).normalize("NFKC").trim();
-
     if (!filteredPayout.length) return filteredPayout;
     const hasRules = payoutDedupeRules && ((payoutDedupeRules.mode_a?.length ?? 0) + (payoutDedupeRules.mode_b?.length ?? 0) > 0);
     if (!hasRules) return filteredPayout;
 
-    // 依專案ID分組再套用對應模式規則
     const groupByPid = new Map<string, PayoutRow[]>();
     const pidOrder: string[] = [];
     for (const r of filteredPayout) {
@@ -661,27 +653,7 @@ export default function DashboardPage() {
         out.push(...rows);
         continue;
       }
-
-      let result = [...rows];
-      for (const rule of rulesToApply) {
-        const roleSet = new Set((rule.roles ?? []).map(normalizeRoleType).filter(Boolean));
-        const keep = normalizeRoleType(rule.keep);
-        if (!keep || !roleSet.has(keep) || (rule.roles?.length ?? 0) < 2) continue;
-
-        result = result.filter((row) => {
-          const type = normalizeRoleType(row.分潤類型);
-          if (!roleSet.has(type)) return true;
-          const recipient = normalizeRecipient(row.領取人);
-          if (!recipient) return true;
-
-          const sameRecipient = result.filter(
-            (r) => roleSet.has(normalizeRoleType(r.分潤類型)) && normalizeRecipient(r.領取人) === recipient
-          );
-          if (sameRecipient.length < 2) return true;
-          return normalizeRoleType(row.分潤類型) === keep;
-        });
-      }
-      out.push(...result);
+      out.push(...applyDedupeRules(rows, rulesToApply));
     }
     return out;
   }, [filteredPayout, masterTypeByProjectId, payoutDedupeRules]);

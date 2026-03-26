@@ -20,5 +20,9 @@ export const MASTER_PAYOUT_DEFAULTS = {
 export const PAYOUT_MODE_B_PROJECT_TYPES = ["廣告業配"] as const;
 
 export function isPayoutModeB(projectType: string): boolean {
-  return (PAYOUT_MODE_B_PROJECT_TYPES as readonly string[]).includes(projectType);
+  const t = String(projectType ?? "")
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim();
+  return (PAYOUT_MODE_B_PROJECT_TYPES as readonly string[]).includes(t);
 }
