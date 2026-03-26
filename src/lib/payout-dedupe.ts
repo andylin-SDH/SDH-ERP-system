@@ -3,7 +3,7 @@
  * 舊資料可能用「角色」欄、或僅寫 BDPM／管理員，需與系統設定規則內的正式名稱對齊。
  */
 
-import type { PayoutDedupeRule } from "@/lib/db/system-config";
+import type { PayoutDedupeRule } from "@/config/payout-dedupe-defaults";
 
 /** 去除空白後比對用的鍵（中英混合：只壓縮空白，不改變大小寫以外的中文） */
 function compactRoleKey(s: string): string {

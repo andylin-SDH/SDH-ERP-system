@@ -8,15 +8,17 @@ import { MASTER_PAYOUT_DEFAULTS } from "@/config/master-payout-defaults";
 import { PROJECT_TYPES } from "@/config/project-types";
 import { ROLES, ROLE_VISIBILITY } from "@/config/role-visibility";
 import type { RoleVisibilityConfig } from "@/config/role-visibility";
+import {
+  DEFAULT_PAYOUT_DEDUPE_RULES,
+  type PayoutDedupeRule,
+  type PayoutDedupeRulesByMode,
+} from "@/config/payout-dedupe-defaults";
 
 export type PayoutDefaults = Record<string, string>;
 export type ProjectTypes = string[];
 export type RoleVisibility = Record<string, { sections: string[]; fullAccess?: boolean }>;
 
-/** 分潤規則：當多個角色為同一人時，只保留指定角色 */
-export type PayoutDedupeRule = { roles: string[]; keep: string };
-
-export type PayoutDedupeRulesByMode = { mode_a: PayoutDedupeRule[]; mode_b: PayoutDedupeRule[] };
+export type { PayoutDedupeRule, PayoutDedupeRulesByMode };
 
 export type RolePermissions = {
   master: {
@@ -38,11 +40,7 @@ function getDefaultRolePermissions(roles: string[]): RolePermissions {
   };
 }
 
-/** 預設分潤規則：模式 B 經紀人與主管同一人時只算經紀人 */
-export const DEFAULT_PAYOUT_DEDUPE_RULES: PayoutDedupeRulesByMode = {
-  mode_a: [],
-  mode_b: [{ roles: ["經紀人", "主管"], keep: "經紀人" }],
-};
+export { DEFAULT_PAYOUT_DEDUPE_RULES };
 
 export async function getSystemConfig(): Promise<{
   master_payout_defaults: PayoutDefaults;

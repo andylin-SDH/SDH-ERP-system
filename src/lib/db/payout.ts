@@ -10,7 +10,7 @@ import { isPayoutModeB } from "@/config/master-payout-defaults";
 import type { MasterRow } from "@/lib/db/master";
 import { getMasterList } from "@/lib/db/master";
 import { getPartners } from "@/lib/db/partners";
-import type { PayoutDedupeRulesByMode } from "@/lib/db/system-config";
+import type { PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
 import { getSystemConfig } from "@/lib/db/system-config";
 import { applyDedupeRules } from "@/lib/payout-dedupe";
 

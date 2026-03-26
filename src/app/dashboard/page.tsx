@@ -13,6 +13,7 @@ import { applyDedupeRules } from "@/lib/payout-dedupe";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
 import { PROJECT_TYPES } from "@/config/project-types";
 import { MASTER_PAYOUT_DEFAULTS, isPayoutModeB } from "@/config/master-payout-defaults";
+import { DEFAULT_PAYOUT_DEDUPE_RULES } from "@/config/payout-dedupe-defaults";
 import { TABLE_KEYS, TABLE_LABELS, TABLE_COLUMNS } from "@/config/table-columns";
 import { SocialLinkIcons } from "@/components/SocialLinkIcons";
 import { PARTNER_STATUS, isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
@@ -355,14 +356,15 @@ export default function DashboardPage() {
     return byTable;
   }, []);
 
-  /** 分潤規則：分模式 A/B，當多角色為同一人時只算一個 */
-  const payoutDedupeRules = useMemo(
-    () =>
-      systemConfig?.payout_dedupe_rules?.mode_a !== undefined && systemConfig?.payout_dedupe_rules?.mode_b !== undefined
-        ? systemConfig.payout_dedupe_rules
-        : { mode_a: [] as { roles: string[]; keep: string }[], mode_b: [{ roles: ["經紀人", "主管"], keep: "經紀人" }] },
-    [systemConfig?.payout_dedupe_rules]
-  );
+  /** 分潤規則：分模式 A/B；與後端預設合併，避免只更新單一欄位時遺失 mode_a / mode_b */
+  const payoutDedupeRules = useMemo(() => {
+    const raw = systemConfig?.payout_dedupe_rules;
+    if (!raw) return DEFAULT_PAYOUT_DEDUPE_RULES;
+    return {
+      mode_a: raw.mode_a ?? DEFAULT_PAYOUT_DEDUPE_RULES.mode_a,
+      mode_b: raw.mode_b ?? DEFAULT_PAYOUT_DEDUPE_RULES.mode_b,
+    };
+  }, [systemConfig?.payout_dedupe_rules]);
 
   /** 角色列表：優先使用系統設定（DB），無則用 config 預設；與「角色管理」「新增使用者」下拉一致 */
   const displayRoles = useMemo(
