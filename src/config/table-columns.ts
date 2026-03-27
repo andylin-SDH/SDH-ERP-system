@@ -70,6 +70,8 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "專案名稱", label: "專案名稱" },
     { key: "專案總金額未稅", label: "專案總金額未稅" },
     { key: "專案營收", label: "專案營收" },
+    { key: "專案入帳日期", label: "專案入帳日期" },
+    { key: "分潤匯款日期", label: "分潤匯款日期" },
     { key: "分潤類型", label: "分潤類型" },
     { key: "分潤成數", label: "分潤成數" },
     { key: "分潤金額", label: "分潤金額" },

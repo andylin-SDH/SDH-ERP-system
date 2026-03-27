@@ -42,9 +42,10 @@ const PAYOUT_DISPLAY_ORDER = [
   "分潤金額",
   "分潤成數",
   "專案名稱",
-  "專案ID",
   "專案營收",
   "專案總金額未稅",
+  "專案入帳日期",
+  "分潤匯款日期",
   "分潤類型",
   "領取人",
 ] as const;
@@ -322,6 +323,7 @@ export default function DashboardPage() {
   const [partnersSearch, setPartnersSearch] = useState("");
   const [tasksSearch, setTasksSearch] = useState("");
   const [payoutSearch, setPayoutSearch] = useState("");
+  const [payoutProjectFilter, setPayoutProjectFilter] = useState("");
   const [financeSearch, setFinanceSearch] = useState("");
   const [invoicesSearch, setInvoicesSearch] = useState("");
   /** 大資料量時分段渲染，降低首屏與互動卡頓 */
@@ -587,7 +589,10 @@ export default function DashboardPage() {
   );
   const payoutVisibleCols = useMemo(() => getVisibleColumnKeys("payout"), [getVisibleColumnKeys]);
   /** 分潤表實際欄順序：與權限／可見欄位一致，但全角色統一為「分潤金額優先」 */
-  const payoutColsForDisplay = useMemo(() => sortPayoutColumnsForDisplay(payoutVisibleCols), [payoutVisibleCols]);
+  const payoutColsForDisplay = useMemo(
+    () => sortPayoutColumnsForDisplay(payoutVisibleCols).filter((k) => k !== "專案ID"),
+    [payoutVisibleCols]
+  );
   const financeVisibleCols = useMemo(() => getVisibleColumnKeys("finance"), [getVisibleColumnKeys]);
   const invoicesVisibleCols = useMemo(() => getVisibleColumnKeys("invoices"), [getVisibleColumnKeys]);
 
@@ -663,10 +668,21 @@ export default function DashboardPage() {
     return out;
   }, [filteredPayout, masterTypeByProjectId, payoutDedupeRules]);
 
+  const payoutProjectOptions = useMemo(() => {
+    return [...new Set(dedupedPayoutForDisplay.map((r) => String(r.專案ID ?? "").trim()).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b, "zh-TW")
+    );
+  }, [dedupedPayoutForDisplay]);
+
+  const projectFilteredPayout = useMemo(() => {
+    if (!payoutProjectFilter) return dedupedPayoutForDisplay;
+    return dedupedPayoutForDisplay.filter((r) => String(r.專案ID ?? "").trim() === payoutProjectFilter);
+  }, [dedupedPayoutForDisplay, payoutProjectFilter]);
+
   const searchedPayout = useMemo(
     () =>
-      filterRowsBySearch(dedupedPayoutForDisplay as unknown as Record<string, unknown>[], payoutVisibleCols, deferredPayoutSearch) as unknown as PayoutRow[],
-    [dedupedPayoutForDisplay, payoutVisibleCols, deferredPayoutSearch, filterRowsBySearch]
+      filterRowsBySearch(projectFilteredPayout as unknown as Record<string, unknown>[], payoutVisibleCols, deferredPayoutSearch) as unknown as PayoutRow[],
+    [projectFilteredPayout, payoutVisibleCols, deferredPayoutSearch, filterRowsBySearch]
   );
   const searchedFinance = useMemo(
     () => filterRowsBySearch(finance as unknown as Record<string, unknown>[], financeVisibleCols, deferredFinanceSearch),
@@ -3756,13 +3772,27 @@ export default function DashboardPage() {
         <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-xl font-bold tracking-tight text-white">分潤表</h2>
-            <input
-              type="text"
-              value={payoutSearch}
-              onChange={(e) => setPayoutSearch(e.target.value)}
-              placeholder="搜尋專案ID、類型、領取人…"
-              className="w-full min-w-0 max-w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
-            />
+            <div className="flex w-full min-w-0 flex-wrap justify-end gap-2">
+              <select
+                value={payoutProjectFilter}
+                onChange={(e) => setPayoutProjectFilter(e.target.value)}
+                className="w-full min-w-0 max-w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 focus:border-amber-500/60 focus:outline-none"
+              >
+                <option value="">全部專案ID</option>
+                {payoutProjectOptions.map((pid) => (
+                  <option key={pid} value={pid}>
+                    {pid}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={payoutSearch}
+                onChange={(e) => setPayoutSearch(e.target.value)}
+                placeholder="搜尋類型、領取人、日期…"
+                className="w-full min-w-0 max-w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
+              />
+            </div>
           </div>
           {filteredPayout.length === 0 ? (
             <p className="rounded-xl border border-white/10 px-4 py-8 text-center text-slate-500">尚無分潤表資料</p>
@@ -3780,7 +3810,7 @@ export default function DashboardPage() {
                     const showAmt = payoutVisibleCols.includes("分潤金額");
                     const showPct = payoutVisibleCols.includes("分潤成數");
                     const showTitle = payoutVisibleCols.includes("專案名稱");
-                    const detailKeys = ["專案ID", "專案營收", "專案總金額未稅", "分潤類型", "領取人"] as const;
+                    const detailKeys = ["專案營收", "專案總金額未稅", "專案入帳日期", "分潤匯款日期", "分潤類型", "領取人"] as const;
                     const hasExpandable = detailKeys.some((k) => payoutVisibleCols.includes(k));
                     return (
                       <div key={cardKey} className="rounded-xl border border-white/10 bg-slate-800/40 p-4">
@@ -3819,14 +3849,17 @@ export default function DashboardPage() {
                             </button>
                             {isExpanded && (
                               <div className="mt-2 space-y-1 rounded-lg bg-slate-900/50 px-3 py-2 text-xs text-slate-400">
-                                {payoutVisibleCols.includes("專案ID") && (
-                                  <p><span className="text-slate-500">專案ID</span> {String(r.專案ID ?? "—")}</p>
-                                )}
                                 {payoutVisibleCols.includes("專案營收") && (
                                   <p><span className="text-slate-500">專案營收</span> {formatAmount(String(r.專案營收 ?? ""))}</p>
                                 )}
                                 {payoutVisibleCols.includes("專案總金額未稅") && (
                                   <p><span className="text-slate-500">專案總金額未稅</span> {formatAmount(String(r.專案總金額未稅 ?? ""))}</p>
+                                )}
+                                {payoutVisibleCols.includes("專案入帳日期") && (
+                                  <p><span className="text-slate-500">專案入帳日期</span> {String(r.專案入帳日期 ?? "—")}</p>
+                                )}
+                                {payoutVisibleCols.includes("分潤匯款日期") && (
+                                  <p><span className="text-slate-500">分潤匯款日期</span> {String(r.分潤匯款日期 ?? "—")}</p>
                                 )}
                                 {payoutVisibleCols.includes("分潤類型") && (
                                   <p><span className="text-slate-500">分潤類型</span> {String(r.分潤類型 ?? "—")}</p>

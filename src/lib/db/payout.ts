@@ -20,6 +20,8 @@ export interface PayoutRow {
   專案名稱?: string;
   專案總金額未稅?: string;
   專案營收?: string;
+  專案入帳日期?: string;
+  分潤匯款日期?: string;
   分潤類型?: string;
   分潤成數?: string;
   分潤金額?: string;
@@ -35,6 +37,8 @@ function rowToPayout(r: Record<string, unknown>): PayoutRow {
     專案名稱: (r.專案名稱 ?? r.project_name) as string | undefined,
     專案總金額未稅: (r.專案總金額未稅 ?? r.total_amount) as string | undefined,
      專案營收: (r.專案營收 ?? r.project_revenue) as string | undefined,
+    專案入帳日期: (r.專案入帳日期 ?? r.project_received_date) as string | undefined,
+    分潤匯款日期: (r.分潤匯款日期 ?? r.payout_remit_date) as string | undefined,
     分潤類型: (r.分潤類型 ?? r.角色 ?? r.payout_type) as string | undefined,
     分潤成數: (r.分潤成數 ?? r.payout_rate) as string | undefined,
     分潤金額: (r.分潤金額 ?? r.payout_amount) as string | undefined,
@@ -138,6 +142,8 @@ export interface PayoutInsertRow {
   專案名稱: string | null;
   專案總金額未稅: string | null;
   專案營收: string | null;
+  專案入帳日期: string | null;
+  分潤匯款日期: string | null;
   分潤類型: string;
   分潤成數: string | null;
   分潤金額: string | null;
@@ -182,6 +188,8 @@ export async function syncPayoutForProject(
         專案名稱,
         專案總金額未稅,
         專案營收,
+        專案入帳日期: null,
+        分潤匯款日期: null,
         分潤類型: "專案引薦人",
         分潤成數: defaults.專案引薦人分潤成數 ?? null,
         分潤金額: String(Math.round(amount * rate引薦人)),
@@ -205,6 +213,8 @@ export async function syncPayoutForProject(
         專案名稱,
         專案總金額未稅,
         專案營收,
+        專案入帳日期: null,
+        分潤匯款日期: null,
         分潤類型,
         分潤成數: defaults[key] ?? null,
         分潤金額: String(Math.round(amount * rate)),
@@ -232,6 +242,8 @@ export async function syncPayoutForProject(
         專案名稱,
         專案總金額未稅,
         專案營收,
+        專案入帳日期: null,
+        分潤匯款日期: null,
         分潤類型,
         分潤成數: rateStr ?? null,
         分潤金額: String(Math.round(amount * rate)),
