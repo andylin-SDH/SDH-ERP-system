@@ -10,6 +10,7 @@ import { createMaster, getMasterList, updateMaster, type NewMasterInput, type Up
 import { DEFAULT_PAYOUT_DEDUPE_RULES } from "@/config/payout-dedupe-defaults";
 import { getSystemConfig } from "@/lib/db/system-config";
 import { syncPayoutForProject } from "@/lib/db/payout";
+import { syncFinanceForProject } from "@/lib/db/finance";
 import { requireAdmin, requireAuth } from "@/lib/auth/api";
 
 export async function GET(request: NextRequest) {
@@ -73,6 +74,7 @@ export async function POST(request: NextRequest) {
     const master = await createMaster(payload);
     try {
       await syncPayoutForProject(master, master_payout_defaults, payout_dedupe_rules ?? DEFAULT_PAYOUT_DEDUPE_RULES);
+      await syncFinanceForProject(master);
     } catch (e) {
       console.error("syncPayoutForProject after POST /api/master", e);
     }
@@ -133,6 +135,7 @@ export async function PATCH(request: NextRequest) {
       const { master_payout_defaults, payout_dedupe_rules } = await getSystemConfig();
       try {
         await syncPayoutForProject(master, master_payout_defaults, payout_dedupe_rules ?? DEFAULT_PAYOUT_DEDUPE_RULES);
+        await syncFinanceForProject(master);
       } catch (e) {
         console.error("syncPayoutForProject after PATCH /api/master", e);
       }

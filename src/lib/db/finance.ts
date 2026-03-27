@@ -4,6 +4,66 @@
 
 import { getSupabase } from "@/lib/supabase/server";
 import type { FinanceRow, InvoiceRow } from "@/modules/finance/types";
+import type { MasterRow } from "@/lib/db/master";
+import { getMasterList } from "@/lib/db/master";
+
+function parseAmount(value: string | null | undefined): number {
+  const n = Number(String(value ?? "").trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
+function hasFinanceAmount(master: MasterRow): boolean {
+  return (
+    parseAmount(master.專案總金額未稅) !== 0 ||
+    parseAmount(master.專案營收) !== 0 ||
+    parseAmount(master.專案成本) !== 0 ||
+    parseAmount(master.KOL費用未稅) !== 0
+  );
+}
+
+export async function syncFinanceForProject(master: MasterRow): Promise<void> {
+  const 專案ID = String(master.專案ID ?? "").trim();
+  if (!專案ID || !hasFinanceAmount(master)) return;
+
+  const supabase = getSupabase();
+  const payload = {
+    專案總金額未稅: master.專案總金額未稅 ?? null,
+    專案成本: master.專案成本 ?? null,
+  };
+
+  const { data: exists, error: qErr } = await supabase
+    .from("財務")
+    .select("id")
+    .eq("專案ID", 專案ID)
+    .limit(1);
+  if (qErr) {
+    if (qErr.code === "42P01") return;
+    throw qErr;
+  }
+
+  if ((exists ?? []).length > 0) {
+    const { error } = await supabase.from("財務").update(payload).eq("專案ID", 專案ID);
+    if (error) throw error;
+    return;
+  }
+
+  const { error } = await supabase.from("財務").insert({
+    專案ID,
+    ...payload,
+  });
+  if (error) throw error;
+}
+
+export async function syncAllFinanceFromMaster(): Promise<void> {
+  const masters = await getMasterList();
+  for (const master of masters) {
+    try {
+      await syncFinanceForProject(master);
+    } catch {
+      // keep going: sync best effort
+    }
+  }
+}
 
 export async function getInvoices(): Promise<InvoiceRow[]> {
   const { data, error } = await getSupabase()
