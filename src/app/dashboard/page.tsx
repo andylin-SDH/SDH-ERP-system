@@ -43,6 +43,9 @@ const PAYOUT_DISPLAY_ORDER = [
   "分潤成數",
   "專案名稱",
   "專案ID",
+  "專案預計匯款日",
+  "專案實際入帳日期",
+  "分潤匯款日期",
   "專案營收",
   "專案總金額未稅",
   "分潤類型",
@@ -3780,7 +3783,7 @@ export default function DashboardPage() {
                     const showAmt = payoutVisibleCols.includes("分潤金額");
                     const showPct = payoutVisibleCols.includes("分潤成數");
                     const showTitle = payoutVisibleCols.includes("專案名稱");
-                    const detailKeys = ["專案ID", "專案營收", "專案總金額未稅", "分潤類型", "領取人"] as const;
+                    const detailKeys = ["專案ID", "專案預計匯款日", "專案實際入帳日期", "分潤匯款日期", "專案營收", "專案總金額未稅", "分潤類型", "領取人"] as const;
                     const hasExpandable = detailKeys.some((k) => payoutVisibleCols.includes(k));
                     return (
                       <div key={cardKey} className="rounded-xl border border-white/10 bg-slate-800/40 p-4">
@@ -3827,6 +3830,15 @@ export default function DashboardPage() {
                                 )}
                                 {payoutVisibleCols.includes("專案總金額未稅") && (
                                   <p><span className="text-slate-500">專案總金額未稅</span> {formatAmount(String(r.專案總金額未稅 ?? ""))}</p>
+                                )}
+                                {payoutVisibleCols.includes("專案預計匯款日") && (
+                                  <p><span className="text-slate-500">專案預計匯款日</span> {String(r.專案預計匯款日 ?? "—")}</p>
+                                )}
+                                {payoutVisibleCols.includes("專案實際入帳日期") && (
+                                  <p><span className="text-slate-500">專案實際入帳日期</span> {String(r.專案實際入帳日期 ?? "—")}</p>
+                                )}
+                                {payoutVisibleCols.includes("分潤匯款日期") && (
+                                  <p><span className="text-slate-500">分潤匯款日期</span> {String(r.分潤匯款日期 ?? "—")}</p>
                                 )}
                                 {payoutVisibleCols.includes("分潤類型") && (
                                   <p><span className="text-slate-500">分潤類型</span> {String(r.分潤類型 ?? "—")}</p>
