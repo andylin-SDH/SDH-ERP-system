@@ -39,10 +39,16 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "KOL名稱", label: "KOL名稱" },
     { key: "專案費用類型", label: "專案費用類型" },
     { key: "廠商名稱", label: "廠商名稱" },
-    { key: "專案BDPM", label: "專案BDPM" },
+    /** 模式 A/B 共用；模式 B 另見經紀人／主管／KOL開發者（由合作夥伴帶出） */
     { key: "專案引薦人", label: "專案引薦人" },
-    { key: "專案管理員", label: "專案管理員" },
-    { key: "執行管理員", label: "執行管理員" },
+    /** 分潤模式 A（製作案、活動案等） */
+    { key: "專案BDPM", label: "專案BDPM（製作/活動）" },
+    { key: "專案管理員", label: "專案管理員（製作/活動）" },
+    { key: "執行管理員", label: "執行管理員（製作/活動）" },
+    /** 分潤模式 B（廣告業配）：與合作夥伴同 KOL 名稱之列對應 */
+    { key: "經紀人", label: "經紀人（廣告業配）" },
+    { key: "主管", label: "主管（廣告業配）" },
+    { key: "KOL開發者", label: "KOL開發者（廣告業配）" },
   ],
   partners: [
     { key: "PartnerID", label: "PartnerID" },

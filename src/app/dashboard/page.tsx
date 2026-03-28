@@ -119,14 +119,51 @@ function fieldMatchesUser(val: string | null | undefined, userName: string, user
   return v === userName || v === userEmail;
 }
 
-function isMasterRowRelatedToUser(row: MasterRow, userName: string, userEmail: string, projectIdsFromMyTasks: Set<string>): boolean {
+function isMasterRowRelatedToUser(
+  row: MasterRow,
+  userName: string,
+  userEmail: string,
+  projectIdsFromMyTasks: Set<string>,
+  partnerByKolName: Map<string, PartnerRow>
+): boolean {
   if (!userName && !userEmail) return false;
+  if (fieldMatchesUser(row.專案引薦人, userName, userEmail)) return true;
+
+  if (isPayoutModeB(String(row.專案類型 ?? ""))) {
+    const p = partnerByKolName.get(String(row.KOL名稱 ?? "").trim());
+    if (p) {
+      for (const key of ["經紀人", "主管", "KOL開發者"] as const) {
+        if (fieldMatchesUser(p[key], userName, userEmail)) return true;
+      }
+    }
+  } else {
+    for (const key of ["專案BDPM", "專案管理員", "執行管理員"] as const) {
+      const cell = row[key as keyof MasterRow] as string | null | undefined;
+      if (fieldMatchesUser(cell, userName, userEmail)) return true;
+    }
+  }
+
   for (const key of MASTER_RELATED_FIELD_KEYS) {
     const cell = row[key as keyof MasterRow] as string | null | undefined;
     if (fieldMatchesUser(cell, userName, userEmail)) return true;
   }
   const pid = String(row.專案ID ?? "").trim();
   return Boolean(pid && projectIdsFromMyTasks.has(pid));
+}
+
+/** 大總表儲存格：模式 B 之經紀人／主管／KOL開發者取自合作夥伴；模式 A 不顯示該三欄（回傳空字串） */
+function masterTableCellText(row: MasterRow, colKey: string, partnerByKolName: Map<string, PartnerRow>): string {
+  const modeB = isPayoutModeB(String(row.專案類型 ?? ""));
+  if (colKey === "經紀人" || colKey === "主管" || colKey === "KOL開發者") {
+    if (!modeB) return "";
+    const p = partnerByKolName.get(String(row.KOL名稱 ?? "").trim());
+    return String(p?.[colKey as keyof PartnerRow] ?? "").trim();
+  }
+  if (colKey === "專案BDPM" || colKey === "專案管理員" || colKey === "執行管理員") {
+    if (modeB) return "";
+    return String((row as unknown as Record<string, unknown>)[colKey] ?? "").trim();
+  }
+  return String((row as unknown as Record<string, unknown>)[colKey] ?? "").trim();
 }
 
 /** 進行中：排除明顯已結案／完成狀態（空狀態視為進行中） */
@@ -712,6 +749,16 @@ export default function DashboardPage() {
     []
   );
 
+  /** 合作夥伴「合作夥伴名稱」→ 列（大總表模式 B 依 KOL 名稱對應經紀人／主管／KOL開發者） */
+  const partnerByKolName = useMemo(() => {
+    const m = new Map<string, PartnerRow>();
+    for (const p of partners) {
+      const name = String(p.合作夥伴名稱 ?? "").trim();
+      if (name) m.set(name, p);
+    }
+    return m;
+  }, [partners]);
+
   /** 列過濾：依 ② 資料可見規則，非 fullAccess 時只顯示 match_fields 符合登入者姓名/Email 的列；空字串視同未勾選 */
   const filterRowsByVisibility = useCallback(
     <T extends Record<string, unknown>>(rows: T[], tableKey: string): T[] => {
@@ -723,14 +770,19 @@ export default function DashboardPage() {
       const uEmail = (me.email ?? "").trim();
       return rows.filter((row) => {
         for (const key of matchFields) {
-          const val = String((row as unknown as Record<string, unknown>)[key] ?? "").trim();
+          let val = String((row as unknown as Record<string, unknown>)[key] ?? "").trim();
+          if (!val && tableKey === "master" && (key === "經紀人" || key === "主管" || key === "KOL開發者")) {
+            const r = row as unknown as MasterRow;
+            const p = partnerByKolName.get(String(r.KOL名稱 ?? "").trim());
+            val = String((p as Record<string, unknown> | undefined)?.[key] ?? "").trim();
+          }
           if (!val) continue;
           if (val === uName || val === uEmail) return true;
         }
         return false;
       });
     },
-    [me, visibilityRules]
+    [me, visibilityRules, partnerByKolName]
   );
 
   const filteredMasterList = useMemo(
@@ -769,9 +821,9 @@ export default function DashboardPage() {
     const inProgress = filteredMasterList.filter((row) => isProjectInProgress(row.專案狀態));
     if (overviewDirectorCompanyView) return inProgress.slice(0, 100);
     return inProgress
-      .filter((row) => isMasterRowRelatedToUser(row, uName, uEmail, overviewMyTaskProjectIds))
+      .filter((row) => isMasterRowRelatedToUser(row, uName, uEmail, overviewMyTaskProjectIds, partnerByKolName))
       .slice(0, 100);
-  }, [filteredMasterList, me, overviewDirectorCompanyView, overviewMyTaskProjectIds]);
+  }, [filteredMasterList, me, overviewDirectorCompanyView, overviewMyTaskProjectIds, partnerByKolName]);
 
   const overviewTaskRows = useMemo(() => {
     if (!me) return [];
@@ -809,8 +861,10 @@ export default function DashboardPage() {
     const uName = (me.name ?? "").trim();
     const uEmail = (me.email ?? "").trim();
     if (overviewDirectorCompanyView) return filteredMasterList;
-    return filteredMasterList.filter((row) => isMasterRowRelatedToUser(row, uName, uEmail, overviewMyTaskProjectIds));
-  }, [filteredMasterList, me, overviewDirectorCompanyView, overviewMyTaskProjectIds]);
+    return filteredMasterList.filter((row) =>
+      isMasterRowRelatedToUser(row, uName, uEmail, overviewMyTaskProjectIds, partnerByKolName)
+    );
+  }, [filteredMasterList, me, overviewDirectorCompanyView, overviewMyTaskProjectIds, partnerByKolName]);
 
   const overviewKpiMetrics = useMemo(() => {
     if (!me) return null;
@@ -820,7 +874,7 @@ export default function DashboardPage() {
     const projectCount = overviewDirectorCompanyView
       ? inProgress(filteredMasterList).length
       : inProgress(filteredMasterList).filter((row) =>
-          isMasterRowRelatedToUser(row, uName, uEmail, overviewMyTaskProjectIds)
+          isMasterRowRelatedToUser(row, uName, uEmail, overviewMyTaskProjectIds, partnerByKolName)
         ).length;
     const pendingTasks = filteredTasks.filter(
       (t) => !t.任務完成 && taskAssigneeIsUser(t, uName, uEmail)
@@ -833,7 +887,7 @@ export default function DashboardPage() {
     }
     const grossMarginPct = totalRev > 0 ? ((totalRev - totalCost) / totalRev) * 100 : null;
     return { projectCount, pendingTasks, totalRevenue: totalRev, totalCost, grossMarginPct };
-  }, [me, filteredMasterList, filteredTasks, overviewDirectorCompanyView, overviewMyTaskProjectIds, masterRowsForOverviewKpis]);
+  }, [me, filteredMasterList, filteredTasks, overviewDirectorCompanyView, overviewMyTaskProjectIds, masterRowsForOverviewKpis, partnerByKolName]);
 
   const masterVisibleCols = useMemo(() => getVisibleColumnKeys("master"), [getVisibleColumnKeys]);
   const partnersVisibleCols = useMemo(() => getVisibleColumnKeys("partners"), [getVisibleColumnKeys]);
@@ -861,12 +915,14 @@ export default function DashboardPage() {
     [partnersVisibleCols]
   );
 
-  /** 套用關鍵字搜尋後的各 Table 資料 */
-  const searchedMasterList = useMemo(
-    () =>
-      filterRowsBySearch(filteredMasterList as unknown as Record<string, unknown>[], masterVisibleCols, deferredMasterSearch) as unknown as MasterRow[],
-    [filteredMasterList, masterVisibleCols, deferredMasterSearch, filterRowsBySearch]
-  );
+  /** 套用關鍵字搜尋後的各 Table 資料（大總表含模式 B 由合作夥伴帶出之欄位） */
+  const searchedMasterList = useMemo(() => {
+    const q = deferredMasterSearch.trim().toLowerCase();
+    if (!q) return filteredMasterList;
+    return filteredMasterList.filter((row) =>
+      masterVisibleCols.some((k) => masterTableCellText(row, k, partnerByKolName).toLowerCase().includes(q))
+    );
+  }, [filteredMasterList, masterVisibleCols, deferredMasterSearch, partnerByKolName]);
   const searchedPartners = useMemo(
     () =>
       filterRowsBySearch(filteredPartners as unknown as Record<string, unknown>[], partnerListCols, deferredPartnersSearch) as unknown as PartnerRow[],
@@ -1964,6 +2020,10 @@ export default function DashboardPage() {
                               const amountKeys = ["專案總金額未稅", "專案營收", "專案成本", "KOL費用未稅"];
                               const isAmount = amountKeys.includes(k);
                               const val = (row as unknown as Record<string, unknown>)[k];
+                              const modeBRow = isPayoutModeB(String(row.專案類型 ?? ""));
+                              const wrongModeRoleCol =
+                                (modeBRow && ["專案BDPM", "專案管理員", "執行管理員"].includes(k)) ||
+                                (!modeBRow && ["經紀人", "主管", "KOL開發者"].includes(k));
                               if (k === "專案ID") {
                                 return (
                                   <td key={k} className="sticky left-0 z-20 w-[5rem] min-w-[5rem] max-w-[5rem] bg-white/90 px-2 py-3.5" title={pid}>
@@ -1994,9 +2054,14 @@ export default function DashboardPage() {
                                   </td>
                                 );
                               }
+                              const cellText = masterTableCellText(row, k, partnerByKolName);
+                              const displayStr = cellText || "—";
                               return (
-                                <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm font-medium text-stone-600 ${isAmount ? "tabular-nums" : ""}`}>
-                                  {isAmount ? formatAmount(String(val ?? "")) : (String(val ?? "—"))}
+                                <td
+                                  key={k}
+                                  className={`whitespace-nowrap px-4 py-3.5 text-sm font-medium ${wrongModeRoleCol ? "text-stone-400" : "text-stone-600"} ${isAmount ? "tabular-nums" : ""}`}
+                                >
+                                  {isAmount ? formatAmount(cellText) : displayStr}
                                 </td>
                               );
                             })}
