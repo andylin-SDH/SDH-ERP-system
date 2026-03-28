@@ -12,6 +12,7 @@ import type { PayoutRow } from "@/lib/db/payout";
 import { applyDedupeRules } from "@/lib/payout-dedupe";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
 import { PROJECT_TYPES } from "@/config/project-types";
+import { DEFAULT_PROJECT_STATUS_OPTIONS } from "@/config/project-status-defaults";
 import { DEFAULT_TASK_TYPE_OPTIONS } from "@/config/task-type-defaults";
 import { MASTER_PAYOUT_DEFAULTS, isPayoutModeB } from "@/config/master-payout-defaults";
 import { DEFAULT_PAYOUT_DEDUPE_RULES, type PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
@@ -377,6 +378,7 @@ export default function DashboardPage() {
   const [systemConfig, setSystemConfig] = useState<{
     master_payout_defaults: Record<string, string>;
     project_types: string[];
+    project_status_options?: string[];
     task_type_options?: string[];
     role_visibility: Record<string, { sections: string[] }>;
     roles?: string[];
@@ -418,6 +420,10 @@ export default function DashboardPage() {
   );
   const projectTypesOptions = useMemo(
     () => systemConfig?.project_types ?? [...PROJECT_TYPES],
+    [systemConfig]
+  );
+  const projectStatusOptions = useMemo(
+    () => systemConfig?.project_status_options ?? [...DEFAULT_PROJECT_STATUS_OPTIONS],
     [systemConfig]
   );
   const taskTypeOptions = useMemo(
@@ -1151,6 +1157,7 @@ export default function DashboardPage() {
           config?: {
             master_payout_defaults: Record<string, string>;
             project_types: string[];
+            project_status_options?: string[];
             task_type_options?: string[];
             role_visibility: Record<string, { sections: string[] }>;
             roles?: string[];
@@ -1312,6 +1319,15 @@ export default function DashboardPage() {
               <section className="rounded-2xl border-2 border-amber-200 bg-white/90 p-6 shadow-xl ring-1 ring-amber-500/20">
                 <h2 className="mb-2 text-xl font-bold tracking-tight text-amber-800">可見性與權限管理</h2>
                 <p className="mb-4 text-sm text-stone-500">依序設定：角色管理 → ① 角色可見區塊 → ④ 總覽指標 → ② 資料可見規則 → ③ 使用者可見範圍</p>
+                <p className="mb-4 text-sm text-stone-600">
+                  <strong className="text-amber-800">系統設定</strong>（分潤預設、專案類型、
+                  <strong className="text-amber-800">專案狀態</strong>
+                  、任務類型、專案權限等）在本頁下方「
+                  <a href="#dashboard-system-settings" className="font-semibold text-amber-800 underline decoration-amber-300 underline-offset-2 hover:text-amber-700">
+                    系統設定
+                  </a>
+                  」區塊，儲存後寫入 <code className="rounded bg-stone-100 px-1 text-xs">system_config</code>。
+                </p>
 
                 {/* 如何連結：可收合說明 */}
                 <div className="mb-6 rounded-xl border border-stone-200/90 bg-white/90 p-4">
@@ -1326,6 +1342,12 @@ export default function DashboardPage() {
                       <p><strong className="text-stone-600">④ 總覽指標</strong> → 存於 <code className="rounded bg-stone-100 px-1">system_config</code> 的 <code className="rounded bg-stone-100 px-1">overview_kpi_by_role</code>，決定總覽頁頂部數字卡；③ 可為單一帳號覆寫（<code className="rounded bg-stone-100 px-1">user_visibility.overview_kpis</code>）。</p>
                       <p><strong className="text-stone-600">② 資料可見規則</strong> → 存於 <code className="rounded bg-stone-100 px-1">visibility_rules</code> 表。勾選的欄位若符合登入者姓名/Email，該列才會顯示（列級過濾）。</p>
                       <p><strong className="text-stone-600">③ 使用者可見範圍</strong> → 存於 <code className="rounded bg-stone-100 px-1">user_visibility</code> 表（依 user_email）。若某使用者有設定，會覆蓋 ①，且可細到「每個 Table 顯示哪些欄位」。</p>
+                      <p>
+                        <strong className="text-stone-600">下方「系統設定」</strong> → 存於 <code className="rounded bg-stone-100 px-1">system_config</code>：
+                        <code className="ml-1 rounded bg-stone-100 px-1">project_types</code>（專案類型）、
+                        <code className="rounded bg-stone-100 px-1">project_status_options</code>（大總表專案狀態下拉）、
+                        <code className="rounded bg-stone-100 px-1">task_type_options</code>（任務類型下拉），以及分潤與權限等。
+                      </p>
                       <p className="text-amber-800">顯示優先順序：③ 有設定 → 用 ③；否則 ① 有該角色設定 → 用 ①；否則用程式預設。</p>
                     </div>
                   )}
@@ -2217,9 +2239,9 @@ export default function DashboardPage() {
 
         {/* 系統設定（董事長/管理者）- 分潤、專案類型、Table 參考：改為只在「可見性與權限」分頁中顯示 */}
         {canEditVisibility && activeSection === "visibility" && (
-          <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-6 shadow-xl ring-1 ring-amber-100/60">
+          <section id="dashboard-system-settings" className="scroll-mt-6 rounded-2xl border border-stone-200/90 bg-white/90 p-6 shadow-xl ring-1 ring-amber-100/60">
             <h2 className="mb-1 text-xl font-bold tracking-tight text-stone-900">系統設定</h2>
-            <p className="mb-4 text-sm text-stone-500">分潤成數、專案類型等，修改後點擊儲存即可生效</p>
+            <p className="mb-4 text-sm text-stone-500">分潤成數、專案類型、專案狀態等，修改後點擊儲存即可生效</p>
 
             <div className="space-y-6">
               {/* 分潤成數預設 */}
@@ -2441,6 +2463,84 @@ export default function DashboardPage() {
                       if (e.key !== "Enter") return;
                       const v = (e.target as HTMLInputElement).value.trim();
                       if (v && !projectTypesOptions.includes(v)) { setSystemConfig((c) => ({ ...(c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} }), project_types: [...projectTypesOptions, v] })); (e.target as HTMLInputElement).value = ""; }
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* 專案狀態選項（大總表「專案狀態」下拉） */}
+              <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="font-semibold text-amber-800">專案狀態選項</h3>
+                  <button
+                    type="button"
+                    disabled={savingConfig === "project_status_options"}
+                    onClick={async () => {
+                      setSavingConfig("project_status_options");
+                      try {
+                        const res = await fetch("/api/system-config", {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ key: "project_status_options", value: projectStatusOptions }),
+                        });
+                        const data = (await safeResJson(res)) as { ok?: boolean; config?: { project_status_options?: string[] } };
+                        if (res.ok && data.ok && data.config) {
+                          setSystemConfig((c) => (c ? { ...c, project_status_options: data.config!.project_status_options } : null));
+                          await refreshDashboardData(["systemConfig", "master"]);
+                        }
+                      } catch {
+                        /* ignore */
+                      }
+                      setSavingConfig(null);
+                    }}
+                    className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
+                  >
+                    {savingConfig === "project_status_options" ? "儲存中" : "儲存"}
+                  </button>
+                </div>
+                <p className="mb-3 text-xs text-stone-500">
+                  新增／編輯大總表時「專案狀態」的下拉選項。存於 <code className="rounded bg-stone-200/80 px-1 py-0.5 text-[10px]">system_config.project_status_options</code>
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {projectStatusOptions.map((s, i) => (
+                    <span key={`${s}-${i}`} className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-1 text-xs text-stone-600">
+                      {s}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSystemConfig((c) => ({
+                            ...(c ?? {
+                              master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS },
+                              project_types: [...PROJECT_TYPES],
+                              role_visibility: {},
+                            }),
+                            project_status_options: projectStatusOptions.filter((_, j) => j !== i),
+                          }))
+                        }
+                        className="text-stone-500 hover:text-amber-800"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    placeholder="+ 新增狀態"
+                    className="w-28 rounded border border-dashed border-stone-300 bg-transparent px-2 py-1 text-xs text-stone-500 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none"
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      const v = (e.target as HTMLInputElement).value.trim();
+                      if (v && !projectStatusOptions.includes(v)) {
+                        setSystemConfig((c) => ({
+                          ...(c ?? {
+                            master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS },
+                            project_types: [...PROJECT_TYPES],
+                            role_visibility: {},
+                          }),
+                          project_status_options: [...projectStatusOptions, v],
+                        }));
+                        (e.target as HTMLInputElement).value = "";
+                      }
                     }}
                   />
                 </div>
@@ -4760,7 +4860,12 @@ export default function DashboardPage() {
                     </div>
                     <InputField label="專案名稱" value={createForm.專案名稱} onChange={(v) => setCreateForm((f) => ({ ...f, 專案名稱: v }))} />
                     <SelectField label="專案類型" value={createForm.專案類型} onChange={(v) => setCreateForm((f) => ({ ...f, 專案類型: v }))} options={projectTypesOptions} />
-                    <InputField label="專案狀態" value={createForm.專案狀態} onChange={(v) => setCreateForm((f) => ({ ...f, 專案狀態: v }))} />
+                    <SelectField
+                      label="專案狀態"
+                      value={createForm.專案狀態}
+                      onChange={(v) => setCreateForm((f) => ({ ...f, 專案狀態: v }))}
+                      options={[...new Set([...projectStatusOptions, createForm.專案狀態].filter(Boolean))]}
+                    />
                     <DateField label="開案日期" value={createForm.開案日期} onChange={(v) => setCreateForm((f) => ({ ...f, 開案日期: v }))} />
                     <DateField label="狀態確認日期" value={createForm.狀態確認日期} onChange={(v) => setCreateForm((f) => ({ ...f, 狀態確認日期: v }))} />
                     <InputField label="專案資料夾" value={createForm.專案資料夾} onChange={(v) => setCreateForm((f) => ({ ...f, 專案資料夾: v }))} className="col-span-2" />
@@ -5322,7 +5427,12 @@ export default function DashboardPage() {
                     <Field label="專案類型" value={selectedMaster.專案類型} />
                   )}
                   {isEditingMaster ? (
-                    <InputField label="專案狀態" value={editMasterForm.專案狀態} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案狀態: v }))} />
+                    <SelectField
+                      label="專案狀態"
+                      value={editMasterForm.專案狀態}
+                      onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案狀態: v }))}
+                      options={[...new Set([...projectStatusOptions, editMasterForm.專案狀態].filter(Boolean))]}
+                    />
                   ) : (
                     <Field label="專案狀態" value={selectedMaster.專案狀態} />
                   )}

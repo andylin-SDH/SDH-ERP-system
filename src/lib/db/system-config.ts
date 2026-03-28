@@ -15,6 +15,7 @@ import {
 } from "@/config/payout-dedupe-defaults";
 import { DEFAULT_OVERVIEW_KPI_BY_ROLE, OVERVIEW_KPI_KEYS } from "@/config/overview-kpi";
 import { DEFAULT_TASK_TYPE_OPTIONS } from "@/config/task-type-defaults";
+import { DEFAULT_PROJECT_STATUS_OPTIONS } from "@/config/project-status-defaults";
 
 export type PayoutDefaults = Record<string, string>;
 export type ProjectTypes = string[];
@@ -67,6 +68,7 @@ function mergeOverviewKpiByRole(
 export async function getSystemConfig(): Promise<{
   master_payout_defaults: PayoutDefaults;
   project_types: ProjectTypes;
+  project_status_options: string[];
   task_type_options: string[];
   role_visibility: RoleVisibility;
   roles: string[];
@@ -83,6 +85,7 @@ export async function getSystemConfig(): Promise<{
 
   const payoutRaw = map.get("master_payout_defaults") as Record<string, string> | undefined;
   const projectRaw = map.get("project_types") as string[] | undefined;
+  const projectStatusRaw = map.get("project_status_options") as string[] | undefined;
   const roleRaw = map.get("role_visibility") as RoleVisibility | undefined;
   const rolesRaw = map.get("roles") as string[] | undefined;
   const permsRaw = map.get("role_permissions") as RolePermissions | undefined;
@@ -136,6 +139,10 @@ export async function getSystemConfig(): Promise<{
       ? { ...MASTER_PAYOUT_DEFAULTS, ...payoutRaw }
       : { ...MASTER_PAYOUT_DEFAULTS },
     project_types: Array.isArray(projectRaw) && projectRaw.length > 0 ? projectRaw : [...PROJECT_TYPES],
+    project_status_options:
+      Array.isArray(projectStatusRaw) && projectStatusRaw.length > 0
+        ? projectStatusRaw.map(String).filter((s) => s.trim().length > 0)
+        : [...DEFAULT_PROJECT_STATUS_OPTIONS],
     task_type_options:
       Array.isArray(taskTypeRaw) && taskTypeRaw.length > 0
         ? taskTypeRaw.map(String).filter((s) => s.trim().length > 0)
