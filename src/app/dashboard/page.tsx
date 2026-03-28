@@ -166,6 +166,11 @@ function masterTableCellText(row: MasterRow, colKey: string, partnerByKolName: M
   return String((row as unknown as Record<string, unknown>)[colKey] ?? "").trim();
 }
 
+/** 大總表：分潤模式 A 專用欄（與模式 B 互斥顯示於同表時） */
+const MASTER_PAYOUT_MODE_A_COL_KEYS = new Set(["專案BDPM", "專案管理員", "執行管理員"]);
+/** 大總表：分潤模式 B 專用欄 */
+const MASTER_PAYOUT_MODE_B_COL_KEYS = new Set(["經紀人", "主管", "KOL開發者"]);
+
 /** 進行中：排除明顯已結案／完成狀態（空狀態視為進行中） */
 function isProjectInProgress(專案狀態: string | null | undefined): boolean {
   const s = String(專案狀態 ?? "").trim();
@@ -923,6 +928,33 @@ export default function DashboardPage() {
       masterVisibleCols.some((k) => masterTableCellText(row, k, partnerByKolName).toLowerCase().includes(q))
     );
   }, [filteredMasterList, masterVisibleCols, deferredMasterSearch, partnerByKolName]);
+
+  /**
+   * 依「② 權限篩選後的大總表列表」是否同時含模式 A 與模式 B 專案，決定表頭／列要出現哪些角色欄（與關鍵字搜尋無關）。
+   * 僅單一模式時隱藏另一組欄位；A+B 並存時仍顯示兩組（單一 HTML table 無法依列藏欄且對齊表頭）。
+   */
+  const { masterColsForDisplay, masterFilteredListHasBothPayoutModes } = useMemo(() => {
+    const cols = masterVisibleCols;
+    if (filteredMasterList.length === 0) {
+      return { masterColsForDisplay: cols, masterFilteredListHasBothPayoutModes: false };
+    }
+    let hasModeA = false;
+    let hasModeB = false;
+    for (const row of filteredMasterList) {
+      if (isPayoutModeB(String(row.專案類型 ?? ""))) hasModeB = true;
+      else hasModeA = true;
+    }
+    const filtered = cols.filter((k) => {
+      if (MASTER_PAYOUT_MODE_A_COL_KEYS.has(k)) return hasModeA;
+      if (MASTER_PAYOUT_MODE_B_COL_KEYS.has(k)) return hasModeB;
+      return true;
+    });
+    return {
+      masterColsForDisplay: filtered,
+      masterFilteredListHasBothPayoutModes: hasModeA && hasModeB,
+    };
+  }, [masterVisibleCols, filteredMasterList]);
+
   const searchedPartners = useMemo(
     () =>
       filterRowsBySearch(filteredPartners as unknown as Record<string, unknown>[], partnerListCols, deferredPartnersSearch) as unknown as PartnerRow[],
@@ -1908,7 +1940,8 @@ export default function DashboardPage() {
         {/* 大總表 */}
         {activeSection === "master" && (
           <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="mb-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-xl font-bold tracking-tight text-stone-900">大總表</h2>
               <div className="flex flex-wrap items-center gap-3">
                 <div className="relative">
@@ -1961,17 +1994,23 @@ export default function DashboardPage() {
                   新增專案
                 </button>
               </div>
+              </div>
+              {masterFilteredListHasBothPayoutModes && filteredMasterList.length > 0 && (
+                <p className="mt-2 max-w-3xl text-xs text-stone-500">
+                  目前可見大總表（依權限篩選後）同時含「製作/活動」與「廣告業配」專案，故顯示兩組分潤角色欄；若僅單一類型則只顯示對應欄位（與搜尋關鍵字無關）。
+                </p>
+              )}
             </div>
             <div className="overflow-x-auto rounded-xl border border-stone-200/90 ring-1 ring-amber-100/60">
               <table className="min-w-full table-fixed divide-y divide-stone-200">
                 <colgroup>
-                  {masterVisibleCols.map((k) => (
+                  {masterColsForDisplay.map((k) => (
                     <col key={k} className={k === "專案ID" ? "w-[5rem] min-w-[5rem]" : k === "專案名稱" ? "min-w-[12rem]" : "min-w-[5rem]"} />
                   ))}
                 </colgroup>
                 <thead className="sticky top-0 z-20 bg-stone-100">
                   <tr>
-                    {masterVisibleCols.map((k) => (
+                    {masterColsForDisplay.map((k) => (
                       <th
                         key={k}
                         className={
@@ -1990,13 +2029,13 @@ export default function DashboardPage() {
                 <tbody className="divide-y divide-stone-200 bg-amber-50/40">
                   {filteredMasterList.length === 0 ? (
                     <tr>
-                      <td colSpan={masterVisibleCols.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                      <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                         尚無大總表資料，請點「新增專案」建立第一筆
                       </td>
                     </tr>
                   ) : searchedMasterList.length === 0 ? (
                     <tr>
-                      <td colSpan={masterVisibleCols.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                      <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                         沒有符合搜尋結果
                       </td>
                     </tr>
@@ -2016,14 +2055,14 @@ export default function DashboardPage() {
                               setSaveMasterError(null);
                             }}
                           >
-                            {masterVisibleCols.map((k) => {
+                            {masterColsForDisplay.map((k) => {
                               const amountKeys = ["專案總金額未稅", "專案營收", "專案成本", "KOL費用未稅"];
                               const isAmount = amountKeys.includes(k);
                               const val = (row as unknown as Record<string, unknown>)[k];
                               const modeBRow = isPayoutModeB(String(row.專案類型 ?? ""));
                               const wrongModeRoleCol =
-                                (modeBRow && ["專案BDPM", "專案管理員", "執行管理員"].includes(k)) ||
-                                (!modeBRow && ["經紀人", "主管", "KOL開發者"].includes(k));
+                                (modeBRow && MASTER_PAYOUT_MODE_A_COL_KEYS.has(k)) ||
+                                (!modeBRow && MASTER_PAYOUT_MODE_B_COL_KEYS.has(k));
                               if (k === "專案ID") {
                                 return (
                                   <td key={k} className="sticky left-0 z-20 w-[5rem] min-w-[5rem] max-w-[5rem] bg-white/90 px-2 py-3.5" title={pid}>
@@ -2068,7 +2107,7 @@ export default function DashboardPage() {
                           </tr>
                           {isExpanded && (
                             <tr key={`${pid}-tasks`}>
-                              <td colSpan={masterVisibleCols.length || 15} className="border-t-0 bg-stone-50 px-4 py-4">
+                              <td colSpan={masterColsForDisplay.length || 15} className="border-t-0 bg-stone-50 px-4 py-4">
                                 <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
                                   <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-amber-800">此專案任務</h3>
                                   <div className="mb-4 overflow-hidden rounded-lg border border-stone-200/90">
