@@ -1,11 +1,15 @@
 /**
  * 各 Table 的可用欄位定義
- * 與 ① 角色可見區塊 一致：master, partners, tasks, finance, invoices
- * 供 ③ 使用者可見範圍 細選欄位
+ * 供 ③ 使用者可見範圍 細選欄位（總覽指標亦在此，與其他分頁一致）
  */
 
-/** 與 ① 可見區塊 相同的區塊 key 順序 */
+import { OVERVIEW_KPI_KEYS, OVERVIEW_KPI_LABELS } from "@/config/overview-kpi";
+
+/** 與 ① 可見區塊 相同的區塊 key 順序（① 介面不顯示 overview，仍保留於此供 ③／側欄） */
 export const SECTION_KEYS = ["overview", "master", "partners", "tasks", "payout", "finance", "invoices"] as const;
+
+/** ①「角色可見區塊」勾選用：不含總覽（總覽改由 ③ 依帳號設定子欄位／是否納入 tables） */
+export const ROLE_SECTION_KEYS_FOR_UI = SECTION_KEYS.filter((k) => k !== "overview");
 
 export const TABLE_LABELS: Record<string, string> = {
   overview: "總覽",
@@ -21,8 +25,8 @@ export const TABLE_LABELS: Record<string, string> = {
 
 /** 各 Table 的欄位 key → 顯示名稱 */
 export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>> = {
-  /** 總覽為彙總頁，無獨立資料表欄位 */
-  overview: [],
+  /** 總覽頂部指標（③ 可見欄位；非列級篩選） */
+  overview: OVERVIEW_KPI_KEYS.map((key) => ({ key, label: OVERVIEW_KPI_LABELS[key] })),
   master: [
     { key: "專案ID", label: "專案ID" },
     { key: "專案名稱", label: "專案名稱" },

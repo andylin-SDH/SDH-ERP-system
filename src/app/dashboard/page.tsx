@@ -17,7 +17,7 @@ import { DEFAULT_PROJECT_EXPENSE_TYPE_OPTIONS } from "@/config/project-expense-t
 import { DEFAULT_TASK_TYPE_OPTIONS } from "@/config/task-type-defaults";
 import { MASTER_PAYOUT_DEFAULTS, isPayoutModeB } from "@/config/master-payout-defaults";
 import { DEFAULT_PAYOUT_DEDUPE_RULES, type PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
-import { TABLE_KEYS, TABLE_LABELS, TABLE_COLUMNS } from "@/config/table-columns";
+import { TABLE_KEYS, TABLE_LABELS, TABLE_COLUMNS, ROLE_SECTION_KEYS_FOR_UI } from "@/config/table-columns";
 import {
   OVERVIEW_KPI_KEYS,
   OVERVIEW_KPI_LABELS,
@@ -250,8 +250,6 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedUserForVisibility, setSelectedUserForVisibility] = useState<User | null>(null);
   const [visibilityTables, setVisibilityTables] = useState<string[]>([]);
-  /** null = 依①角色總覽指標；陣列 = 此帳號專用 */
-  const [visibilityOverviewKpis, setVisibilityOverviewKpis] = useState<string[] | null>(null);
   const [visibilityColumns, setVisibilityColumns] = useState<Record<string, string[]>>({});
   const [savingVisibility, setSavingVisibility] = useState(false);
   const [visibilityError, setVisibilityError] = useState<string | null>(null);
@@ -613,14 +611,14 @@ export default function DashboardPage() {
     const defaultSecs = getSectionsForRole(me.role);
     let base: string[];
     if (myVisibility?.tables?.length) {
-      /** ③ 自訂區塊清單仍補上總覽（與①相同），否則側欄會缺「總覽」分頁 */
+      /** ③ 自訂：是否顯示「總覽」分頁由 tables 是否含 overview 決定 */
       base = [...myVisibility.tables];
     } else {
       const fromDb = systemConfig?.role_visibility?.[me.role]?.sections;
       base = fromDb && fromDb.length > 0 ? [...fromDb] : [...defaultSecs];
+      /** ① 不再勾選總覽區塊，儲存時仍會帶入 overview；舊 DB 若無則補上 */
+      if (!base.includes("overview")) base = ["overview", ...base];
     }
-    /** 靜態角色預設含總覽時，一律補上，避免舊 DB／舊③ 清單漏列 */
-    if (defaultSecs.includes("overview") && !base.includes("overview")) return ["overview", ...base];
     return base;
   }, [me, myVisibility, systemConfig]);
 
@@ -684,6 +682,13 @@ export default function DashboardPage() {
   /** 取得某 Table 的可見欄位 key 列表（③ 使用者可見範圍） */
   const getVisibleColumnKeys = useCallback(
     (tableKey: string): string[] => {
+      if (tableKey === "overview") {
+        const cols = myVisibility?.columns?.overview;
+        const allKeys = (TABLE_COLUMNS.overview ?? []).map((c) => c.key);
+        if (!cols || cols.length === 0) return allKeys;
+        if (cols.includes("*")) return allKeys;
+        return cols.filter((k) => allKeys.includes(k));
+      }
       const cols = myVisibility?.columns?.[tableKey];
       const normalized =
         tableKey === "tasks" && cols && !cols.includes("*")
@@ -777,18 +782,27 @@ export default function DashboardPage() {
     return open.filter((t) => taskAssigneeIsUser(t, uName, uEmail)).slice(0, 150);
   }, [filteredTasks, me, overviewDirectorCompanyView]);
 
-  /** 總覽頂部指標：①③ 可設定可見 key */
+  /** 總覽頂部指標：③ columns.overview 優先；舊版 overview_kpis；最後依 system_config／靜態角色預設 */
   const visibleOverviewKpiKeys = useMemo((): OverviewKpiKey[] => {
     if (!me) return [];
     const fromRole =
       systemConfig?.overview_kpi_by_role?.[me.role] ?? getDefaultOverviewKpisForRole(me.role);
-    const custom = myVisibility?.overview_kpis;
-    if (custom === null || custom === undefined) {
-      const fromR = fromRole.filter((k) => OVERVIEW_KPI_KEYS.includes(k as OverviewKpiKey));
-      return (fromR.length ? fromR : [...OVERVIEW_KPI_KEYS]) as OverviewKpiKey[];
+    const colKeys = myVisibility?.columns?.overview;
+    if (colKeys && colKeys.length > 0) {
+      if (colKeys.includes("*")) return [...OVERVIEW_KPI_KEYS] as OverviewKpiKey[];
+      const filtered = colKeys.filter((k): k is OverviewKpiKey =>
+        OVERVIEW_KPI_KEYS.includes(k as OverviewKpiKey)
+      );
+      return (filtered.length ? filtered : (fromRole as OverviewKpiKey[])) as OverviewKpiKey[];
     }
-    return custom.filter((k): k is OverviewKpiKey => OVERVIEW_KPI_KEYS.includes(k as OverviewKpiKey));
-  }, [me, systemConfig?.overview_kpi_by_role, myVisibility?.overview_kpis]);
+    const legacy = myVisibility?.overview_kpis;
+    if (legacy !== null && legacy !== undefined && legacy.length > 0) {
+      return legacy.filter((k): k is OverviewKpiKey => OVERVIEW_KPI_KEYS.includes(k as OverviewKpiKey));
+    }
+    if (legacy !== null && legacy !== undefined && legacy.length === 0) return [];
+    const fromR = fromRole.filter((k) => OVERVIEW_KPI_KEYS.includes(k as OverviewKpiKey));
+    return (fromR.length ? fromR : [...OVERVIEW_KPI_KEYS]) as OverviewKpiKey[];
+  }, [me, systemConfig?.overview_kpi_by_role, myVisibility?.columns?.overview, myVisibility?.overview_kpis]);
 
   const masterRowsForOverviewKpis = useMemo(() => {
     if (!me) return [];
@@ -1083,7 +1097,6 @@ export default function DashboardPage() {
     if (!selectedUserForVisibility) {
       setVisibilityTables([]);
       setVisibilityColumns({});
-      setVisibilityOverviewKpis(null);
       setVisibilityError(null);
       setEditUserForm({ name: "", role: "", dept: "", scope: "", password: "" });
       setEditUserError(null);
@@ -1105,21 +1118,30 @@ export default function DashboardPage() {
           visibility?: { tables?: string[]; columns?: Record<string, string[]>; overview_kpis?: string[] | null };
         };
         if (d.ok && d.visibility) {
-          setVisibilityTables(d.visibility.tables ?? []);
-          setVisibilityColumns(d.visibility.columns ?? {});
-          setVisibilityOverviewKpis(
-            d.visibility.overview_kpis === undefined ? null : d.visibility.overview_kpis
-          );
+          const tables = d.visibility.tables ?? [];
+          let cols = d.visibility.columns ?? {};
+          const legacy = d.visibility.overview_kpis;
+          if (
+            (!cols.overview || cols.overview.length === 0) &&
+            Array.isArray(legacy) &&
+            legacy.length > 0
+          ) {
+            cols = { ...cols, overview: [...legacy] };
+          }
+          let nextTables = tables;
+          if (cols.overview && cols.overview.length > 0 && !nextTables.includes("overview")) {
+            nextTables = [...nextTables, "overview"];
+          }
+          setVisibilityTables(nextTables);
+          setVisibilityColumns(cols);
         } else {
           setVisibilityTables([]);
           setVisibilityColumns({});
-          setVisibilityOverviewKpis(null);
         }
       })
       .catch(() => {
         setVisibilityTables([]);
         setVisibilityColumns({});
-        setVisibilityOverviewKpis(null);
       });
   }, [selectedUserForVisibility]);
 
@@ -1371,7 +1393,7 @@ export default function DashboardPage() {
             {canEditVisibility && activeSection === "visibility" && (
               <section className="rounded-2xl border-2 border-amber-200 bg-white/90 p-6 shadow-xl ring-1 ring-amber-500/20">
                 <h2 className="mb-2 text-xl font-bold tracking-tight text-amber-800">可見性與權限管理</h2>
-                <p className="mb-4 text-sm text-stone-500">依序設定：角色管理 → ① 角色可見區塊 → ④ 總覽指標 → ② 資料可見規則 → ③ 使用者可見範圍</p>
+                <p className="mb-4 text-sm text-stone-500">依序設定：角色管理 → ① 角色可見區塊 → ② 資料可見規則 → ③ 使用者可見範圍（含總覽頂部指標，與其他分頁欄位同一套）</p>
                 <p className="mb-4 text-sm text-stone-600">
                   <strong className="text-amber-800">系統設定</strong>（分潤預設、專案類型、
                   <strong className="text-amber-800">專案狀態</strong>
@@ -1391,8 +1413,8 @@ export default function DashboardPage() {
                   {showHowItWorks && (
                     <div className="mt-4 space-y-3 border-t border-stone-200/90 pt-4 text-xs text-stone-500">
                       <p><strong className="text-stone-600">角色列表</strong> → 存於 <code className="rounded bg-stone-100 px-1">system_config</code> 的 <code className="rounded bg-stone-100 px-1">roles</code>（陣列）。新增使用者時的角色下拉與這裡一致。</p>
-                      <p><strong className="text-stone-600">① 角色可見區塊</strong> → 存於 <code className="rounded bg-stone-100 px-1">system_config</code> 的 <code className="rounded bg-stone-100 px-1">role_visibility</code>。每個角色可勾選能進入的區塊（overview、master、partners、tasks、payout、finance、invoices）。</p>
-                      <p><strong className="text-stone-600">④ 總覽指標</strong> → 存於 <code className="rounded bg-stone-100 px-1">system_config</code> 的 <code className="rounded bg-stone-100 px-1">overview_kpi_by_role</code>，決定總覽頁頂部數字卡；③ 可為單一帳號覆寫（<code className="rounded bg-stone-100 px-1">user_visibility.overview_kpis</code>）。</p>
+                      <p><strong className="text-stone-600">① 角色可見區塊</strong> → 存於 <code className="rounded bg-stone-100 px-1">system_config</code> 的 <code className="rounded bg-stone-100 px-1">role_visibility</code>。每個角色可勾選資料區塊（不含總覽；總覽分頁與頂部指標在 ③ 依帳號設定）。</p>
+                      <p><strong className="text-stone-600">總覽頂部指標</strong> → 在 ③ 勾選「總覽」Table 後，於子欄位勾選（與大總表等相同），存於 <code className="rounded bg-stone-100 px-1">user_visibility.columns.overview</code>；舊資料可能仍在 <code className="rounded bg-stone-100 px-1">overview_kpis</code>。系統並以 <code className="rounded bg-stone-100 px-1">overview_kpi_by_role</code> 作為未細選時的預設。</p>
                       <p><strong className="text-stone-600">② 資料可見規則</strong> → 存於 <code className="rounded bg-stone-100 px-1">visibility_rules</code> 表。勾選的欄位若符合登入者姓名/Email，該列才會顯示（列級過濾）。</p>
                       <p><strong className="text-stone-600">③ 使用者可見範圍</strong> → 存於 <code className="rounded bg-stone-100 px-1">user_visibility</code> 表（依 user_email）。若某使用者有設定，會覆蓋 ①，且可細到「每個 Table 顯示哪些欄位」。</p>
                       <p>
@@ -1500,7 +1522,10 @@ export default function DashboardPage() {
                             const current = systemConfig?.role_visibility ?? {};
                             const rv: Record<string, { sections: string[] }> = {};
                             for (const role of displayRoles) {
-                              rv[role] = current[role] ?? ROLE_VISIBILITY[role] ?? { sections: ["overview", "tasks"] };
+                              const raw = current[role] ?? ROLE_VISIBILITY[role] ?? { sections: ["overview", "tasks"] };
+                              const secs = raw.sections ?? [];
+                              const rest = secs.filter((s) => s !== "overview");
+                              rv[role] = { ...raw, sections: ["overview", ...rest] };
                             }
                             const res = await fetch("/api/system-config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "role_visibility", value: rv }) });
                             const data = (await safeResJson(res)) as { ok?: boolean; config?: { role_visibility: Record<string, { sections: string[] }> } };
@@ -1516,25 +1541,30 @@ export default function DashboardPage() {
                         {savingConfig === "role_visibility" ? "儲存中" : "儲存"}
                       </button>
                     </div>
-                    <p className="mb-3 text-xs text-stone-500">各角色可進入的區塊（overview、master、partners、tasks、payout、finance、invoices 等）</p>
+                    <p className="mb-3 text-xs text-stone-500">
+                      各角色可進入的資料區塊（不含「總覽」：總覽分頁與頂部指標改由 ③ 依帳號勾選「總覽」及子欄位）。儲存時會自動為每個角色帶入總覽區塊權限。
+                    </p>
                     <div className="space-y-2">
                       {displayRoles.map((role) => {
                         const cfg = systemConfig?.role_visibility?.[role] ?? ROLE_VISIBILITY[role] ?? { sections: ["overview", "tasks"] };
                         return [role, cfg] as const;
-                      }).map(([role, cfg]) => (
+                      }).map(([role, cfg]) => {
+                        const sectionsRaw = cfg?.sections ?? [];
+                        const sectionsNoOverview = sectionsRaw.filter((x) => x !== "overview");
+                        return (
                         <div key={role} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                           <span className="w-16 text-xs font-medium text-stone-900">{role}</span>
                           <div className="flex flex-wrap gap-x-2 gap-y-1">
-                            {TABLE_KEYS.map((s) => {
-                              const sections = cfg?.sections ?? [];
-                              const checked = sections.includes(s);
+                            {ROLE_SECTION_KEYS_FOR_UI.map((s) => {
+                              const checked = sectionsNoOverview.includes(s);
                               return (
                                 <label key={s} className="flex cursor-pointer items-center gap-1">
                                   <input type="checkbox" checked={checked} onChange={() => {
-                                    const next = checked ? sections.filter((x) => x !== s) : [...sections, s];
+                                    const next = checked ? sectionsNoOverview.filter((x) => x !== s) : [...sectionsNoOverview, s];
+                                    const merged = ["overview", ...next];
                                     setSystemConfig((c) => {
                                       const base = c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} };
-                                      const rv = { ...base.role_visibility, [role]: { ...(typeof cfg === "object" ? cfg : {}), sections: next } };
+                                      const rv = { ...base.role_visibility, [role]: { ...(typeof cfg === "object" ? cfg : {}), sections: merged } };
                                       return { ...base, role_visibility: rv };
                                     });
                                   }} className="h-3 w-3 rounded border-stone-300 bg-stone-50 text-amber-500" />
@@ -1544,92 +1574,6 @@ export default function DashboardPage() {
                             })}
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* ④ 總覽指標可見（依角色）；③ 使用者可覆寫 */}
-                  <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
-                    <div className="mb-3 flex items-center justify-between">
-                      <h3 className="font-semibold text-amber-800">④ 總覽指標（依角色）</h3>
-                      <button
-                        type="button"
-                        disabled={savingConfig === "overview_kpi_by_role"}
-                        onClick={async () => {
-                          setSavingConfig("overview_kpi_by_role");
-                          try {
-                            const current = systemConfig?.overview_kpi_by_role ?? {};
-                            const rv: Record<string, string[]> = {};
-                            for (const role of displayRoles) {
-                              rv[role] = current[role]?.length
-                                ? [...current[role]]
-                                : getDefaultOverviewKpisForRole(role);
-                            }
-                            const res = await fetch("/api/system-config", {
-                              method: "PUT",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ key: "overview_kpi_by_role", value: rv }),
-                            });
-                            const data = (await safeResJson(res)) as { ok?: boolean; config?: { overview_kpi_by_role?: Record<string, string[]> } };
-                            if (res.ok && data.ok && data.config?.overview_kpi_by_role) {
-                              setSystemConfig((c) =>
-                                c ? { ...c, overview_kpi_by_role: data.config!.overview_kpi_by_role } : null
-                              );
-                              await refreshDashboardData(["systemConfig"]);
-                            }
-                          } catch {
-                            /* ignore */
-                          }
-                          setSavingConfig(null);
-                        }}
-                        className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
-                      >
-                        {savingConfig === "overview_kpi_by_role" ? "儲存中" : "儲存"}
-                      </button>
-                    </div>
-                    <p className="mb-3 text-xs text-stone-500">
-                      各角色在總覽頁頂部可看到的匯總（與資料區塊分開設定）。③ 可為單一帳號覆寫。
-                    </p>
-                    <div className="space-y-2">
-                      {displayRoles.map((role) => {
-                        const keys =
-                          systemConfig?.overview_kpi_by_role?.[role] ?? getDefaultOverviewKpisForRole(role);
-                        return (
-                          <div key={role} className="flex flex-wrap items-start gap-x-3 gap-y-1.5">
-                            <span className="w-16 shrink-0 text-xs font-medium text-stone-900">{role}</span>
-                            <div className="flex flex-wrap gap-x-2 gap-y-1">
-                              {OVERVIEW_KPI_KEYS.map((k) => {
-                                const checked = keys.includes(k);
-                                return (
-                                  <label key={k} className="flex cursor-pointer items-center gap-1">
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={() => {
-                                        const cur =
-                                          systemConfig?.overview_kpi_by_role?.[role] ??
-                                          getDefaultOverviewKpisForRole(role);
-                                        const next = checked ? cur.filter((x) => x !== k) : [...cur, k];
-                                        setSystemConfig((c) => ({
-                                          ...(c ?? {
-                                            master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS },
-                                            project_types: [...PROJECT_TYPES],
-                                            role_visibility: {},
-                                          }),
-                                          overview_kpi_by_role: {
-                                            ...((c ?? systemConfig)?.overview_kpi_by_role ?? {}),
-                                            [role]: next,
-                                          },
-                                        }));
-                                      }}
-                                      className="h-3 w-3 rounded border-stone-300 bg-stone-50 text-amber-500"
-                                    />
-                                    <span className="text-xs text-stone-600">{OVERVIEW_KPI_LABELS[k]}</span>
-                                  </label>
-                                );
-                              })}
-                            </div>
-                          </div>
                         );
                       })}
                     </div>
@@ -1668,7 +1612,7 @@ export default function DashboardPage() {
                     <p className="mb-4 text-xs text-stone-500">勾選的欄位若符合登入者姓名/Email，該列會顯示（OR 邏輯）</p>
                     {visibilityRulesError && <p className="mb-3 text-xs text-amber-800">{visibilityRulesError}</p>}
                     <div className="space-y-5">
-                      {TABLE_KEYS.map((tableKey) => {
+                      {TABLE_KEYS.filter((k) => k !== "overview").map((tableKey) => {
                         const cols = TABLE_COLUMNS[tableKey] ?? [];
                         const selected = visibilityRules[tableKey] ?? [];
                         return (
@@ -1739,7 +1683,7 @@ export default function DashboardPage() {
                       </button>
                     </div>
                     <p className="mb-4 text-xs text-stone-500">
-                      點選使用者可設定 Table／欄位與總覽指標（例：不勾選專案成本、總覽隱藏毛利率）。
+                      點選使用者可設定各 Table 可見欄位；「總覽」下可勾選頂部指標（與其他分頁相同邏輯）。
                     </p>
                     <div className="overflow-hidden rounded-lg border border-stone-200/90">
                       <table className="min-w-full divide-y divide-stone-200">
@@ -5283,49 +5227,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-amber-200/80 bg-stone-50/95 p-4">
-                <h3 className="text-sm font-semibold text-amber-800">總覽指標可見性</h3>
-                <p className="mt-1 text-xs text-stone-500">
-                  未按「還原」時可覆寫 ④ 中該角色的預設；儲存後寫入 user_visibility。還原後改依①角色設定。
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setVisibilityOverviewKpis(null)}
-                  className="mt-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-100"
-                >
-                  還原為①角色預設
-                </button>
-                <div className="mt-3 flex flex-wrap gap-x-3 gap-y-2">
-                  {OVERVIEW_KPI_KEYS.map((k) => {
-                    const roleK =
-                      systemConfig?.overview_kpi_by_role?.[selectedUserForVisibility.role] ??
-                      getDefaultOverviewKpisForRole(selectedUserForVisibility.role);
-                    const effective = visibilityOverviewKpis ?? roleK;
-                    const checked = effective.includes(k);
-                    return (
-                      <label key={k} className="flex cursor-pointer items-center gap-1.5">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => {
-                            const roleKeys =
-                              systemConfig?.overview_kpi_by_role?.[selectedUserForVisibility.role] ??
-                              getDefaultOverviewKpisForRole(selectedUserForVisibility.role);
-                            const start = visibilityOverviewKpis ?? [...roleKeys];
-                            const next = e.target.checked
-                              ? Array.from(new Set([...start, k]))
-                              : start.filter((x) => x !== k);
-                            setVisibilityOverviewKpis(next);
-                          }}
-                          className="h-3.5 w-3.5 rounded border-stone-300 bg-stone-50 text-amber-500"
-                        />
-                        <span className="text-xs text-stone-600">{OVERVIEW_KPI_LABELS[k]}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-
               <h3 className="text-sm font-semibold text-amber-800">可見欄位</h3>
               <p className="text-sm text-stone-500">勾選此使用者可看到的 Table 與欄位。未勾選的欄位（如專案分潤、專案成本）將不顯示。未設定時依角色預設顯示。</p>
               <div className="space-y-4">
@@ -5426,7 +5327,7 @@ export default function DashboardPage() {
                           },
                           {} as Record<string, string[]>
                         ),
-                        overview_kpis: visibilityOverviewKpis,
+                        overview_kpis: null,
                       }),
                     });
                     const data = (await safeResJson(res)) as { ok?: boolean; error?: string };
