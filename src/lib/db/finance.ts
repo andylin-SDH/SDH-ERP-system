@@ -54,6 +54,17 @@ export async function syncFinanceForProject(master: MasterRow): Promise<void> {
   if (error) throw error;
 }
 
+/** 刪除財務表中該專案列（與大總表刪除連動） */
+export async function deleteFinanceBy專案ID(專案ID: string): Promise<void> {
+  const pid = String(專案ID ?? "").trim();
+  if (!pid) return;
+  const { error } = await getSupabase().from("財務").delete().eq("專案ID", pid);
+  if (error) {
+    if (error.code === "42P01") return;
+    throw error;
+  }
+}
+
 export async function syncAllFinanceFromMaster(): Promise<void> {
   const masters = await getMasterList();
   for (const master of masters) {

@@ -3,10 +3,12 @@
  * GET：回傳所有大總表資料（需登入）
  * POST：新增一筆大總表（需登入，任何人可建立專案）
  * PATCH：更新大總表（限董事長/管理者）
+ * DELETE：刪除專案（僅董事長；連動任務、分潤表、財務）
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createMaster, getMasterList, updateMaster, type NewMasterInput, type UpdateMasterInput } from "@/lib/db/master";
+import { deleteMasterProjectByRowId } from "@/lib/db/master-project-delete";
 import { DEFAULT_PAYOUT_DEDUPE_RULES } from "@/config/payout-dedupe-defaults";
 import { getSystemConfig } from "@/lib/db/system-config";
 import { syncPayoutForProject } from "@/lib/db/payout";
@@ -145,6 +147,30 @@ export async function PATCH(request: NextRequest) {
     console.error("PATCH /api/master error:", error);
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 }
+    );
+  }
+}
+
+/** 刪除專案（僅董事長）；連動刪除任務、分潤表、財務之該專案資料 */
+export async function DELETE(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if (auth instanceof NextResponse) return auth;
+  if (auth.user.role !== "董事長") {
+    return NextResponse.json({ ok: false, error: "僅董事長可刪除專案" }, { status: 403 });
+  }
+  try {
+    const body = (await request.json().catch(() => ({}))) as { id?: string } | null;
+    const id = String(body?.id ?? "").trim();
+    if (!id) {
+      return NextResponse.json({ ok: false, error: "id 為必填" }, { status: 400 });
+    }
+    await deleteMasterProjectByRowId(id);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("DELETE /api/master error:", error);
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "刪除失敗" },
       { status: 500 }
     );
   }

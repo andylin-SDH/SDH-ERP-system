@@ -203,6 +203,8 @@ export default function DashboardPage() {
   });
   const [selectedMaster, setSelectedMaster] = useState<MasterRow | null>(null);
   const [isEditingMaster, setIsEditingMaster] = useState(false);
+  const [showDeleteMasterConfirm, setShowDeleteMasterConfirm] = useState(false);
+  const [deletingMaster, setDeletingMaster] = useState(false);
   const [savingMaster, setSavingMaster] = useState(false);
   const [saveMasterError, setSaveMasterError] = useState<string | null>(null);
   const [editMasterForm, setEditMasterForm] = useState(() => ({
@@ -465,6 +467,14 @@ export default function DashboardPage() {
     const names = partners.map((p) => String(p.合作夥伴名稱 ?? "").trim()).filter(Boolean);
     return [...new Set(names)].sort((a, b) => a.localeCompare(b, "zh-Hant"));
   }, [partners]);
+  /** 刪除專案確認視窗：連動筆數（任務、分潤列） */
+  const masterDeleteRelatedCounts = useMemo(() => {
+    if (!selectedMaster) return { tasks: 0, payouts: 0 };
+    const pid = String(selectedMaster.專案ID ?? "").trim();
+    const tasksN = tasks.filter((t) => String(t.專案ID ?? "").trim() === pid).length;
+    const payoutsN = payoutList.filter((p) => String(p.專案ID ?? "").trim() === pid).length;
+    return { tasks: tasksN, payouts: payoutsN };
+  }, [selectedMaster, tasks, payoutList]);
   /** 欄位標籤快取：避免 render 期間大量 .find() */
   const tableColumnLabels = useMemo(() => {
     const byTable: Record<string, Record<string, string>> = {};
@@ -1130,14 +1140,19 @@ export default function DashboardPage() {
         setSelectedTask(null);
         setSaveTaskError(null);
       } else if (selectedMaster) {
+        if (showDeleteMasterConfirm) {
+          setShowDeleteMasterConfirm(false);
+          return;
+        }
         setSelectedMaster(null);
         setIsEditingMaster(false);
         setSaveMasterError(null);
+        setShowDeleteMasterConfirm(false);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedMaster, selectedTask]);
+  }, [selectedMaster, selectedTask, showDeleteMasterConfirm]);
 
   const refreshDashboardData = useCallback(
     async (
@@ -5438,6 +5453,7 @@ export default function DashboardPage() {
 
       {/* 大總表 詳情抽屜 */}
       {selectedMaster && (
+        <>
         <div className="fixed inset-0 z-40 flex items-start justify-end bg-stone-900/30 backdrop-blur-sm">
           <div className="flex h-full w-full max-w-xl flex-col border-l border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
             <header className="flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
@@ -5449,7 +5465,19 @@ export default function DashboardPage() {
                   專案ID：{selectedMaster.專案ID} · 狀態：{selectedMaster.專案狀態 ?? "—"}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {me?.role === "董事長" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSaveMasterError(null);
+                      setShowDeleteMasterConfirm(true);
+                    }}
+                    className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100"
+                  >
+                    刪除專案
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -5502,6 +5530,7 @@ export default function DashboardPage() {
                     setSelectedMaster(null);
                     setIsEditingMaster(false);
                     setSaveMasterError(null);
+                    setShowDeleteMasterConfirm(false);
                   }}
                   className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
                 >
@@ -5793,6 +5822,71 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {showDeleteMasterConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-sm">
+            <div
+              className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl ring-1 ring-stone-200/80"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-master-title"
+            >
+              <h3 id="delete-master-title" className="text-lg font-bold text-stone-900">
+                確認刪除專案？
+              </h3>
+              <p className="mt-2 text-sm leading-relaxed text-stone-600">
+                將永久刪除此筆大總表資料，並一併刪除同專案ID 之任務（{masterDeleteRelatedCounts.tasks}{" "}
+                筆）、分潤表列（{masterDeleteRelatedCounts.payouts} 筆）、財務表中該專案列。此操作無法復原。
+              </p>
+              <p className="mt-2 text-xs font-medium text-stone-500">專案ID：{selectedMaster.專案ID}</p>
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={deletingMaster}
+                  onClick={() => setShowDeleteMasterConfirm(false)}
+                  className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-100 disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={deletingMaster}
+                  onClick={async () => {
+                    setDeletingMaster(true);
+                    setSaveMasterError(null);
+                    try {
+                      const res = await fetch("/api/master", {
+                        method: "DELETE",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id: selectedMaster.id }),
+                        cache: "no-store",
+                      });
+                      const data = (await safeResJson(res)) as { ok?: boolean; error?: string };
+                      if (!res.ok || !data.ok) {
+                        setSaveMasterError(data.error ?? "刪除失敗");
+                        setDeletingMaster(false);
+                        return;
+                      }
+                      setMasterList((prev) => prev.filter((r) => r.id !== selectedMaster.id));
+                      setSelectedMaster(null);
+                      setIsEditingMaster(false);
+                      setShowDeleteMasterConfirm(false);
+                      setDeletingMaster(false);
+                      await refreshDashboardData(["tasks", "payout", "finance", "master"]);
+                    } catch (err) {
+                      setSaveMasterError(err instanceof Error ? err.message : "刪除失敗");
+                      setDeletingMaster(false);
+                    }
+                  }}
+                  className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white shadow transition hover:bg-red-500 disabled:opacity-50"
+                >
+                  {deletingMaster ? "刪除中…" : "確認刪除"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        </>
       )}
 
       {/* 任務 編輯抽屜 */}

@@ -67,6 +67,17 @@ export type UpdateTaskInput = {
   任務完成?: boolean;
 };
 
+/** 刪除該專案底下所有任務（與大總表刪除連動） */
+export async function deleteTasksBy專案ID(專案ID: string): Promise<void> {
+  const pid = String(專案ID ?? "").trim();
+  if (!pid) return;
+  const { error } = await getSupabase().from("任務").delete().eq("專案ID", pid);
+  if (error) {
+    if (error.code === "42P01") return;
+    throw error;
+  }
+}
+
 export async function updateTask(payload: UpdateTaskInput): Promise<TaskRow> {
   const 任務ID = String(payload.任務ID ?? "").trim();
   if (!任務ID) throw new Error("任務ID 為必填");
