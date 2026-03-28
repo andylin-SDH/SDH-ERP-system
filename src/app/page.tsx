@@ -76,7 +76,7 @@ export default function Home() {
             width={1257}
             height={174}
             sizes="(max-width: 448px) 100vw, 448px"
-            className="h-auto w-full max-w-lg object-contain drop-shadow-sm"
+            className="h-auto w-full max-w-[256px] object-contain drop-shadow-sm"
             priority
           />
           <h1 className="mt-4 text-center text-2xl font-bold tracking-tight text-stone-800">
