@@ -1036,62 +1036,50 @@ export default function DashboardPage() {
         </button>
       </header>
 
-      <div className="space-y-10">
-        {/* 資料分頁：按鈕下方直接顯示對應區塊內容（管理者多一個「可見性與權限」分頁） */}
-        {me && tabSections.length > 0 && (
-          <>
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-800/40 px-4 py-3">
-              {/* 小螢幕：下拉選單 */}
-              <div className="w-full md:hidden">
-                <select
-                  value={activeSection ?? ""}
-                  onChange={(e) => setActiveSection(e.target.value || null)}
-                  className="w-full rounded-xl border border-white/20 bg-slate-900/80 px-4 py-2.5 text-sm font-medium text-white focus:border-amber-500/60 focus:outline-none"
+      {/* 資料分頁：左側直向導覽 + 右側區塊內容（管理者多「可見性與權限」） */}
+      {me && tabSections.length > 0 && (
+        <div className="flex w-full flex-col gap-4 md:flex-row md:items-start md:gap-8">
+          <aside className="w-full shrink-0 rounded-2xl border border-white/10 bg-slate-900/50 p-3 shadow-lg ring-1 ring-white/5 md:sticky md:top-6 md:w-56 md:self-start">
+            <p className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">資料區塊</p>
+            <nav className="flex max-h-[min(40vh,22rem)] flex-col gap-1 overflow-y-auto pr-0.5 md:max-h-[calc(100vh-10rem)]" aria-label="Dashboard 分頁">
+              {tabSections.map((sec) => (
+                <button
+                  key={sec}
+                  type="button"
+                  draggable
+                  onDragStart={() => setDraggingTab(sec)}
+                  onDragEnd={() => setDraggingTab(null)}
+                  onDragOver={(e) => {
+                    if (!draggingTab || draggingTab === sec) return;
+                    e.preventDefault();
+                    setTabOrder((prev) => {
+                      const current = prev && prev.length ? prev : tabSections;
+                      const fromIndex = current.indexOf(draggingTab);
+                      const toIndex = current.indexOf(sec);
+                      if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return current;
+                      const next = [...current];
+                      next.splice(fromIndex, 1);
+                      next.splice(toIndex, 0, draggingTab);
+                      return next;
+                    });
+                  }}
+                  onClick={() => setActiveSection(sec)}
+                  className={`w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
+                    activeSection === sec
+                      ? "border border-amber-500/50 bg-amber-500/15 text-amber-300 shadow-sm shadow-amber-500/10"
+                      : "border border-transparent text-slate-300 hover:bg-white/5 hover:text-white"
+                  }`}
                 >
-                  {tabSections.map((sec) => (
-                    <option key={sec} value={sec}>{TABLE_LABELS[sec] ?? sec}</option>
-                  ))}
-                </select>
-              </div>
-              {/* 大螢幕：按鈕列 */}
-              <div className="hidden flex-1 flex-wrap items-center gap-2 md:flex">
-                {tabSections.map((sec) => (
-                  <button
-                    key={sec}
-                    type="button"
-                    draggable
-                    onDragStart={() => setDraggingTab(sec)}
-                    onDragEnd={() => setDraggingTab(null)}
-                    onDragOver={(e) => {
-                      if (!draggingTab || draggingTab === sec) return;
-                      e.preventDefault();
-                      setTabOrder((prev) => {
-                        const current = prev && prev.length ? prev : tabSections;
-                        const fromIndex = current.indexOf(draggingTab);
-                        const toIndex = current.indexOf(sec);
-                        if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return current;
-                        const next = [...current];
-                        next.splice(fromIndex, 1);
-                        next.splice(toIndex, 0, draggingTab);
-                        return next;
-                      });
-                    }}
-                    onClick={() => setActiveSection(sec)}
-                    className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
-                      activeSection === sec
-                        ? "bg-amber-500 text-slate-900 shadow shadow-amber-500/40"
-                        : "bg-slate-900/60 text-slate-300 hover:bg-slate-700/80"
-                    }`}
-                  >
-                    {TABLE_LABELS[sec] ?? sec}
-                  </button>
-                ))}
-              </div>
-              <p className="hidden text-[11px] text-slate-500 md:block">
-                目前區塊：<span className="font-semibold text-amber-400">{TABLE_LABELS[activeSection ?? ""] ?? activeSection ?? "—"}</span>
-              </p>
-            </div>
+                  {TABLE_LABELS[sec] ?? sec}
+                </button>
+              ))}
+            </nav>
+            <p className="mt-3 border-t border-white/10 pt-3 text-[10px] leading-relaxed text-slate-500">
+              拖曳項目可調整順序。目前：<span className="font-semibold text-amber-400/90">{TABLE_LABELS[activeSection ?? ""] ?? activeSection ?? "—"}</span>
+            </p>
+          </aside>
 
+          <div className="min-w-0 flex-1 space-y-10">
             {/* 管理者專用：可見性與權限管理分頁內容 */}
             {canEditVisibility && activeSection === "visibility" && (
               <section className="rounded-2xl border-2 border-amber-500/30 bg-slate-800/20 p-6 shadow-xl ring-1 ring-amber-500/20">
@@ -4025,9 +4013,9 @@ export default function DashboardPage() {
           )}
         </section>
         )}
-          </>
-        )}
-      </div>
+          </div>
+        </div>
+      )}
 
       {/* 大總表 新增專案 Modal */}
       {showCreateMaster && (
