@@ -527,12 +527,17 @@ export default function DashboardPage() {
 
   /** 目前登入者可見的資料區塊（③ 自訂 visibility 優先，否則 ① DB 角色可見區塊，最後 fallback 靜態 config） */
   const visibleSections = useMemo(() => {
-    if (myVisibility?.tables?.length) return myVisibility.tables;
     if (!me) return [];
-    const fromDb = systemConfig?.role_visibility?.[me.role]?.sections;
     const defaultSecs = getSectionsForRole(me.role);
-    const base = fromDb && fromDb.length > 0 ? [...fromDb] : [...defaultSecs];
-    /** 舊 DB 若未勾選總覽，仍依程式預設補上，避免升級後看不到入口 */
+    let base: string[];
+    if (myVisibility?.tables?.length) {
+      /** ③ 自訂區塊清單仍補上總覽（與①相同），否則側欄會缺「總覽」分頁 */
+      base = [...myVisibility.tables];
+    } else {
+      const fromDb = systemConfig?.role_visibility?.[me.role]?.sections;
+      base = fromDb && fromDb.length > 0 ? [...fromDb] : [...defaultSecs];
+    }
+    /** 靜態角色預設含總覽時，一律補上，避免舊 DB／舊③ 清單漏列 */
     if (defaultSecs.includes("overview") && !base.includes("overview")) return ["overview", ...base];
     return base;
   }, [me, myVisibility, systemConfig]);
@@ -547,7 +552,17 @@ export default function DashboardPage() {
     const setBase = new Set(base);
     const ordered = tabOrder.filter((k) => setBase.has(k));
     const rest = base.filter((k) => !ordered.includes(k));
-    return [...ordered, ...rest];
+    const merged = [...ordered, ...rest];
+    /** 總覽固定緊接在「可見性與權限」之後（管理者），或置於資料分頁最前，方便回到總覽 */
+    if (merged.includes("overview")) {
+      const without = merged.filter((k) => k !== "overview");
+      const visIdx = without.indexOf("visibility");
+      if (visIdx !== -1) {
+        return [...without.slice(0, visIdx + 1), "overview", ...without.slice(visIdx + 1)];
+      }
+      return ["overview", ...without];
+    }
+    return merged;
   }, [me, visibleSections, canEditVisibility, tabOrder]);
 
   /** 目前選取的區塊（分頁）：預設為 visibleSections 第 1 個 */
@@ -1121,6 +1136,15 @@ export default function DashboardPage() {
           <p className="mt-1.5 text-sm font-medium text-slate-400">
             {me?.name}（{me?.role}）· 全公司使用者、專案、任務、合作夥伴
           </p>
+          {me && visibleSections.includes("overview") && activeSection !== "overview" && (
+            <button
+              type="button"
+              onClick={() => setActiveSection("overview")}
+              className="mt-2 text-left text-sm font-semibold text-amber-400 transition hover:text-amber-300 hover:underline"
+            >
+              前往總覽
+            </button>
+          )}
         </div>
         <button
           type="button"
