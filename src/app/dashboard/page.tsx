@@ -1442,124 +1442,115 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#faf8f5] md:flex-row">
-      {/* 全高側欄：行動版抽屜、桌面可收合 */}
+    <div className="flex min-h-screen flex-col bg-[#faf8f5]">
+      {/* Logo 獨立頂列（不包在深色側欄內） */}
       {me && tabSections.length > 0 && (
-        <>
-          <div
-            className={`fixed inset-0 z-40 bg-stone-900/45 transition-opacity md:hidden ${mobileNavOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
-            aria-hidden
-            onClick={() => setMobileNavOpen(false)}
-          />
-          <aside
-            className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r border-stone-700 bg-stone-900 text-stone-100 shadow-2xl transition-transform duration-200 ease-out md:static md:z-0 md:min-h-screen md:translate-x-0 md:shadow-none ${
-              mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
-            } ${sidebarCollapsed ? "md:w-[4.25rem]" : "w-[min(100vw,17rem)] md:w-56"}`}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-stone-200/90 bg-[#faf8f5] px-4 py-3 md:px-8">
+          <Link href="/" className="block min-w-0 max-w-full" onClick={() => setMobileNavOpen(false)}>
+            <Image
+              src="/logo.png"
+              alt="SDH 盛德好"
+              width={1257}
+              height={174}
+              sizes="(max-width: 768px) 100vw, 260px"
+              className="h-7 w-auto max-w-[min(100%,260px)] object-contain object-left sm:h-8 md:h-[2.25rem]"
+            />
+          </Link>
+          <button
+            type="button"
+            className="shrink-0 rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-800 shadow-sm md:hidden"
+            onClick={() => setMobileNavOpen(true)}
+            aria-label="開啟選單"
           >
-            <div className="flex h-14 shrink-0 items-center gap-2 border-b border-stone-700 px-3">
-              <Link
-                href="/"
-                className={`min-w-0 flex-1 ${sidebarCollapsed ? "md:flex md:justify-center" : ""}`}
-                onClick={() => setMobileNavOpen(false)}
-              >
-                <Image
-                  src="/logo.png"
-                  alt="SDH 盛德好"
-                  width={1257}
-                  height={174}
-                  sizes="(max-width: 768px) 160px, 200px"
-                  className={`h-7 w-auto max-w-[160px] object-contain object-left md:max-w-[200px] ${sidebarCollapsed ? "md:max-h-7 md:max-w-[32px]" : ""}`}
-                />
-              </Link>
-              <button
-                type="button"
-                className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg text-stone-400 transition hover:bg-stone-800 hover:text-amber-300 md:inline-flex"
-                onClick={() => setSidebarCollapsed((c) => !c)}
-                aria-label={sidebarCollapsed ? "展開側欄" : "收合側欄"}
-              >
-                <span aria-hidden className="text-lg">{sidebarCollapsed ? "»" : "«"}</span>
-              </button>
-              <button
-                type="button"
-                className="rounded-lg p-2 text-stone-400 transition hover:bg-stone-800 md:hidden"
-                onClick={() => setMobileNavOpen(false)}
-                aria-label="關閉選單"
-              >
-                ✕
-              </button>
-            </div>
-            <p className={`px-3 pt-3 text-[10px] font-semibold uppercase tracking-wider text-stone-500 ${sidebarCollapsed ? "md:hidden" : ""}`}>
-              資料區塊
-            </p>
-            <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 py-3" aria-label="Dashboard 分頁">
-              {tabSections.map((sec) => {
-                const label = TABLE_LABELS[sec] ?? sec;
-                const shortLabel = Array.from(label)[0] ?? "·";
-                return (
-                  <button
-                    key={sec}
-                    type="button"
-                    draggable
-                    onDragStart={() => setDraggingTab(sec)}
-                    onDragEnd={() => setDraggingTab(null)}
-                    onDragOver={(e) => {
-                      if (!draggingTab || draggingTab === sec) return;
-                      e.preventDefault();
-                      setTabOrder((prev) => {
-                        const current = prev && prev.length ? prev : tabSections;
-                        const fromIndex = current.indexOf(draggingTab);
-                        const toIndex = current.indexOf(sec);
-                        if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return current;
-                        const next = [...current];
-                        next.splice(fromIndex, 1);
-                        next.splice(toIndex, 0, draggingTab);
-                        return next;
-                      });
-                    }}
-                    title={label}
-                    onClick={() => {
-                      setActiveSection(sec);
-                      setMobileNavOpen(false);
-                    }}
-                    className={`flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
-                      activeSection === sec
-                        ? "border border-amber-400/80 bg-stone-800 text-amber-300 shadow-sm shadow-black/20"
-                        : "border border-transparent text-stone-300 hover:bg-stone-800/90 hover:text-white"
-                    } ${sidebarCollapsed ? "md:justify-center md:px-2" : ""}`}
-                  >
-                    <span className={`min-w-0 flex-1 truncate ${sidebarCollapsed ? "md:hidden" : ""}`}>{label}</span>
-                    <span
-                      className={`hidden shrink-0 text-amber-400 md:inline-flex md:h-8 md:w-8 md:items-center md:justify-center md:rounded-lg md:border md:border-stone-600 md:text-xs md:font-bold ${sidebarCollapsed ? "md:inline-flex" : "md:hidden"}`}
-                      aria-hidden
-                    >
-                      {shortLabel}
-                    </span>
-                  </button>
-                );
-              })}
-            </nav>
-            <p className={`mt-auto shrink-0 border-t border-stone-700 px-3 py-3 text-[10px] leading-relaxed text-stone-500 ${sidebarCollapsed ? "md:hidden" : ""}`}>
-              拖曳項目可調整順序。目前：
-              <span className="font-semibold text-amber-400">{TABLE_LABELS[activeSection ?? ""] ?? activeSection ?? "—"}</span>
-            </p>
-          </aside>
-        </>
+            ☰
+          </button>
+        </div>
       )}
 
-      <div className="flex min-h-screen min-w-0 flex-1 flex-col p-4 md:p-8">
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        {/* 深色側欄：僅從 Logo 列下方開始（頂天立地至視窗底） */}
         {me && tabSections.length > 0 && (
-          <div className="mb-5 flex items-center gap-3 border-b border-stone-200/90 pb-4 md:hidden">
-            <button
-              type="button"
-              className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-800 shadow-sm"
-              onClick={() => setMobileNavOpen(true)}
-              aria-label="開啟選單"
+          <>
+            <div
+              className={`fixed bottom-0 left-0 right-0 top-14 z-40 bg-stone-900/45 transition-opacity md:hidden ${mobileNavOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+              aria-hidden
+              onClick={() => setMobileNavOpen(false)}
+            />
+            <aside
+              className={`fixed bottom-0 left-0 top-14 z-50 flex flex-col border-r border-stone-700 bg-stone-900 text-stone-100 shadow-2xl transition-transform duration-200 ease-out md:static md:top-auto md:z-0 md:max-h-none md:min-h-0 md:translate-x-0 md:self-stretch md:shadow-none ${
+                mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+              } ${sidebarCollapsed ? "md:w-[4.25rem]" : "w-[min(100vw,17rem)] md:w-56"}`}
             >
-              ☰
-            </button>
-            <span className="text-sm font-semibold text-stone-800">選單</span>
-          </div>
+              <div className="flex h-11 shrink-0 items-center justify-end gap-1 border-b border-stone-700 px-2">
+                <button
+                  type="button"
+                  className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg text-stone-400 transition hover:bg-stone-800 hover:text-amber-300 md:inline-flex"
+                  onClick={() => setSidebarCollapsed((c) => !c)}
+                  aria-label={sidebarCollapsed ? "展開側欄" : "收合側欄"}
+                >
+                  <span aria-hidden className="text-lg">{sidebarCollapsed ? "»" : "«"}</span>
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg p-2 text-stone-400 transition hover:bg-stone-800 md:hidden"
+                  onClick={() => setMobileNavOpen(false)}
+                  aria-label="關閉選單"
+                >
+                  ✕
+                </button>
+              </div>
+              <p className={`px-3 pt-3 text-[10px] font-semibold uppercase tracking-wider text-stone-500 ${sidebarCollapsed ? "md:hidden" : ""}`}>
+                資料區塊
+              </p>
+              <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 py-3" aria-label="Dashboard 分頁">
+                {tabSections.map((sec) => {
+                  const label = TABLE_LABELS[sec] ?? sec;
+                  return (
+                    <button
+                      key={sec}
+                      type="button"
+                      draggable
+                      onDragStart={() => setDraggingTab(sec)}
+                      onDragEnd={() => setDraggingTab(null)}
+                      onDragOver={(e) => {
+                        if (!draggingTab || draggingTab === sec) return;
+                        e.preventDefault();
+                        setTabOrder((prev) => {
+                          const current = prev && prev.length ? prev : tabSections;
+                          const fromIndex = current.indexOf(draggingTab);
+                          const toIndex = current.indexOf(sec);
+                          if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return current;
+                          const next = [...current];
+                          next.splice(fromIndex, 1);
+                          next.splice(toIndex, 0, draggingTab);
+                          return next;
+                        });
+                      }}
+                      title={sidebarCollapsed ? label : undefined}
+                      onClick={() => {
+                        setActiveSection(sec);
+                        setMobileNavOpen(false);
+                      }}
+                      className={`w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
+                        activeSection === sec
+                          ? "border border-amber-400/80 bg-stone-800 text-amber-300 shadow-sm shadow-black/20"
+                          : "border border-transparent text-stone-300 hover:bg-stone-800/90 hover:text-white"
+                      } ${sidebarCollapsed ? "md:px-1.5 md:text-center md:text-[10px] md:leading-tight" : ""}`}
+                    >
+                      <span className={`block min-w-0 ${sidebarCollapsed ? "md:break-words" : "truncate"}`}>{label}</span>
+                    </button>
+                  );
+                })}
+              </nav>
+              <p className={`mt-auto shrink-0 border-t border-stone-700 px-3 py-3 text-[10px] leading-relaxed text-stone-500 ${sidebarCollapsed ? "md:hidden" : ""}`}>
+                拖曳項目可調整順序。目前：
+                <span className="font-semibold text-amber-400">{TABLE_LABELS[activeSection ?? ""] ?? activeSection ?? "—"}</span>
+              </p>
+            </aside>
+          </>
         )}
+
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4 md:p-8">
 
         {(!me || tabSections.length === 0) && (
           <div className="mb-6 flex min-h-[2rem] items-center border-b border-stone-200/90 pb-4">
@@ -5148,6 +5139,7 @@ export default function DashboardPage() {
         )}
           </div>
         )}
+      </div>
       </div>
 
       {/* 大總表 新增專案 Modal */}
