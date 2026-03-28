@@ -137,6 +137,30 @@ function isProjectInProgress(專案狀態: string | null | undefined): boolean {
   return true;
 }
 
+/** 將 DB／試算表等來源的日期字串轉成 HTML date input 可用的 yyyy-MM-dd */
+function normalizeDateForInput(raw: string | null | undefined): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const slash = /^(\d{4})[/.](\d{1,2})[/.](\d{1,2})/.exec(s);
+  if (slash) {
+    const y = slash[1];
+    const m = slash[2].padStart(2, "0");
+    const d = slash[3].padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  const t = Date.parse(s);
+  if (!Number.isNaN(t)) {
+    const d = new Date(t);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  return "";
+}
+
 function taskAssigneeIsUser(t: TaskRow, userName: string, userEmail: string): boolean {
   const a = String(t.任務負責人 ?? "").trim();
   if (!a) return false;
@@ -483,7 +507,7 @@ export default function DashboardPage() {
     };
   }, [displayRoles, systemConfig]);
 
-  /** 使用者姓名列表（對應 Users；用於分潤模式 A/B 的專案BDPM、專案引薦人、專案管理員、執行管理員 下拉選單） */
+  /** 使用者姓名列表（對應 DB Users：姓名優先，無則帳號 email；新增／刪除使用者後會隨 refreshDashboardData(['users']) 更新） */
   const userNames = useMemo(
     () => [...new Set(users.map((u) => (u.name && u.name.trim()) || u.email || "").filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-TW")),
     [users]
@@ -555,11 +579,6 @@ export default function DashboardPage() {
     if ((status === PARTNER_STATUS.PENDING || status === PARTNER_STATUS.REJECTED) && creator === meEmail) return true;
     return false;
   }, [me, editingPartnerSource]);
-
-  /** 編輯 Modal 開啟時載入類別／Users 下拉選項 */
-  useEffect(() => {
-    if (showEditPartner) fetchPartnerFormOptions();
-  }, [showEditPartner, fetchPartnerFormOptions]);
 
   /** 非董事長／管理者：除 KOL開發者（及審核欄位）外皆可編輯 */
   const partnerFieldEditable = useCallback(
@@ -1017,8 +1036,8 @@ export default function DashboardPage() {
       專案名稱: selectedMaster.專案名稱 ?? "",
       專案類型: selectedMaster.專案類型 ?? "",
       專案狀態: selectedMaster.專案狀態 ?? "",
-      狀態確認日期: selectedMaster.狀態確認日期 ?? "",
-      開案日期: selectedMaster.開案日期 ?? "",
+      狀態確認日期: normalizeDateForInput(selectedMaster.狀態確認日期),
+      開案日期: normalizeDateForInput(selectedMaster.開案日期),
       專案資料夾: selectedMaster.專案資料夾 ?? "",
       專案總金額未稅: selectedMaster.專案總金額未稅 ?? "",
       專案成本: selectedMaster.專案成本 ?? "",
@@ -1181,6 +1200,13 @@ export default function DashboardPage() {
     },
     []
   );
+
+  /** 新增／編輯合作夥伴 Modal 開啟時：自 DB 重新載入 Users 與表單選項（人員增刪後清單即更新） */
+  useEffect(() => {
+    if (!showCreatePartner && !showEditPartner) return;
+    void refreshDashboardData(["users"]);
+    void fetchPartnerFormOptions();
+  }, [showCreatePartner, showEditPartner, refreshDashboardData, fetchPartnerFormOptions]);
 
   useEffect(() => {
     fetch("/api/auth/session", { credentials: "include", cache: "no-store" })
@@ -3006,12 +3032,15 @@ export default function DashboardPage() {
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">經紀人</label>
-                    <input
-                      type="text"
+                    <SearchableSelectField
+                      label="經紀人"
                       value={createPartnerForm.經紀人}
-                      onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 經紀人: e.target.value }))}
-                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
+                      onChange={(v) => setCreatePartnerForm((f) => ({ ...f, 經紀人: v }))}
+                      options={[...new Set([...userNames, createPartnerForm.經紀人].filter(Boolean))].sort((a, b) =>
+                        a.localeCompare(b, "zh-TW")
+                      )}
+                      searchPlaceholder="搜尋人員姓名或帳號…"
+                      emptyHint="尚無使用者資料時請先至「使用者」新增帳號"
                     />
                   </div>
                   <div>
@@ -3046,12 +3075,15 @@ export default function DashboardPage() {
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">主管（分潤模式 B 用）</label>
-                    <input
-                      type="text"
+                    <SearchableSelectField
+                      label="主管（分潤模式 B 用）"
                       value={createPartnerForm.主管}
-                      onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 主管: e.target.value }))}
-                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
+                      onChange={(v) => setCreatePartnerForm((f) => ({ ...f, 主管: v }))}
+                      options={[...new Set([...userNames, createPartnerForm.主管].filter(Boolean))].sort((a, b) =>
+                        a.localeCompare(b, "zh-TW")
+                      )}
+                      searchPlaceholder="搜尋人員姓名或帳號…"
+                      emptyHint="尚無使用者資料時請先至「使用者」新增帳號"
                     />
                   </div>
                   <div>
@@ -3328,16 +3360,22 @@ export default function DashboardPage() {
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">經紀人</label>
                     {partnerFieldEditable("經紀人") ? (
-                      <input
-                        type="text"
+                      <SearchableSelectField
+                        label="經紀人"
                         value={editPartnerForm.經紀人}
-                        onChange={(e) => setEditPartnerForm((f) => ({ ...f, 經紀人: e.target.value }))}
-                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
+                        onChange={(v) => setEditPartnerForm((f) => ({ ...f, 經紀人: v }))}
+                        options={[...new Set([...userNames, editPartnerForm.經紀人].filter(Boolean))].sort((a, b) =>
+                          a.localeCompare(b, "zh-TW")
+                        )}
+                        searchPlaceholder="搜尋人員姓名或帳號…"
+                        emptyHint="尚無使用者資料時請先至「使用者」新增帳號"
                       />
                     ) : (
-                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.經紀人 || "—"}</p>
+                      <>
+                        <label className="mb-1 block text-xs font-semibold text-stone-500">經紀人</label>
+                        <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.經紀人 || "—"}</p>
+                      </>
                     )}
                   </div>
                   <div>
@@ -3368,16 +3406,22 @@ export default function DashboardPage() {
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">主管（分潤模式 B 用）</label>
                     {partnerFieldEditable("主管") ? (
-                      <input
-                        type="text"
+                      <SearchableSelectField
+                        label="主管（分潤模式 B 用）"
                         value={editPartnerForm.主管}
-                        onChange={(e) => setEditPartnerForm((f) => ({ ...f, 主管: e.target.value }))}
-                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
+                        onChange={(v) => setEditPartnerForm((f) => ({ ...f, 主管: v }))}
+                        options={[...new Set([...userNames, editPartnerForm.主管].filter(Boolean))].sort((a, b) =>
+                          a.localeCompare(b, "zh-TW")
+                        )}
+                        searchPlaceholder="搜尋人員姓名或帳號…"
+                        emptyHint="尚無使用者資料時請先至「使用者」新增帳號"
                       />
                     ) : (
-                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.主管 || "—"}</p>
+                      <>
+                        <label className="mb-1 block text-xs font-semibold text-stone-500">主管（分潤模式 B 用）</label>
+                        <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.主管 || "—"}</p>
+                      </>
                     )}
                   </div>
                   <div>
@@ -3754,6 +3798,7 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={async () => {
+                      await refreshDashboardData(["users"]);
                       const opts = await fetchPartnerFormOptions();
                       setCreatePartnerForm({
                         PartnerID: opts?.nextPartnerId ?? "",
@@ -5312,6 +5357,7 @@ export default function DashboardPage() {
                     if (!isEditingMaster) {
                       setIsEditingMaster(true);
                       setSaveMasterError(null);
+                      void refreshDashboardData(["partners"]);
                       return;
                     }
                     // 取消編輯 → 還原為目前 selectedMaster 的值
@@ -5321,8 +5367,8 @@ export default function DashboardPage() {
                       專案名稱: selectedMaster.專案名稱 ?? "",
                       專案類型: selectedMaster.專案類型 ?? "",
                       專案狀態: selectedMaster.專案狀態 ?? "",
-                      狀態確認日期: selectedMaster.狀態確認日期 ?? "",
-                      開案日期: selectedMaster.開案日期 ?? "",
+                      狀態確認日期: normalizeDateForInput(selectedMaster.狀態確認日期),
+                      開案日期: normalizeDateForInput(selectedMaster.開案日期),
                       專案資料夾: selectedMaster.專案資料夾 ?? "",
                       專案總金額未稅: selectedMaster.專案總金額未稅 ?? "",
                       專案成本: selectedMaster.專案成本 ?? "",
@@ -5881,7 +5927,7 @@ function SearchableSelectField({
   }, [options, q]);
 
   return (
-    <div className={className} ref={rootRef}>
+    <div className={`relative z-20 ${className}`} ref={rootRef}>
       <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</label>
       <button
         type="button"
@@ -5894,7 +5940,7 @@ function SearchableSelectField({
         </span>
       </button>
       {open && (
-        <div className="mt-1.5 rounded-xl border border-stone-200 bg-white p-2 shadow-lg ring-1 ring-stone-200/80">
+        <div className="relative z-30 mt-1.5 rounded-xl border border-stone-200 bg-white p-2 shadow-lg ring-1 ring-stone-200/80">
           <input
             type="search"
             value={q}
@@ -6020,7 +6066,7 @@ function DateField({ label, value, onChange }: DateFieldProps) {
           type="date"
           tabIndex={0}
           className="pointer-events-none min-w-0 flex-1 border-0 bg-transparent p-0 text-sm font-medium text-stone-900 outline-none [color-scheme:light]"
-          value={value}
+          value={normalizeDateForInput(value)}
           onChange={(e) => onChange(e.target.value)}
         />
       </div>
