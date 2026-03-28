@@ -1,6 +1,14 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Noto_Sans_TC } from "next/font/google";
 import "./globals.css";
+
+/** 中文介面主字型（與 Geist 並存供 CSS 變數使用） */
+const notoSansTc = Noto_Sans_TC({
+  variable: "--font-noto-sans-tc",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -25,7 +33,7 @@ export default function RootLayout({
   return (
     <html lang="zh-TW">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${notoSansTc.variable} ${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         {children}
       </body>

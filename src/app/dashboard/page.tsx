@@ -1477,14 +1477,14 @@ export default function DashboardPage() {
               onClick={() => setMobileNavOpen(false)}
             />
             <aside
-              className={`fixed bottom-0 left-0 top-14 z-50 flex flex-col border-r border-stone-700 bg-stone-900 text-stone-100 shadow-2xl transition-transform duration-200 ease-out md:static md:top-auto md:z-0 md:max-h-none md:min-h-0 md:translate-x-0 md:self-stretch md:shadow-none ${
+              className={`fixed bottom-0 left-0 top-14 z-50 flex flex-col border-r border-stone-700/90 bg-gradient-to-b from-stone-900 via-stone-900 to-stone-950 text-stone-100 shadow-2xl shadow-black/30 transition-transform duration-200 ease-out md:static md:top-auto md:z-0 md:max-h-none md:min-h-0 md:translate-x-0 md:self-stretch md:shadow-none ${
                 mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
               } ${sidebarCollapsed ? "md:w-[4.25rem]" : "w-[min(100vw,17rem)] md:w-56"}`}
             >
-              <div className="flex h-11 shrink-0 items-center justify-end gap-1 border-b border-stone-700 px-2">
+              <div className="flex h-11 shrink-0 items-center justify-end gap-1 border-b border-stone-700/80 px-2">
                 <button
                   type="button"
-                  className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg text-stone-400 transition hover:bg-stone-800 hover:text-amber-300 md:inline-flex"
+                  className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full text-stone-400 transition-all duration-150 hover:bg-stone-800/90 hover:text-amber-300 md:inline-flex"
                   onClick={() => setSidebarCollapsed((c) => !c)}
                   aria-label={sidebarCollapsed ? "展開側欄" : "收合側欄"}
                 >
@@ -1499,10 +1499,10 @@ export default function DashboardPage() {
                   ✕
                 </button>
               </div>
-              <p className={`px-3 pt-3 text-[10px] font-semibold uppercase tracking-wider text-stone-500 ${sidebarCollapsed ? "md:hidden" : ""}`}>
+              <p className={`px-3 pt-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-500 ${sidebarCollapsed ? "md:hidden" : ""}`}>
                 資料區塊
               </p>
-              <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 py-3" aria-label="Dashboard 分頁">
+              <nav className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2.5 py-3" aria-label="Dashboard 分頁">
                 {tabSections.map((sec) => {
                   const label = TABLE_LABELS[sec] ?? sec;
                   return (
@@ -1531,10 +1531,10 @@ export default function DashboardPage() {
                         setActiveSection(sec);
                         setMobileNavOpen(false);
                       }}
-                      className={`w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
+                      className={`relative w-full overflow-hidden rounded-2xl px-3 py-2.5 text-left text-sm font-semibold transition-all duration-150 ease-out before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-1 before:rounded-r-full before:transition-all before:duration-150 before:content-[''] ${
                         activeSection === sec
-                          ? "border border-amber-400/80 bg-stone-800 text-amber-300 shadow-sm shadow-black/20"
-                          : "border border-transparent text-stone-300 hover:bg-stone-800/90 hover:text-white"
+                          ? "bg-stone-800/95 text-amber-200 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] ring-1 ring-amber-400/35 before:bg-amber-400"
+                          : "text-stone-300 ring-1 ring-transparent before:bg-transparent hover:bg-stone-800/70 hover:text-white hover:ring-stone-600/40 hover:shadow-sm"
                       } ${sidebarCollapsed ? "md:px-1.5 md:text-center md:text-[10px] md:leading-tight" : ""}`}
                     >
                       <span className={`block min-w-0 ${sidebarCollapsed ? "md:break-words" : "truncate"}`}>{label}</span>
@@ -1542,7 +1542,7 @@ export default function DashboardPage() {
                   );
                 })}
               </nav>
-              <p className={`mt-auto shrink-0 border-t border-stone-700 px-3 py-3 text-[10px] leading-relaxed text-stone-500 ${sidebarCollapsed ? "md:hidden" : ""}`}>
+              <p className={`mt-auto shrink-0 border-t border-stone-700/80 px-3 py-3 text-[10px] leading-relaxed text-stone-500 ${sidebarCollapsed ? "md:hidden" : ""}`}>
                 拖曳項目可調整順序。目前：
                 <span className="font-semibold text-amber-400">{TABLE_LABELS[activeSection ?? ""] ?? activeSection ?? "—"}</span>
               </p>
@@ -1569,15 +1569,17 @@ export default function DashboardPage() {
 
         <header className="mb-8 flex flex-wrap items-center justify-between gap-4 md:mb-10">
           <div>
-            <Link href="/" className="text-sm font-medium text-stone-500 transition hover:text-amber-800">
+            <Link href="/" className="text-sm font-medium text-stone-500 transition duration-150 hover:text-amber-800">
               ← 首頁
             </Link>
-            <h1 className="mt-2 text-2xl font-bold tracking-tight text-stone-900 sm:text-3xl">
-              {me?.name ?? "總覽"} Dashboard
-            </h1>
-            <p className="mt-1.5 text-sm font-medium text-stone-500">
-              {me?.name}（{me?.role}）· 全公司使用者、專案、任務、合作夥伴
-            </p>
+            <div className="mt-2 border-l-4 border-amber-500/80 pl-4">
+              <h1 className="text-2xl font-bold tracking-tight text-stone-900 sm:text-3xl">
+                {me?.name ?? "總覽"} Dashboard
+              </h1>
+              <p className="mt-1.5 text-sm font-medium text-stone-500">
+                {me?.name}（{me?.role}）· 全公司使用者、專案、任務、合作夥伴
+              </p>
+            </div>
             {me && visibleSections.includes("overview") && activeSection !== "overview" && (
               <button
                 type="button"
@@ -1924,9 +1926,9 @@ export default function DashboardPage() {
 
         {/* 總覽：與我有關的進行中專案 + 指派給我的任務；董事長可切全公司 */}
         {activeSection === "overview" && (
-          <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
+          <section className="rounded-3xl border border-stone-200/80 bg-gradient-to-br from-white via-white to-amber-50/40 p-4 shadow-lg shadow-stone-300/40 ring-1 ring-amber-100/50 sm:p-6">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
+              <div className="border-l-4 border-amber-500 pl-4">
                 <h2 className="text-xl font-bold tracking-tight text-stone-900">總覽</h2>
                 <p className="mt-1 text-sm text-stone-500">
                   {overviewDirectorCompanyView
@@ -1963,7 +1965,7 @@ export default function DashboardPage() {
                 {visibleOverviewKpiKeys.map((k) => (
                   <div
                     key={k}
-                    className="rounded-xl border border-stone-200/90 bg-white/90 px-3 py-3 shadow-inner ring-1 ring-amber-100/60 sm:px-4"
+                    className="rounded-2xl border border-stone-200/70 bg-white/95 px-3 py-3 shadow-md shadow-stone-200/50 ring-1 ring-amber-100/40 transition-all duration-150 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-amber-200/40 sm:px-4"
                   >
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
                       {OVERVIEW_KPI_LABELS[k]}
@@ -1984,7 +1986,7 @@ export default function DashboardPage() {
             )}
 
             <div className="grid gap-6 lg:grid-cols-2">
-              <div className="min-w-0 rounded-xl border border-stone-200/90 bg-white/95 p-4">
+              <div className="min-w-0 rounded-2xl border border-stone-200/80 bg-white/95 p-4 shadow-sm shadow-stone-200/50 ring-1 ring-stone-100/80">
                 <h3 className="mb-1 text-sm font-bold text-amber-800">
                   {overviewDirectorCompanyView ? "進行中專案" : "與我相關的進行中專案"}
                 </h3>
@@ -2021,7 +2023,7 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              <div className="min-w-0 rounded-xl border border-stone-200/90 bg-white/95 p-4">
+              <div className="min-w-0 rounded-2xl border border-stone-200/80 bg-white/95 p-4 shadow-sm shadow-stone-200/50 ring-1 ring-stone-100/80">
                 <h3 className="mb-1 text-sm font-bold text-amber-800">
                   {overviewDirectorCompanyView ? "未完成任務" : "指派給我的任務"}
                 </h3>
