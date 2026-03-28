@@ -1209,14 +1209,14 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-[#faf8f5] p-8">
       {/* Logo 獨立一欄，置頂 */}
-      <div className="mb-6 flex items-center border-b border-stone-200/90 pb-4">
+      <div className="mb-6 flex min-h-[3.5rem] items-center border-b border-stone-200/90 pb-4">
         <Link href="/" className="block">
           <Image
             src="/logo.jpg"
             alt="SDH 盛德好"
-            width={72}
-            height={29}
-            className="h-[29px] w-auto object-contain object-left"
+            width={280}
+            height={80}
+            className="h-[52px] w-auto max-w-[min(100%,280px)] object-contain object-left sm:h-14"
           />
         </Link>
       </div>
