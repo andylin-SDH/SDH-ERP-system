@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { User } from "@/lib/types";
@@ -430,6 +430,11 @@ export default function DashboardPage() {
     () => systemConfig?.task_type_options ?? [...DEFAULT_TASK_TYPE_OPTIONS],
     [systemConfig]
   );
+  /** 合作夥伴（已核准）的「合作夥伴名稱」＝大總表 KOL 名稱選項 */
+  const kolNameOptionsFromDb = useMemo(() => {
+    const names = partners.map((p) => String(p.合作夥伴名稱 ?? "").trim()).filter(Boolean);
+    return [...new Set(names)].sort((a, b) => a.localeCompare(b, "zh-Hant"));
+  }, [partners]);
   /** 欄位標籤快取：避免 render 期間大量 .find() */
   const tableColumnLabels = useMemo(() => {
     const byTable: Record<string, Record<string, string>> = {};
@@ -4922,7 +4927,14 @@ export default function DashboardPage() {
                 <section>
                   <h3 className="mb-3 text-base font-bold text-amber-800">人員與分潤設定</h3>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-4">
-                    <InputField label="KOL名稱" value={createForm.KOL名稱} onChange={(v) => setCreateForm((f) => ({ ...f, KOL名稱: v }))} />
+                    <SearchableSelectField
+                      label="KOL名稱"
+                      value={createForm.KOL名稱}
+                      onChange={(v) => setCreateForm((f) => ({ ...f, KOL名稱: v }))}
+                      options={kolNameOptionsFromDb}
+                      searchPlaceholder="搜尋 KOL…"
+                      emptyHint="尚無合作夥伴資料時請先至「合作夥伴」新增已核准 KOL"
+                    />
                     <InputField label="廠商名稱" value={createForm.廠商名稱} onChange={(v) => setCreateForm((f) => ({ ...f, 廠商名稱: v }))} />
                     {isPayoutModeB(createForm.專案類型) ? (
                       <>
@@ -5536,7 +5548,16 @@ export default function DashboardPage() {
                 <h3 className="mb-3 text-base font-bold text-amber-800">人員與分潤設定</h3>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                   {isEditingMaster ? (
-                    <InputField label="KOL名稱" value={editMasterForm.KOL名稱} onChange={(v) => setEditMasterForm((f) => ({ ...f, KOL名稱: v }))} />
+                    <SearchableSelectField
+                      label="KOL名稱"
+                      value={editMasterForm.KOL名稱}
+                      onChange={(v) => setEditMasterForm((f) => ({ ...f, KOL名稱: v }))}
+                      options={[...new Set([...kolNameOptionsFromDb, editMasterForm.KOL名稱].filter(Boolean))].sort((a, b) =>
+                        a.localeCompare(b, "zh-Hant")
+                      )}
+                      searchPlaceholder="搜尋 KOL…"
+                      emptyHint="尚無合作夥伴資料時請先至「合作夥伴」新增已核准 KOL"
+                    />
                   ) : (
                     <Field label="KOL名稱" value={selectedMaster.KOL名稱} />
                   )}
@@ -5813,6 +5834,117 @@ function NumberField({ label, value, onChange, className = "" }: NumberFieldProp
   );
 }
 
+interface SearchableSelectFieldProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  className?: string;
+  /** 頂部搜尋框 placeholder */
+  searchPlaceholder?: string;
+  /** 選項為空時的說明（例如請先至合作夥伴新增） */
+  emptyHint?: string;
+}
+
+/** 可搜尋下拉：頂部搜尋列 + 選項列表（內嵌展開，避免置於 Modal 內被 overflow 裁切） */
+function SearchableSelectField({
+  label,
+  value,
+  onChange,
+  options,
+  className = "",
+  searchPlaceholder = "搜尋…",
+  emptyHint,
+}: SearchableSelectFieldProps) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) setQ("");
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+    const base = [...new Set(options)].filter(Boolean);
+    if (!qq) return base;
+    return base.filter((o) => o.toLowerCase().includes(qq));
+  }, [options, q]);
+
+  return (
+    <div className={className} ref={rootRef}>
+      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</label>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-left text-sm font-medium transition hover:border-amber-300/80 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+      >
+        <span className={`min-w-0 truncate ${value ? "text-stone-900" : "text-stone-400"}`}>{value || "請選擇"}</span>
+        <span className="shrink-0 text-stone-400" aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open && (
+        <div className="mt-1.5 rounded-xl border border-stone-200 bg-white p-2 shadow-lg ring-1 ring-stone-200/80">
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={searchPlaceholder}
+            className="mb-2 w-full rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+            autoComplete="off"
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+          <ul className="max-h-52 overflow-y-auto rounded-lg">
+            <li>
+              <button
+                type="button"
+                className="w-full rounded-lg px-2 py-2 text-left text-xs text-stone-500 transition hover:bg-amber-50"
+                onClick={() => {
+                  onChange("");
+                  setOpen(false);
+                }}
+              >
+                （清空）
+              </button>
+            </li>
+            {filtered.map((name) => (
+              <li key={name}>
+                <button
+                  type="button"
+                  className={`w-full rounded-lg px-2 py-2 text-left text-xs transition hover:bg-amber-50 ${
+                    value === name ? "bg-amber-50/80 font-semibold text-amber-900" : "text-stone-800"
+                  }`}
+                  onClick={() => {
+                    onChange(name);
+                    setOpen(false);
+                  }}
+                >
+                  {name}
+                </button>
+              </li>
+            ))}
+            {filtered.length === 0 && (
+              <li className="px-2 py-3 text-center text-xs leading-relaxed text-stone-400">
+                {options.length === 0 ? emptyHint ?? "無可選項目" : "無符合搜尋的項目"}
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface SelectFieldProps {
   label: string;
   value: string;
@@ -5848,15 +5980,50 @@ interface DateFieldProps {
 }
 
 function DateField({ label, value, onChange }: DateFieldProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const openPicker = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    try {
+      if (typeof el.showPicker === "function") {
+        void el.showPicker();
+        return;
+      }
+    } catch {
+      /* 非使用者手勢等情境可能拋錯 */
+    }
+    el.focus();
+    try {
+      el.click();
+    } catch {
+      /* ignore */
+    }
+  };
+
   return (
     <div>
       <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</label>
-      <input
-        type="date"
-        className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 outline-none transition focus:border-amber-400/70 focus:ring-2 focus:ring-amber-500/20 [color-scheme:light]"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
+      {/* 整欄可點：原生 date 常只有右側圖示能開日曆；input 設 pointer-events-none，點擊由外層呼叫 showPicker */}
+      <div
+        className="flex w-full cursor-pointer items-center rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 transition [color-scheme:light] focus-within:border-amber-400/70 focus-within:ring-2 focus-within:ring-amber-500/20"
+        onClick={openPicker}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            openPicker();
+          }
+        }}
+        role="presentation"
+      >
+        <input
+          ref={inputRef}
+          type="date"
+          tabIndex={0}
+          className="pointer-events-none min-w-0 flex-1 border-0 bg-transparent p-0 text-sm font-medium text-stone-900 outline-none [color-scheme:light]"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </div>
     </div>
   );
 }
