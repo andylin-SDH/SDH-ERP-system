@@ -64,7 +64,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "專案ID", label: "專案ID" },
     { key: "專案名稱", label: "專案名稱" },
     { key: "任務", label: "任務" },
-    { key: "狀態", label: "狀態" },
+    { key: "任務類型", label: "任務類型" },
     { key: "任務負責人", label: "任務負責人" },
     { key: "任務完成", label: "任務完成" },
   ],

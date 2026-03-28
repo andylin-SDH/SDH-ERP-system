@@ -12,6 +12,7 @@ import type { PayoutRow } from "@/lib/db/payout";
 import { applyDedupeRules } from "@/lib/payout-dedupe";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
 import { PROJECT_TYPES } from "@/config/project-types";
+import { DEFAULT_TASK_TYPE_OPTIONS } from "@/config/task-type-defaults";
 import { MASTER_PAYOUT_DEFAULTS, isPayoutModeB } from "@/config/master-payout-defaults";
 import { DEFAULT_PAYOUT_DEDUPE_RULES, type PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
 import { TABLE_KEYS, TABLE_LABELS, TABLE_COLUMNS } from "@/config/table-columns";
@@ -209,11 +210,11 @@ export default function DashboardPage() {
   const [partnersLoadError, setPartnersLoadError] = useState<string | null>(null);
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const [addingTaskFor, setAddingTaskFor] = useState<string | null>(null);
-  const [newTaskForm, setNewTaskForm] = useState({ 任務名稱: "", 任務狀態: "", 任務負責人: "" });
+  const [newTaskForm, setNewTaskForm] = useState({ 任務名稱: "", 任務類型: "", 任務負責人: "" });
   const [addingTask, setAddingTask] = useState(false);
   const [addTaskError, setAddTaskError] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskRow | null>(null);
-  const [editTaskForm, setEditTaskForm] = useState({ 任務名稱: "", 任務狀態: "", 任務負責人: "", 任務完成: false });
+  const [editTaskForm, setEditTaskForm] = useState({ 任務名稱: "", 任務類型: "", 任務負責人: "", 任務完成: false });
   const [savingTask, setSavingTask] = useState(false);
   const [saveTaskError, setSaveTaskError] = useState<string | null>(null);
   const [remindingTaskId, setRemindingTaskId] = useState<string | null>(null);
@@ -376,6 +377,7 @@ export default function DashboardPage() {
   const [systemConfig, setSystemConfig] = useState<{
     master_payout_defaults: Record<string, string>;
     project_types: string[];
+    task_type_options?: string[];
     role_visibility: Record<string, { sections: string[] }>;
     roles?: string[];
     payout_dedupe_rules?: PayoutDedupeRulesByMode;
@@ -416,6 +418,10 @@ export default function DashboardPage() {
   );
   const projectTypesOptions = useMemo(
     () => systemConfig?.project_types ?? [...PROJECT_TYPES],
+    [systemConfig]
+  );
+  const taskTypeOptions = useMemo(
+    () => systemConfig?.task_type_options ?? [...DEFAULT_TASK_TYPE_OPTIONS],
     [systemConfig]
   );
   /** 欄位標籤快取：避免 render 期間大量 .find() */
@@ -633,8 +639,12 @@ export default function DashboardPage() {
   const getVisibleColumnKeys = useCallback(
     (tableKey: string): string[] => {
       const cols = myVisibility?.columns?.[tableKey];
-      if (!cols || cols.includes("*")) return (TABLE_COLUMNS[tableKey] ?? []).map((c) => c.key);
-      return cols;
+      const normalized =
+        tableKey === "tasks" && cols && !cols.includes("*")
+          ? cols.map((c) => (c === "狀態" ? "任務類型" : c))
+          : cols;
+      if (!normalized || normalized.includes("*")) return (TABLE_COLUMNS[tableKey] ?? []).map((c) => c.key);
+      return normalized;
     },
     [myVisibility]
   );
@@ -1071,7 +1081,7 @@ export default function DashboardPage() {
     if (!selectedTask) return;
     setEditTaskForm({
       任務名稱: selectedTask.任務 ?? "",
-      任務狀態: selectedTask.狀態 ?? "",
+      任務類型: selectedTask.任務類型 ?? "",
       任務負責人: selectedTask.任務負責人 ?? "",
       任務完成: Boolean(selectedTask.任務完成),
     });
@@ -1141,6 +1151,7 @@ export default function DashboardPage() {
           config?: {
             master_payout_defaults: Record<string, string>;
             project_types: string[];
+            task_type_options?: string[];
             role_visibility: Record<string, { sections: string[] }>;
             roles?: string[];
             payout_dedupe_rules?: PayoutDedupeRulesByMode;
@@ -1795,7 +1806,7 @@ export default function DashboardPage() {
                         <tr>
                           <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-amber-800">任務</th>
                           <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-stone-600">專案</th>
-                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-stone-600">狀態</th>
+                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-stone-600">任務類型</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-200">
@@ -1807,7 +1818,7 @@ export default function DashboardPage() {
                             <td className="max-w-[7rem] truncate px-3 py-2 text-stone-500" title={t.專案名稱 ?? t.專案ID ?? ""}>
                               {t.專案名稱 ?? t.專案ID ?? "—"}
                             </td>
-                            <td className="whitespace-nowrap px-3 py-2 text-stone-600">{t.狀態 ?? "—"}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-stone-600">{t.任務類型 ?? "—"}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1944,7 +1955,7 @@ export default function DashboardPage() {
                                         setExpandedProjectId((prev) => (prev === pid ? null : pid));
                                         setAddingTaskFor(null);
                                         setAddTaskError(null);
-                                        setNewTaskForm({ 任務名稱: "", 任務狀態: "", 任務負責人: "" });
+                                        setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "" });
                                       }}
                                       className="mr-2 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-stone-50 text-stone-500 transition hover:bg-amber-100/90 hover:border-amber-300 hover:text-amber-800"
                                       title={isExpanded ? "收合任務" : "展開任務"}
@@ -1981,7 +1992,7 @@ export default function DashboardPage() {
                                       <thead className="bg-amber-100/80">
                                         <tr>
                                           <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">任務</th>
-                                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">狀態</th>
+                                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">任務類型</th>
                                           <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">任務負責人</th>
                                           <th className="px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">完成</th>
                                         </tr>
@@ -2001,7 +2012,7 @@ export default function DashboardPage() {
                                               onClick={() => setSelectedTask(t)}
                                             >
                                               <td className="px-3 py-2.5 text-sm text-stone-900">{t.任務 ?? "—"}</td>
-                                              <td className="whitespace-nowrap px-3 py-2.5 text-sm text-stone-600">{t.狀態 ?? "—"}</td>
+                                              <td className="whitespace-nowrap px-3 py-2.5 text-sm text-stone-600">{t.任務類型 ?? "—"}</td>
                                               <td className="whitespace-nowrap px-3 py-2.5 text-sm text-stone-600">
                                                 <span className="inline-flex items-center gap-1">
                                                   {t.任務負責人 ?? "—"}
@@ -2093,7 +2104,7 @@ export default function DashboardPage() {
                                               專案ID: pid,
                                               專案名稱: row.專案名稱 ?? "",
                                               任務名稱: newTaskForm.任務名稱.trim(),
-                                              任務狀態: newTaskForm.任務狀態.trim() || null,
+                                              任務類型: newTaskForm.任務類型.trim() || null,
                                               負責人: newTaskForm.任務負責人.trim() || null,
                                             }),
                                           });
@@ -2104,7 +2115,7 @@ export default function DashboardPage() {
                                             return;
                                           }
                                           setTasks((prev) => [data.task!, ...prev]);
-                                          setNewTaskForm({ 任務名稱: "", 任務狀態: "", 任務負責人: "" });
+                                          setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "" });
                                           setAddingTaskFor(null);
                                         } catch (err: unknown) {
                                           setAddTaskError(err instanceof Error ? err.message : "新增失敗");
@@ -2124,14 +2135,19 @@ export default function DashboardPage() {
                                         />
                                       </div>
                                       <div>
-                                        <label className="mb-1 block text-xs font-semibold text-stone-500">狀態</label>
-                                        <input
-                                          type="text"
-                                          value={newTaskForm.任務狀態}
-                                          onChange={(e) => setNewTaskForm((f) => ({ ...f, 任務狀態: e.target.value }))}
-                                          className="w-28 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
-                                          placeholder="如：進行中"
-                                        />
+                                        <label className="mb-1 block text-xs font-semibold text-stone-500">任務類型</label>
+                                        <select
+                                          value={newTaskForm.任務類型}
+                                          onChange={(e) => setNewTaskForm((f) => ({ ...f, 任務類型: e.target.value }))}
+                                          className="min-w-[8rem] rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                                        >
+                                          <option value="">—</option>
+                                          {taskTypeOptions.map((o) => (
+                                            <option key={o} value={o}>
+                                              {o}
+                                            </option>
+                                          ))}
+                                        </select>
                                       </div>
                                       <div>
                                         <label className="mb-1 block text-xs font-semibold text-stone-500">任務負責人</label>
@@ -2161,7 +2177,7 @@ export default function DashboardPage() {
                                           onClick={() => {
                                             setAddingTaskFor(null);
                                             setAddTaskError(null);
-                                            setNewTaskForm({ 任務名稱: "", 任務狀態: "", 任務負責人: "" });
+                                            setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "" });
                                           }}
                                           className="rounded-lg border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-100"
                                         >
@@ -2175,7 +2191,7 @@ export default function DashboardPage() {
                                       onClick={() => {
                                         setAddingTaskFor(pid);
                                         setAddTaskError(null);
-                                        setNewTaskForm({ 任務名稱: "", 任務狀態: "", 任務負責人: "" });
+                                        setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "" });
                                       }}
                                       className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100/90"
                                     >
@@ -2425,6 +2441,82 @@ export default function DashboardPage() {
                       if (e.key !== "Enter") return;
                       const v = (e.target as HTMLInputElement).value.trim();
                       if (v && !projectTypesOptions.includes(v)) { setSystemConfig((c) => ({ ...(c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} }), project_types: [...projectTypesOptions, v] })); (e.target as HTMLInputElement).value = ""; }
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* 任務類型選項（任務表「任務類型」下拉） */}
+              <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="font-semibold text-amber-800">任務類型選項</h3>
+                  <button
+                    type="button"
+                    disabled={savingConfig === "task_type_options"}
+                    onClick={async () => {
+                      setSavingConfig("task_type_options");
+                      try {
+                        const res = await fetch("/api/system-config", {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ key: "task_type_options", value: taskTypeOptions }),
+                        });
+                        const data = (await safeResJson(res)) as { ok?: boolean; config?: { task_type_options?: string[] } };
+                        if (res.ok && data.ok && data.config) {
+                          setSystemConfig((c) => (c ? { ...c, task_type_options: data.config!.task_type_options } : null));
+                          await refreshDashboardData(["systemConfig"]);
+                        }
+                      } catch {
+                        /* ignore */
+                      }
+                      setSavingConfig(null);
+                    }}
+                    className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
+                  >
+                    {savingConfig === "task_type_options" ? "儲存中" : "儲存"}
+                  </button>
+                </div>
+                <p className="mb-3 text-xs text-stone-500">任務列表「任務類型」欄的下拉選項；可自訂分類名稱。</p>
+                <div className="flex flex-wrap gap-2">
+                  {taskTypeOptions.map((s, i) => (
+                    <span key={`${s}-${i}`} className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-1 text-xs text-stone-600">
+                      {s}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSystemConfig((c) => ({
+                            ...(c ?? {
+                              master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS },
+                              project_types: [...PROJECT_TYPES],
+                              role_visibility: {},
+                            }),
+                            task_type_options: taskTypeOptions.filter((_, j) => j !== i),
+                          }))
+                        }
+                        className="text-stone-500 hover:text-amber-800"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    placeholder="+ 新增類型"
+                    className="w-28 rounded border border-dashed border-stone-300 bg-transparent px-2 py-1 text-xs text-stone-500 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none"
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      const v = (e.target as HTMLInputElement).value.trim();
+                      if (v && !taskTypeOptions.includes(v)) {
+                        setSystemConfig((c) => ({
+                          ...(c ?? {
+                            master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS },
+                            project_types: [...PROJECT_TYPES],
+                            role_visibility: {},
+                          }),
+                          task_type_options: [...taskTypeOptions, v],
+                        }));
+                        (e.target as HTMLInputElement).value = "";
+                      }
                     }}
                   />
                 </div>
@@ -4063,11 +4155,74 @@ export default function DashboardPage() {
                   onClick={() => setSelectedTask(t)}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-stone-900">{t.任務 ?? "—"}</p>
-                      <p className="mt-0.5 text-xs text-stone-500">{t.專案名稱 ?? "—"}</p>
+                    <div className="flex min-w-0 flex-1 items-start gap-2">
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!t.任務ID) return;
+                          const next = !t.任務完成;
+                          try {
+                            const res = await fetch("/api/tasks", {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ 任務ID: t.任務ID, 任務完成: next }),
+                            });
+                            const data = (await safeResJson(res)) as { ok?: boolean; task?: TaskRow };
+                            if (res.ok && data.ok) setTasks((prev) => prev.map((x) => (x.任務ID === t.任務ID ? data.task! : x)));
+                          } catch {
+                            /* 忽略 */
+                          }
+                        }}
+                        disabled={!t.任務ID}
+                        className="mt-0.5 inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border-2 transition hover:border-amber-400/70 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        style={{
+                          backgroundColor: t.任務完成 ? "rgba(245,158,11,0.25)" : "transparent",
+                          borderColor: t.任務完成 ? "rgba(245,158,11,0.5)" : "rgb(214 211 209)",
+                        }}
+                        title={t.任務完成 ? "點擊取消完成" : "點擊標記完成"}
+                      >
+                        {t.任務完成 ? <span className="text-sm text-amber-800">✓</span> : null}
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-stone-900">{t.任務 ?? "—"}</p>
+                        <p className="mt-0.5 text-xs text-stone-500">{t.專案名稱 ?? "—"}</p>
+                      </div>
                     </div>
                     <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${t.任務完成 ? "bg-amber-100 text-amber-800" : "bg-stone-200 text-stone-500"}`}>{t.任務完成 ? "已完成" : "進行中"}</span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    <span className="text-xs text-stone-500">任務類型</span>
+                    <select
+                      value={t.任務類型 ?? ""}
+                      onChange={async (e) => {
+                        if (!t.任務ID) return;
+                        const next = e.target.value.trim();
+                        try {
+                          const res = await fetch("/api/tasks", {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ 任務ID: t.任務ID, 任務類型: next || null }),
+                          });
+                          const data = (await safeResJson(res)) as { ok?: boolean; task?: TaskRow };
+                          if (res.ok && data.ok) setTasks((prev) => prev.map((x) => (x.任務ID === t.任務ID ? data.task! : x)));
+                        } catch {
+                          /* 忽略 */
+                        }
+                      }}
+                      disabled={!t.任務ID}
+                      className="min-w-0 max-w-full flex-1 rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-xs font-medium text-stone-700 focus:border-amber-400/70 focus:outline-none disabled:opacity-50"
+                    >
+                      <option value="">—</option>
+                      {taskTypeOptions.map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                      {t.任務類型 && !taskTypeOptions.includes(t.任務類型) ? (
+                        <option value={t.任務類型}>{t.任務類型}</option>
+                      ) : null}
+                    </select>
                   </div>
                   <p className="mt-2 text-xs text-stone-500">負責人：{t.任務負責人 ?? "—"}</p>
                 </div>
@@ -4110,6 +4265,82 @@ export default function DashboardPage() {
                         if (k === "專案ID") {
                           return (
                             <td key={k} className="whitespace-nowrap px-4 py-3.5 text-xs font-normal text-stone-500" title={t.專案ID}>{t.專案ID ? "SDH-…" : "—"}</td>
+                          );
+                        }
+                        if (k === "任務") {
+                          const taskTitle = t.任務 ?? "—";
+                          return (
+                            <td key={k} className="max-w-[280px] px-4 py-3.5">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (!t.任務ID) return;
+                                    const next = !t.任務完成;
+                                    try {
+                                      const res = await fetch("/api/tasks", {
+                                        method: "PATCH",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ 任務ID: t.任務ID, 任務完成: next }),
+                                      });
+                                      const data = (await safeResJson(res)) as { ok?: boolean; task?: TaskRow };
+                                      if (res.ok && data.ok) setTasks((prev) => prev.map((x) => (x.任務ID === t.任務ID ? data.task! : x)));
+                                    } catch {
+                                      /* 忽略 */
+                                    }
+                                  }}
+                                  disabled={!t.任務ID}
+                                  className="inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md border-2 transition hover:border-amber-400/70 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                  style={{
+                                    backgroundColor: t.任務完成 ? "rgba(245,158,11,0.25)" : "transparent",
+                                    borderColor: t.任務完成 ? "rgba(245,158,11,0.5)" : "rgb(214 211 209)",
+                                  }}
+                                  title={t.任務完成 ? "點擊取消完成" : "點擊標記完成"}
+                                >
+                                  {t.任務完成 ? <span className="text-amber-800">✓</span> : null}
+                                </button>
+                                <span className="min-w-0 flex-1 truncate text-sm font-medium text-stone-900" title={taskTitle !== "—" ? taskTitle : undefined}>
+                                  {taskTitle}
+                                </span>
+                              </div>
+                            </td>
+                          );
+                        }
+                        if (k === "任務類型") {
+                          const val = t.任務類型 ?? "";
+                          const showOrphan = Boolean(val && !taskTypeOptions.includes(val));
+                          return (
+                            <td key={k} className="whitespace-nowrap px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
+                              <select
+                                value={val}
+                                onChange={async (e) => {
+                                  if (!t.任務ID) return;
+                                  const next = e.target.value.trim();
+                                  try {
+                                    const res = await fetch("/api/tasks", {
+                                      method: "PATCH",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ 任務ID: t.任務ID, 任務類型: next || null }),
+                                    });
+                                    const data = (await safeResJson(res)) as { ok?: boolean; task?: TaskRow };
+                                    if (res.ok && data.ok) setTasks((prev) => prev.map((x) => (x.任務ID === t.任務ID ? data.task! : x)));
+                                  } catch {
+                                    /* 忽略 */
+                                  }
+                                }}
+                                disabled={!t.任務ID}
+                                className="max-w-[220px] rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-sm font-medium text-stone-700 focus:border-amber-400/70 focus:outline-none disabled:opacity-50"
+                              >
+                                <option value="">—</option>
+                                {taskTypeOptions.map((o) => (
+                                  <option key={o} value={o}>
+                                    {o}
+                                  </option>
+                                ))}
+                                {showOrphan ? <option value={val}>{val}</option> : null}
+                              </select>
+                            </td>
                           );
                         }
                         if (k === "任務負責人") {
@@ -4157,7 +4388,7 @@ export default function DashboardPage() {
                                   } catch { /* 忽略 */ }
                                 }}
                                 className="inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md border-2 transition hover:border-amber-400/70 hover:bg-amber-50"
-                                style={{ backgroundColor: t.任務完成 ? "rgba(245,158,11,0.25)" : "transparent", borderColor: t.任務完成 ? "rgba(245,158,11,0.5)" : "rgba(255,255,255,0.2)" }}
+                                style={{ backgroundColor: t.任務完成 ? "rgba(245,158,11,0.25)" : "transparent", borderColor: t.任務完成 ? "rgba(245,158,11,0.5)" : "rgb(214 211 209)" }}
                                 title={t.任務完成 ? "點擊取消完成" : "點擊標記完成"}
                               >
                                 {t.任務完成 ? <span className="text-amber-800">✓</span> : null}
@@ -5313,7 +5544,7 @@ export default function DashboardPage() {
                     body: JSON.stringify({
                       任務ID: selectedTask.任務ID,
                       任務名稱: editTaskForm.任務名稱.trim() || null,
-                      任務狀態: editTaskForm.任務狀態.trim() || null,
+                      任務類型: editTaskForm.任務類型.trim() || null,
                       負責人: editTaskForm.任務負責人.trim() || null,
                       任務完成: editTaskForm.任務完成,
                     }),
@@ -5329,7 +5560,7 @@ export default function DashboardPage() {
                   await refreshDashboardData(["tasks"]);
                   setEditTaskForm({
                     任務名稱: data.task.任務 ?? "",
-                    任務狀態: data.task.狀態 ?? "",
+                    任務類型: data.task.任務類型 ?? "",
                     任務負責人: data.task.任務負責人 ?? "",
                     任務完成: Boolean(data.task.任務完成),
                   });
@@ -5355,14 +5586,22 @@ export default function DashboardPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">狀態</label>
-                  <input
-                    type="text"
-                    value={editTaskForm.任務狀態}
-                    onChange={(e) => setEditTaskForm((f) => ({ ...f, 任務狀態: e.target.value }))}
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">任務類型</label>
+                  <select
+                    value={editTaskForm.任務類型}
+                    onChange={(e) => setEditTaskForm((f) => ({ ...f, 任務類型: e.target.value }))}
                     className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
-                    placeholder="如：進行中"
-                  />
+                  >
+                    <option value="">—</option>
+                    {taskTypeOptions.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                    {editTaskForm.任務類型 && !taskTypeOptions.includes(editTaskForm.任務類型) ? (
+                      <option value={editTaskForm.任務類型}>{editTaskForm.任務類型}</option>
+                    ) : null}
+                  </select>
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">任務負責人</label>

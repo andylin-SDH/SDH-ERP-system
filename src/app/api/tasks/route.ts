@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   try {
-    const body = (await request.json()) as { 專案ID?: string; 專案名稱?: string; 任務名稱?: string; 任務狀態?: string; 負責人?: string } | null;
+    const body = (await request.json()) as { 專案ID?: string; 專案名稱?: string; 任務名稱?: string; 任務類型?: string; 負責人?: string } | null;
     const 專案ID = String(body?.專案ID ?? "").trim();
     if (!專案ID) {
       return NextResponse.json({ ok: false, error: "專案ID 為必填" }, { status: 400 });
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
       專案ID,
       專案名稱: 專案名稱 ?? null,
       任務名稱,
-      任務狀態: body?.任務狀態 ?? null,
+      任務類型: body?.任務類型 ?? null,
       負責人: body?.負責人 ?? null,
     });
     // 若有指定負責人，非同步寄送指派通知（失敗不影響 API 回應）
@@ -71,7 +71,7 @@ export async function PATCH(request: NextRequest) {
     const body = (await request.json()) as {
       任務ID?: string;
       任務名稱?: string;
-      任務狀態?: string;
+      任務類型?: string;
       負責人?: string;
       任務完成?: boolean;
     } | null;
@@ -82,7 +82,7 @@ export async function PATCH(request: NextRequest) {
     const task = await updateTask({
       任務ID,
       任務名稱: body?.任務名稱,
-      任務狀態: body?.任務狀態,
+      任務類型: body?.任務類型,
       負責人: body?.負責人,
       任務完成: body?.任務完成,
     });

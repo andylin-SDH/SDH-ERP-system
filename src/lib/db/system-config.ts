@@ -14,6 +14,7 @@ import {
   type PayoutDedupeRulesByMode,
 } from "@/config/payout-dedupe-defaults";
 import { DEFAULT_OVERVIEW_KPI_BY_ROLE, OVERVIEW_KPI_KEYS } from "@/config/overview-kpi";
+import { DEFAULT_TASK_TYPE_OPTIONS } from "@/config/task-type-defaults";
 
 export type PayoutDefaults = Record<string, string>;
 export type ProjectTypes = string[];
@@ -66,6 +67,7 @@ function mergeOverviewKpiByRole(
 export async function getSystemConfig(): Promise<{
   master_payout_defaults: PayoutDefaults;
   project_types: ProjectTypes;
+  task_type_options: string[];
   role_visibility: RoleVisibility;
   roles: string[];
   role_permissions: RolePermissions;
@@ -86,6 +88,7 @@ export async function getSystemConfig(): Promise<{
   const permsRaw = map.get("role_permissions") as RolePermissions | undefined;
   const dedupeRaw = map.get("payout_dedupe_rules") as PayoutDedupeRulesByMode | PayoutDedupeRule[] | undefined;
   const overviewKpiRaw = map.get("overview_kpi_by_role") as Record<string, string[]> | undefined;
+  const taskTypeRaw = (map.get("task_type_options") ?? map.get("task_status_options")) as string[] | undefined;
 
   const roles = Array.isArray(rolesRaw) && rolesRaw.length > 0 ? rolesRaw : [...ROLES];
   const defaultPerms = getDefaultRolePermissions(roles);
@@ -133,6 +136,10 @@ export async function getSystemConfig(): Promise<{
       ? { ...MASTER_PAYOUT_DEFAULTS, ...payoutRaw }
       : { ...MASTER_PAYOUT_DEFAULTS },
     project_types: Array.isArray(projectRaw) && projectRaw.length > 0 ? projectRaw : [...PROJECT_TYPES],
+    task_type_options:
+      Array.isArray(taskTypeRaw) && taskTypeRaw.length > 0
+        ? taskTypeRaw.map(String).filter((s) => s.trim().length > 0)
+        : [...DEFAULT_TASK_TYPE_OPTIONS],
     role_visibility: roleRaw && Object.keys(roleRaw).length > 0 ? roleRaw : toRoleVisibilityForStorage(ROLE_VISIBILITY),
     roles,
     role_permissions: mergedPerms,

@@ -12,7 +12,7 @@ function rowToTask(r: Record<string, unknown>): TaskRow {
     專案ID: r.專案ID as string,
     專案名稱: (r.專案名稱 as string) ?? undefined,
     任務: (r.任務名稱 as string) ?? undefined,
-    狀態: (r.任務狀態 as string) ?? undefined,
+    任務類型: ((r.任務類型 ?? r.任務狀態) as string) ?? undefined,
     任務負責人: (r.負責人 as string) ?? undefined,
     任務完成: Boolean(r.任務完成),
   };
@@ -32,7 +32,7 @@ export type NewTaskInput = {
   專案ID: string;
   專案名稱?: string | null;
   任務名稱: string;
-  任務狀態?: string | null;
+  任務類型?: string | null;
   負責人?: string | null;
 };
 
@@ -44,7 +44,7 @@ export async function createTask(payload: NewTaskInput): Promise<TaskRow> {
     專案ID,
     專案名稱: payload.專案名稱?.trim() ?? null,
     任務名稱: payload.任務名稱?.trim() ?? null,
-    任務狀態: payload.任務狀態?.trim() ?? null,
+    任務類型: payload.任務類型?.trim() ?? null,
     負責人: payload.負責人?.trim() ?? null,
   };
 
@@ -62,7 +62,7 @@ export async function createTask(payload: NewTaskInput): Promise<TaskRow> {
 export type UpdateTaskInput = {
   任務ID: string;
   任務名稱?: string | null;
-  任務狀態?: string | null;
+  任務類型?: string | null;
   負責人?: string | null;
   任務完成?: boolean;
 };
@@ -73,7 +73,7 @@ export async function updateTask(payload: UpdateTaskInput): Promise<TaskRow> {
 
   const updateData: Record<string, unknown> = {};
   if (payload.任務名稱 !== undefined) updateData.任務名稱 = payload.任務名稱?.trim() ?? null;
-  if (payload.任務狀態 !== undefined) updateData.任務狀態 = payload.任務狀態?.trim() ?? null;
+  if (payload.任務類型 !== undefined) updateData.任務類型 = payload.任務類型?.trim() ?? null;
   if (payload.負責人 !== undefined) updateData.負責人 = payload.負責人?.trim() ?? null;
   if (payload.任務完成 !== undefined) updateData.任務完成 = Boolean(payload.任務完成);
 

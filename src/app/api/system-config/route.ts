@@ -41,6 +41,7 @@ export async function PUT(request: NextRequest) {
         "role_permissions",
         "payout_dedupe_rules",
         "overview_kpi_by_role",
+        "task_type_options",
       ].includes(key)
     ) {
       return NextResponse.json({ ok: false, error: "不允許的 key" }, { status: 400 });

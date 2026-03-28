@@ -8,7 +8,7 @@ export interface TaskRow {
   專案ID?: string;
   專案名稱?: string;
   任務?: string;
-  狀態?: string;
+  任務類型?: string;
   任務負責人?: string;
   任務完成?: boolean;
 }

@@ -55,7 +55,7 @@ CREATE TABLE "任務" (
   "任務ID" uuid PRIMARY KEY DEFAULT (gen_random_uuid()),
   "專案ID" text NOT NULL,
   "任務名稱" text,
-  "任務狀態" text,
+  "任務類型" text,
   "負責人" text,
   "備註" text,
   "created_at" timestamptz DEFAULT (now())
