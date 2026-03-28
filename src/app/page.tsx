@@ -71,7 +71,7 @@ export default function Home() {
       <main className="w-full max-w-md">
         <div className="flex flex-col items-center">
           <Image
-            src="/logo.png"
+            src="/logo.jpg"
             alt="SDH"
             width={120}
             height={120}

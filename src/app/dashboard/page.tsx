@@ -1212,7 +1212,7 @@ export default function DashboardPage() {
       <div className="mb-6 flex items-center border-b border-stone-200/90 pb-4">
         <Link href="/" className="block">
           <Image
-            src="/logo.png"
+            src="/logo.jpg"
             alt="SDH 盛德好"
             width={72}
             height={29}
