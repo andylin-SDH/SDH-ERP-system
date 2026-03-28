@@ -26,8 +26,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       visibility: visibility
-        ? { tables: visibility.tables, columns: visibility.columns }
-        : { tables: [], columns: {} },
+        ? { tables: visibility.tables, columns: visibility.columns, overview_kpis: visibility.overview_kpis }
+        : { tables: [], columns: {}, overview_kpis: null },
     });
   } catch (e) {
     console.error("GET /api/user-visibility error:", e);
@@ -43,7 +43,12 @@ export async function PUT(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
 
   try {
-    const body = (await request.json()) as { user_email?: string; tables?: string[]; columns?: Record<string, string[]> };
+    const body = (await request.json()) as {
+      user_email?: string;
+      tables?: string[];
+      columns?: Record<string, string[]>;
+      overview_kpis?: string[] | null;
+    };
     const user_email = String(body?.user_email ?? "").trim();
     if (!user_email) {
       return NextResponse.json({ ok: false, error: "user_email 為必填" }, { status: 400 });
@@ -53,8 +58,12 @@ export async function PUT(request: NextRequest) {
       user_email,
       tables: Array.isArray(body.tables) ? body.tables : [],
       columns: body.columns && typeof body.columns === "object" ? body.columns : {},
+      overview_kpis: body.overview_kpis !== undefined ? body.overview_kpis : undefined,
     });
-    return NextResponse.json({ ok: true, visibility: { tables: visibility.tables, columns: visibility.columns } });
+    return NextResponse.json({
+      ok: true,
+      visibility: { tables: visibility.tables, columns: visibility.columns, overview_kpis: visibility.overview_kpis },
+    });
   } catch (e) {
     console.error("PUT /api/user-visibility error:", e);
     return NextResponse.json(

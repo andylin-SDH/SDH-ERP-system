@@ -13,6 +13,7 @@ import {
   type PayoutDedupeRule,
   type PayoutDedupeRulesByMode,
 } from "@/config/payout-dedupe-defaults";
+import { DEFAULT_OVERVIEW_KPI_BY_ROLE, OVERVIEW_KPI_KEYS } from "@/config/overview-kpi";
 
 export type PayoutDefaults = Record<string, string>;
 export type ProjectTypes = string[];
@@ -42,6 +43,26 @@ function getDefaultRolePermissions(roles: string[]): RolePermissions {
 
 export { DEFAULT_PAYOUT_DEDUPE_RULES };
 
+function mergeOverviewKpiByRole(
+  raw: Record<string, string[]> | undefined,
+  roles: string[]
+): Record<string, string[]> {
+  const allowed = new Set<string>(OVERVIEW_KPI_KEYS as unknown as string[]);
+  const out: Record<string, string[]> = {};
+  for (const role of roles) {
+    const fromDb = raw?.[role];
+    const fromDefault = DEFAULT_OVERVIEW_KPI_BY_ROLE[role];
+    const base = fromDefault?.length ? [...fromDefault] : [...OVERVIEW_KPI_KEYS];
+    if (!fromDb?.length) {
+      out[role] = base;
+      continue;
+    }
+    const filtered = fromDb.map(String).filter((k) => allowed.has(k));
+    out[role] = filtered.length ? filtered : base;
+  }
+  return out;
+}
+
 export async function getSystemConfig(): Promise<{
   master_payout_defaults: PayoutDefaults;
   project_types: ProjectTypes;
@@ -49,6 +70,7 @@ export async function getSystemConfig(): Promise<{
   roles: string[];
   role_permissions: RolePermissions;
   payout_dedupe_rules: PayoutDedupeRulesByMode;
+  overview_kpi_by_role: Record<string, string[]>;
 }> {
   const { data } = await getSupabase().from("system_config").select("key, value");
   const map = new Map<string, unknown>();
@@ -63,6 +85,7 @@ export async function getSystemConfig(): Promise<{
   const rolesRaw = map.get("roles") as string[] | undefined;
   const permsRaw = map.get("role_permissions") as RolePermissions | undefined;
   const dedupeRaw = map.get("payout_dedupe_rules") as PayoutDedupeRulesByMode | PayoutDedupeRule[] | undefined;
+  const overviewKpiRaw = map.get("overview_kpi_by_role") as Record<string, string[]> | undefined;
 
   const roles = Array.isArray(rolesRaw) && rolesRaw.length > 0 ? rolesRaw : [...ROLES];
   const defaultPerms = getDefaultRolePermissions(roles);
@@ -114,6 +137,7 @@ export async function getSystemConfig(): Promise<{
     roles,
     role_permissions: mergedPerms,
     payout_dedupe_rules: dedupeRules,
+    overview_kpi_by_role: mergeOverviewKpiByRole(overviewKpiRaw, roles),
   };
 }
 

@@ -10,8 +10,8 @@ export default function LoginPage() {
     window.location.replace("/");
   }, []);
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50">
-      <p className="text-zinc-500">導向登入...</p>
+    <div className="flex min-h-screen items-center justify-center bg-[#faf8f5]">
+      <p className="text-stone-500">導向登入...</p>
     </div>
   );
 }

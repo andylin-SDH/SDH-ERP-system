@@ -15,6 +15,12 @@ import { PROJECT_TYPES } from "@/config/project-types";
 import { MASTER_PAYOUT_DEFAULTS, isPayoutModeB } from "@/config/master-payout-defaults";
 import { DEFAULT_PAYOUT_DEDUPE_RULES, type PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
 import { TABLE_KEYS, TABLE_LABELS, TABLE_COLUMNS } from "@/config/table-columns";
+import {
+  OVERVIEW_KPI_KEYS,
+  OVERVIEW_KPI_LABELS,
+  getDefaultOverviewKpisForRole,
+  type OverviewKpiKey,
+} from "@/config/overview-kpi";
 import { SocialLinkIcons } from "@/components/SocialLinkIcons";
 import { PARTNER_STATUS, isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
 
@@ -68,6 +74,22 @@ function formatAmount(v: string | null | undefined): string {
   const n = Number(String(v).replace(/,/g, ""));
   if (Number.isNaN(n)) return String(v);
   return n.toLocaleString("zh-TW");
+}
+
+function parseNumericField(v: string | null | undefined): number {
+  if (v == null || String(v).trim() === "") return 0;
+  const n = Number(String(v).replace(/,/g, "").trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
+function masterRowRevenue(row: MasterRow): number {
+  const r = row.專案營收;
+  if (r != null && String(r).trim() !== "") return parseNumericField(r);
+  return parseNumericField(calc專案營收(row.專案總金額未稅 ?? "", row.專案成本 ?? "", row.KOL費用未稅 ?? ""));
+}
+
+function masterRowCostSum(row: MasterRow): number {
+  return parseNumericField(row.專案成本) + parseNumericField(row.KOL費用未稅);
 }
 
 /** 產生專案ID：SDH-YYYYMMDD-HHmmss-XX（XX 為 2 碼隨機，避免同秒多筆衝突） */
@@ -199,13 +221,20 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedUserForVisibility, setSelectedUserForVisibility] = useState<User | null>(null);
   const [visibilityTables, setVisibilityTables] = useState<string[]>([]);
+  /** null = 依①角色總覽指標；陣列 = 此帳號專用 */
+  const [visibilityOverviewKpis, setVisibilityOverviewKpis] = useState<string[] | null>(null);
   const [visibilityColumns, setVisibilityColumns] = useState<Record<string, string[]>>({});
   const [savingVisibility, setSavingVisibility] = useState(false);
   const [visibilityError, setVisibilityError] = useState<string | null>(null);
   const [editUserForm, setEditUserForm] = useState<{ name: string; role: string; dept: string; scope: string; password: string }>({ name: "", role: "", dept: "", scope: "", password: "" });
   const [savingUser, setSavingUser] = useState(false);
   const [editUserError, setEditUserError] = useState<string | null>(null);
-  const [myVisibility, setMyVisibility] = useState<{ tables: string[]; columns: Record<string, string[]> } | null>(null);
+  const [myVisibility, setMyVisibility] = useState<{
+    tables: string[];
+    columns: Record<string, string[]>;
+    /** null = 依①角色總覽指標設定 */
+    overview_kpis?: string[] | null;
+  } | null>(null);
   /** Dashboard 分頁目前排序（拖曳用），null 代表沿用預設順序 */
   const [tabOrder, setTabOrder] = useState<string[] | null>(null);
   const [draggingTab, setDraggingTab] = useState<string | null>(null);
@@ -350,6 +379,7 @@ export default function DashboardPage() {
     role_visibility: Record<string, { sections: string[] }>;
     roles?: string[];
     payout_dedupe_rules?: PayoutDedupeRulesByMode;
+    overview_kpi_by_role?: Record<string, string[]>;
   } | null>(null);
   const [newRoleName, setNewRoleName] = useState("");
   const [savingConfig, setSavingConfig] = useState<string | null>(null);
@@ -691,6 +721,50 @@ export default function DashboardPage() {
     return open.filter((t) => taskAssigneeIsUser(t, uName, uEmail)).slice(0, 150);
   }, [filteredTasks, me, overviewDirectorCompanyView]);
 
+  /** 總覽頂部指標：①③ 可設定可見 key */
+  const visibleOverviewKpiKeys = useMemo((): OverviewKpiKey[] => {
+    if (!me) return [];
+    const fromRole =
+      systemConfig?.overview_kpi_by_role?.[me.role] ?? getDefaultOverviewKpisForRole(me.role);
+    const custom = myVisibility?.overview_kpis;
+    if (custom === null || custom === undefined) {
+      const fromR = fromRole.filter((k) => OVERVIEW_KPI_KEYS.includes(k as OverviewKpiKey));
+      return (fromR.length ? fromR : [...OVERVIEW_KPI_KEYS]) as OverviewKpiKey[];
+    }
+    return custom.filter((k): k is OverviewKpiKey => OVERVIEW_KPI_KEYS.includes(k as OverviewKpiKey));
+  }, [me, systemConfig?.overview_kpi_by_role, myVisibility?.overview_kpis]);
+
+  const masterRowsForOverviewKpis = useMemo(() => {
+    if (!me) return [];
+    const uName = (me.name ?? "").trim();
+    const uEmail = (me.email ?? "").trim();
+    if (overviewDirectorCompanyView) return filteredMasterList;
+    return filteredMasterList.filter((row) => isMasterRowRelatedToUser(row, uName, uEmail, overviewMyTaskProjectIds));
+  }, [filteredMasterList, me, overviewDirectorCompanyView, overviewMyTaskProjectIds]);
+
+  const overviewKpiMetrics = useMemo(() => {
+    if (!me) return null;
+    const uName = (me.name ?? "").trim();
+    const uEmail = (me.email ?? "").trim();
+    const inProgress = (rows: MasterRow[]) => rows.filter((row) => isProjectInProgress(row.專案狀態));
+    const projectCount = overviewDirectorCompanyView
+      ? inProgress(filteredMasterList).length
+      : inProgress(filteredMasterList).filter((row) =>
+          isMasterRowRelatedToUser(row, uName, uEmail, overviewMyTaskProjectIds)
+        ).length;
+    const pendingTasks = filteredTasks.filter(
+      (t) => !t.任務完成 && taskAssigneeIsUser(t, uName, uEmail)
+    ).length;
+    let totalRev = 0;
+    let totalCost = 0;
+    for (const row of masterRowsForOverviewKpis) {
+      totalRev += masterRowRevenue(row);
+      totalCost += masterRowCostSum(row);
+    }
+    const grossMarginPct = totalRev > 0 ? ((totalRev - totalCost) / totalRev) * 100 : null;
+    return { projectCount, pendingTasks, totalRevenue: totalRev, totalCost, grossMarginPct };
+  }, [me, filteredMasterList, filteredTasks, overviewDirectorCompanyView, overviewMyTaskProjectIds, masterRowsForOverviewKpis]);
+
   const masterVisibleCols = useMemo(() => getVisibleColumnKeys("master"), [getVisibleColumnKeys]);
   const partnersVisibleCols = useMemo(() => getVisibleColumnKeys("partners"), [getVisibleColumnKeys]);
   const tasksVisibleCols = useMemo(() => getVisibleColumnKeys("tasks"), [getVisibleColumnKeys]);
@@ -953,6 +1027,7 @@ export default function DashboardPage() {
     if (!selectedUserForVisibility) {
       setVisibilityTables([]);
       setVisibilityColumns({});
+      setVisibilityOverviewKpis(null);
       setVisibilityError(null);
       setEditUserForm({ name: "", role: "", dept: "", scope: "", password: "" });
       setEditUserError(null);
@@ -969,18 +1044,26 @@ export default function DashboardPage() {
     fetch(`/api/user-visibility?email=${encodeURIComponent(selectedUserForVisibility.email)}`, { cache: "no-store" })
       .then(safeResJson)
       .then((res) => {
-        const d = res as { ok?: boolean; visibility?: { tables?: string[]; columns?: Record<string, string[]> } };
+        const d = res as {
+          ok?: boolean;
+          visibility?: { tables?: string[]; columns?: Record<string, string[]>; overview_kpis?: string[] | null };
+        };
         if (d.ok && d.visibility) {
           setVisibilityTables(d.visibility.tables ?? []);
           setVisibilityColumns(d.visibility.columns ?? {});
+          setVisibilityOverviewKpis(
+            d.visibility.overview_kpis === undefined ? null : d.visibility.overview_kpis
+          );
         } else {
           setVisibilityTables([]);
           setVisibilityColumns({});
+          setVisibilityOverviewKpis(null);
         }
       })
       .catch(() => {
         setVisibilityTables([]);
         setVisibilityColumns({});
+        setVisibilityOverviewKpis(null);
       });
   }, [selectedUserForVisibility]);
 
@@ -1042,15 +1125,28 @@ export default function DashboardPage() {
         setPartnersLoadError(ptVal.partnersError ?? null);
       }
       if (vis.status === "fulfilled" && vis.value && (vis.value as { ok?: boolean }).ok) {
-        const v = vis.value as { tables?: string[]; columns?: Record<string, string[]> };
-        setMyVisibility({ tables: v.tables ?? [], columns: v.columns ?? {} });
+        const v = vis.value as { tables?: string[]; columns?: Record<string, string[]>; overview_kpis?: string[] | null };
+        setMyVisibility({
+          tables: v.tables ?? [],
+          columns: v.columns ?? {},
+          overview_kpis: v.overview_kpis !== undefined ? v.overview_kpis : null,
+        });
       }
       if (rulesRes.status === "fulfilled" && rulesRes.value && (rulesRes.value as { ok?: boolean }).ok) {
         const r = rulesRes.value as { rules?: Record<string, string[]> };
         setVisibilityRules(r.rules ?? {});
       }
       if (cfgRes.status === "fulfilled" && cfgRes.value && (cfgRes.value as { ok?: boolean }).ok) {
-        const c = (cfgRes.value as { config?: { master_payout_defaults: Record<string, string>; project_types: string[]; role_visibility: Record<string, { sections: string[] }>; roles?: string[]; payout_dedupe_rules?: PayoutDedupeRulesByMode } }).config;
+        const c = (cfgRes.value as {
+          config?: {
+            master_payout_defaults: Record<string, string>;
+            project_types: string[];
+            role_visibility: Record<string, { sections: string[] }>;
+            roles?: string[];
+            payout_dedupe_rules?: PayoutDedupeRulesByMode;
+            overview_kpi_by_role?: Record<string, string[]>;
+          };
+        }).config;
         if (c) setSystemConfig(c);
       }
       if (invRes.status === "fulfilled" && invRes.value && (invRes.value as { ok?: boolean }).ok)
@@ -1085,16 +1181,16 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0c0f14] p-8">
-        <p className="text-lg font-semibold text-slate-400">載入中...</p>
+      <div className="flex min-h-screen items-center justify-center bg-[#faf8f5] p-8">
+        <p className="text-lg font-semibold text-stone-500">載入中...</p>
       </div>
     );
   }
 
   if (error && !me) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-[#0c0f14] p-8">
-        <p className="text-lg font-semibold text-amber-400">{error}</p>
+      <div className="flex min-h-screen flex-col items-center justify-center bg-[#faf8f5] p-8">
+        <p className="text-lg font-semibold text-amber-800">{error}</p>
         <Link
           href="/"
           className="mt-4 inline-block rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-slate-900 transition hover:bg-amber-400"
@@ -1111,9 +1207,9 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0c0f14] p-8">
+    <div className="min-h-screen bg-[#faf8f5] p-8">
       {/* Logo 獨立一欄，置頂 */}
-      <div className="mb-6 flex items-center border-b border-white/10 pb-4">
+      <div className="mb-6 flex items-center border-b border-stone-200/90 pb-4">
         <Link href="/" className="block">
           <Image
             src="/logo.png"
@@ -1127,20 +1223,20 @@ export default function DashboardPage() {
 
       <header className="mb-10 flex items-center justify-between">
         <div>
-          <Link href="/" className="text-sm font-medium text-slate-400 transition hover:text-amber-400">
+          <Link href="/" className="text-sm font-medium text-stone-500 transition hover:text-amber-800">
             ← 首頁
           </Link>
-          <h1 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-3xl">
+          <h1 className="mt-2 text-2xl font-bold tracking-tight text-stone-900 sm:text-3xl">
             {me?.name ?? "總覽"} Dashboard
           </h1>
-          <p className="mt-1.5 text-sm font-medium text-slate-400">
+          <p className="mt-1.5 text-sm font-medium text-stone-500">
             {me?.name}（{me?.role}）· 全公司使用者、專案、任務、合作夥伴
           </p>
           {me && visibleSections.includes("overview") && activeSection !== "overview" && (
             <button
               type="button"
               onClick={() => setActiveSection("overview")}
-              className="mt-2 text-left text-sm font-semibold text-amber-400 transition hover:text-amber-300 hover:underline"
+              className="mt-2 text-left text-sm font-semibold text-amber-800 transition hover:text-amber-700 hover:underline"
             >
               前往總覽
             </button>
@@ -1149,7 +1245,7 @@ export default function DashboardPage() {
         <button
           type="button"
           onClick={handleLogout}
-          className="rounded-xl border border-white/20 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-amber-500/40 hover:bg-amber-500/10 hover:text-amber-400"
+          className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-semibold text-stone-600 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
         >
           登出
         </button>
@@ -1158,8 +1254,8 @@ export default function DashboardPage() {
       {/* 資料分頁：左側直向導覽 + 右側區塊內容（管理者多「可見性與權限」） */}
       {me && tabSections.length > 0 && (
         <div className="flex w-full flex-col gap-4 md:flex-row md:items-start md:gap-8">
-          <aside className="w-full shrink-0 rounded-2xl border border-white/10 bg-slate-900/50 p-3 shadow-lg ring-1 ring-white/5 md:sticky md:top-6 md:w-56 md:self-start">
-            <p className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">資料區塊</p>
+          <aside className="w-full shrink-0 rounded-2xl border border-stone-200/90 bg-white/90 p-3 shadow-lg ring-1 ring-amber-100/60 md:sticky md:top-6 md:w-56 md:self-start">
+            <p className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-wider text-stone-500">資料區塊</p>
             <nav className="flex max-h-[min(40vh,22rem)] flex-col gap-1 overflow-y-auto pr-0.5 md:max-h-[calc(100vh-10rem)]" aria-label="Dashboard 分頁">
               {tabSections.map((sec) => (
                 <button
@@ -1185,51 +1281,52 @@ export default function DashboardPage() {
                   onClick={() => setActiveSection(sec)}
                   className={`w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
                     activeSection === sec
-                      ? "border border-amber-500/50 bg-amber-500/15 text-amber-300 shadow-sm shadow-amber-500/10"
-                      : "border border-transparent text-slate-300 hover:bg-white/5 hover:text-white"
+                      ? "border border-amber-400/70 bg-amber-50 text-amber-700 shadow-sm shadow-amber-100/30"
+                      : "border border-transparent text-stone-600 hover:bg-amber-50/80 hover:text-stone-900"
                   }`}
                 >
                   {TABLE_LABELS[sec] ?? sec}
                 </button>
               ))}
             </nav>
-            <p className="mt-3 border-t border-white/10 pt-3 text-[10px] leading-relaxed text-slate-500">
-              拖曳項目可調整順序。目前：<span className="font-semibold text-amber-400/90">{TABLE_LABELS[activeSection ?? ""] ?? activeSection ?? "—"}</span>
+            <p className="mt-3 border-t border-stone-200/90 pt-3 text-[10px] leading-relaxed text-stone-500">
+              拖曳項目可調整順序。目前：<span className="font-semibold text-amber-800">{TABLE_LABELS[activeSection ?? ""] ?? activeSection ?? "—"}</span>
             </p>
           </aside>
 
           <div className="min-w-0 flex-1 space-y-10">
             {/* 管理者專用：可見性與權限管理分頁內容 */}
             {canEditVisibility && activeSection === "visibility" && (
-              <section className="rounded-2xl border-2 border-amber-500/30 bg-slate-800/20 p-6 shadow-xl ring-1 ring-amber-500/20">
-                <h2 className="mb-2 text-xl font-bold tracking-tight text-amber-400">可見性與權限管理</h2>
-                <p className="mb-4 text-sm text-slate-400">依序設定：角色管理 → ① 角色可見區塊 → ② 資料可見規則 → ③ 使用者可見範圍</p>
+              <section className="rounded-2xl border-2 border-amber-200 bg-white/90 p-6 shadow-xl ring-1 ring-amber-500/20">
+                <h2 className="mb-2 text-xl font-bold tracking-tight text-amber-800">可見性與權限管理</h2>
+                <p className="mb-4 text-sm text-stone-500">依序設定：角色管理 → ① 角色可見區塊 → ④ 總覽指標 → ② 資料可見規則 → ③ 使用者可見範圍</p>
 
                 {/* 如何連結：可收合說明 */}
-                <div className="mb-6 rounded-xl border border-white/10 bg-slate-900/50 p-4">
-                  <button type="button" onClick={() => setShowHowItWorks((v) => !v)} className="flex w-full items-center justify-between text-left text-sm font-medium text-slate-300 hover:text-amber-400">
+                <div className="mb-6 rounded-xl border border-stone-200/90 bg-white/90 p-4">
+                  <button type="button" onClick={() => setShowHowItWorks((v) => !v)} className="flex w-full items-center justify-between text-left text-sm font-medium text-stone-600 hover:text-amber-800">
                     <span>📋 資料如何連結、存在哪裡（點擊展開）</span>
-                    <span className="text-slate-500">{showHowItWorks ? "▼" : "▶"}</span>
+                    <span className="text-stone-500">{showHowItWorks ? "▼" : "▶"}</span>
                   </button>
                   {showHowItWorks && (
-                    <div className="mt-4 space-y-3 border-t border-white/10 pt-4 text-xs text-slate-400">
-                      <p><strong className="text-slate-300">角色列表</strong> → 存於 <code className="rounded bg-white/10 px-1">system_config</code> 的 <code className="rounded bg-white/10 px-1">roles</code>（陣列）。新增使用者時的角色下拉與這裡一致。</p>
-                      <p><strong className="text-slate-300">① 角色可見區塊</strong> → 存於 <code className="rounded bg-white/10 px-1">system_config</code> 的 <code className="rounded bg-white/10 px-1">role_visibility</code>。每個角色可勾選能進入的區塊（overview、master、partners、tasks、payout、finance、invoices）。</p>
-                      <p><strong className="text-slate-300">② 資料可見規則</strong> → 存於 <code className="rounded bg-white/10 px-1">visibility_rules</code> 表。勾選的欄位若符合登入者姓名/Email，該列才會顯示（列級過濾）。</p>
-                      <p><strong className="text-slate-300">③ 使用者可見範圍</strong> → 存於 <code className="rounded bg-white/10 px-1">user_visibility</code> 表（依 user_email）。若某使用者有設定，會覆蓋 ①，且可細到「每個 Table 顯示哪些欄位」。</p>
-                      <p className="text-amber-400/90">顯示優先順序：③ 有設定 → 用 ③；否則 ① 有該角色設定 → 用 ①；否則用程式預設。</p>
+                    <div className="mt-4 space-y-3 border-t border-stone-200/90 pt-4 text-xs text-stone-500">
+                      <p><strong className="text-stone-600">角色列表</strong> → 存於 <code className="rounded bg-stone-100 px-1">system_config</code> 的 <code className="rounded bg-stone-100 px-1">roles</code>（陣列）。新增使用者時的角色下拉與這裡一致。</p>
+                      <p><strong className="text-stone-600">① 角色可見區塊</strong> → 存於 <code className="rounded bg-stone-100 px-1">system_config</code> 的 <code className="rounded bg-stone-100 px-1">role_visibility</code>。每個角色可勾選能進入的區塊（overview、master、partners、tasks、payout、finance、invoices）。</p>
+                      <p><strong className="text-stone-600">④ 總覽指標</strong> → 存於 <code className="rounded bg-stone-100 px-1">system_config</code> 的 <code className="rounded bg-stone-100 px-1">overview_kpi_by_role</code>，決定總覽頁頂部數字卡；③ 可為單一帳號覆寫（<code className="rounded bg-stone-100 px-1">user_visibility.overview_kpis</code>）。</p>
+                      <p><strong className="text-stone-600">② 資料可見規則</strong> → 存於 <code className="rounded bg-stone-100 px-1">visibility_rules</code> 表。勾選的欄位若符合登入者姓名/Email，該列才會顯示（列級過濾）。</p>
+                      <p><strong className="text-stone-600">③ 使用者可見範圍</strong> → 存於 <code className="rounded bg-stone-100 px-1">user_visibility</code> 表（依 user_email）。若某使用者有設定，會覆蓋 ①，且可細到「每個 Table 顯示哪些欄位」。</p>
+                      <p className="text-amber-800">顯示優先順序：③ 有設定 → 用 ③；否則 ① 有該角色設定 → 用 ①；否則用程式預設。</p>
                     </div>
                   )}
                 </div>
 
                 <div className="space-y-6">
                   {/* 角色管理：新增/刪除角色，同步到 ① 與新增使用者下拉 */}
-                  <div className="rounded-xl border border-white/10 bg-slate-800/30 p-4">
-                    <h3 className="mb-3 font-semibold text-amber-400">角色管理</h3>
-                    <p className="mb-3 text-xs text-slate-500">此處角色會同步到「① 角色可見區塊」與「新增使用者」的角色下拉。刪除角色前請確認無使用者使用該角色。</p>
+                  <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
+                    <h3 className="mb-3 font-semibold text-amber-800">角色管理</h3>
+                    <p className="mb-3 text-xs text-stone-500">此處角色會同步到「① 角色可見區塊」與「新增使用者」的角色下拉。刪除角色前請確認無使用者使用該角色。</p>
                     <div className="mb-3 flex flex-wrap items-center gap-2">
                       {displayRoles.map((role) => (
-                        <span key={role} className="inline-flex items-center gap-1.5 rounded-lg border border-white/20 bg-slate-900/50 px-3 py-1.5 text-sm text-slate-300">
+                        <span key={role} className="inline-flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white/90 px-3 py-1.5 text-sm text-stone-600">
                           {role}
                           <button
                             type="button"
@@ -1238,7 +1335,7 @@ export default function DashboardPage() {
                               if (next.length === 0) return;
                               setSystemConfig((c) => (c ? { ...c, roles: next } : null));
                             }}
-                            className="text-slate-500 hover:text-red-400"
+                            className="text-stone-500 hover:text-red-400"
                             title="刪除此角色"
                           >×</button>
                         </span>
@@ -1258,7 +1355,7 @@ export default function DashboardPage() {
                           }
                         }}
                         placeholder="輸入新角色名稱"
-                        className="w-40 rounded-lg border border-white/20 bg-slate-900/50 px-3 py-1.5 text-sm text-white placeholder:text-slate-500"
+                        className="w-40 rounded-lg border border-stone-300 bg-white/90 px-3 py-1.5 text-sm text-stone-900 placeholder:text-stone-500"
                       />
                       <button
                         type="button"
@@ -1268,7 +1365,7 @@ export default function DashboardPage() {
                           setSystemConfig((c) => (c ? { ...c, roles: [...(c.roles ?? displayRoles), v] } : null));
                           setNewRoleName("");
                         }}
-                        className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-400 transition hover:bg-amber-500/30"
+                        className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60"
                       >
                         新增角色
                       </button>
@@ -1296,16 +1393,16 @@ export default function DashboardPage() {
                           setSavingRoles(false);
                         }
                       }}
-                      className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-400 transition hover:bg-amber-500/30 disabled:opacity-60"
+                      className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
                     >
                       {savingRoles ? "儲存中" : "儲存角色"}
                     </button>
                   </div>
 
                   {/* 第1層：角色可見區塊 */}
-                  <div className="rounded-xl border border-white/10 bg-slate-800/30 p-4">
+                  <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
                     <div className="mb-3 flex items-center justify-between">
-                      <h3 className="font-semibold text-amber-400">① 角色可見區塊</h3>
+                      <h3 className="font-semibold text-amber-800">① 角色可見區塊</h3>
                       <button
                         type="button"
                         disabled={savingConfig === "role_visibility"}
@@ -1327,19 +1424,19 @@ export default function DashboardPage() {
                           } catch {}
                           setSavingConfig(null);
                         }}
-                        className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-400 transition hover:bg-amber-500/30 disabled:opacity-60"
+                        className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
                       >
                         {savingConfig === "role_visibility" ? "儲存中" : "儲存"}
                       </button>
                     </div>
-                    <p className="mb-3 text-xs text-slate-500">各角色可進入的區塊（overview、master、partners、tasks、payout、finance、invoices 等）</p>
+                    <p className="mb-3 text-xs text-stone-500">各角色可進入的區塊（overview、master、partners、tasks、payout、finance、invoices 等）</p>
                     <div className="space-y-2">
                       {displayRoles.map((role) => {
                         const cfg = systemConfig?.role_visibility?.[role] ?? ROLE_VISIBILITY[role] ?? { sections: ["overview", "tasks"] };
                         return [role, cfg] as const;
                       }).map(([role, cfg]) => (
                         <div key={role} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                          <span className="w-16 text-xs font-medium text-white">{role}</span>
+                          <span className="w-16 text-xs font-medium text-stone-900">{role}</span>
                           <div className="flex flex-wrap gap-x-2 gap-y-1">
                             {TABLE_KEYS.map((s) => {
                               const sections = cfg?.sections ?? [];
@@ -1353,8 +1450,8 @@ export default function DashboardPage() {
                                       const rv = { ...base.role_visibility, [role]: { ...(typeof cfg === "object" ? cfg : {}), sections: next } };
                                       return { ...base, role_visibility: rv };
                                     });
-                                  }} className="h-3 w-3 rounded border-white/30 bg-white/5 text-amber-500" />
-                                  <span className="text-xs text-slate-300">{TABLE_LABELS[s] ?? s}</span>
+                                  }} className="h-3 w-3 rounded border-stone-300 bg-stone-50 text-amber-500" />
+                                  <span className="text-xs text-stone-600">{TABLE_LABELS[s] ?? s}</span>
                                 </label>
                               );
                             })}
@@ -1364,10 +1461,97 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  {/* 第2層：資料可見規則 */}
-                  <div className="rounded-xl border border-white/10 bg-slate-800/30 p-4">
+                  {/* ④ 總覽指標可見（依角色）；③ 使用者可覆寫 */}
+                  <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
                     <div className="mb-3 flex items-center justify-between">
-                      <h3 className="font-semibold text-amber-400">② 資料可見規則</h3>
+                      <h3 className="font-semibold text-amber-800">④ 總覽指標（依角色）</h3>
+                      <button
+                        type="button"
+                        disabled={savingConfig === "overview_kpi_by_role"}
+                        onClick={async () => {
+                          setSavingConfig("overview_kpi_by_role");
+                          try {
+                            const current = systemConfig?.overview_kpi_by_role ?? {};
+                            const rv: Record<string, string[]> = {};
+                            for (const role of displayRoles) {
+                              rv[role] = current[role]?.length
+                                ? [...current[role]]
+                                : getDefaultOverviewKpisForRole(role);
+                            }
+                            const res = await fetch("/api/system-config", {
+                              method: "PUT",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ key: "overview_kpi_by_role", value: rv }),
+                            });
+                            const data = (await safeResJson(res)) as { ok?: boolean; config?: { overview_kpi_by_role?: Record<string, string[]> } };
+                            if (res.ok && data.ok && data.config?.overview_kpi_by_role) {
+                              setSystemConfig((c) =>
+                                c ? { ...c, overview_kpi_by_role: data.config!.overview_kpi_by_role } : null
+                              );
+                              await refreshDashboardData(["systemConfig"]);
+                            }
+                          } catch {
+                            /* ignore */
+                          }
+                          setSavingConfig(null);
+                        }}
+                        className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
+                      >
+                        {savingConfig === "overview_kpi_by_role" ? "儲存中" : "儲存"}
+                      </button>
+                    </div>
+                    <p className="mb-3 text-xs text-stone-500">
+                      各角色在總覽頁頂部可看到的匯總（與資料區塊分開設定）。③ 可為單一帳號覆寫。
+                    </p>
+                    <div className="space-y-2">
+                      {displayRoles.map((role) => {
+                        const keys =
+                          systemConfig?.overview_kpi_by_role?.[role] ?? getDefaultOverviewKpisForRole(role);
+                        return (
+                          <div key={role} className="flex flex-wrap items-start gap-x-3 gap-y-1.5">
+                            <span className="w-16 shrink-0 text-xs font-medium text-stone-900">{role}</span>
+                            <div className="flex flex-wrap gap-x-2 gap-y-1">
+                              {OVERVIEW_KPI_KEYS.map((k) => {
+                                const checked = keys.includes(k);
+                                return (
+                                  <label key={k} className="flex cursor-pointer items-center gap-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => {
+                                        const cur =
+                                          systemConfig?.overview_kpi_by_role?.[role] ??
+                                          getDefaultOverviewKpisForRole(role);
+                                        const next = checked ? cur.filter((x) => x !== k) : [...cur, k];
+                                        setSystemConfig((c) => ({
+                                          ...(c ?? {
+                                            master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS },
+                                            project_types: [...PROJECT_TYPES],
+                                            role_visibility: {},
+                                          }),
+                                          overview_kpi_by_role: {
+                                            ...((c ?? systemConfig)?.overview_kpi_by_role ?? {}),
+                                            [role]: next,
+                                          },
+                                        }));
+                                      }}
+                                      className="h-3 w-3 rounded border-stone-300 bg-stone-50 text-amber-500"
+                                    />
+                                    <span className="text-xs text-stone-600">{OVERVIEW_KPI_LABELS[k]}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 第2層：資料可見規則 */}
+                  <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h3 className="font-semibold text-amber-800">② 資料可見規則</h3>
                       <button
                         type="button"
                         disabled={savingVisibilityRules}
@@ -1389,26 +1573,26 @@ export default function DashboardPage() {
                           } catch (err) { setVisibilityRulesError(err instanceof Error ? err.message : "儲存失敗"); }
                           setSavingVisibilityRules(false);
                         }}
-                        className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-400 transition hover:bg-amber-500/30 disabled:opacity-60"
+                        className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
                       >
                         {savingVisibilityRules ? "儲存中" : "儲存"}
                       </button>
                     </div>
-                    <p className="mb-4 text-xs text-slate-500">勾選的欄位若符合登入者姓名/Email，該列會顯示（OR 邏輯）</p>
-                    {visibilityRulesError && <p className="mb-3 text-xs text-amber-400">{visibilityRulesError}</p>}
+                    <p className="mb-4 text-xs text-stone-500">勾選的欄位若符合登入者姓名/Email，該列會顯示（OR 邏輯）</p>
+                    {visibilityRulesError && <p className="mb-3 text-xs text-amber-800">{visibilityRulesError}</p>}
                     <div className="space-y-5">
                       {TABLE_KEYS.map((tableKey) => {
                         const cols = TABLE_COLUMNS[tableKey] ?? [];
                         const selected = visibilityRules[tableKey] ?? [];
                         return (
-                          <div key={tableKey} className="rounded-lg border border-white/5 bg-slate-900/40 p-3">
+                          <div key={tableKey} className="rounded-lg border border-stone-200/70 bg-stone-50/95 p-3">
                             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                              <p className="text-xs font-semibold uppercase tracking-wider text-amber-400/90">{TABLE_LABELS[tableKey] ?? tableKey}</p>
+                              <p className="text-xs font-semibold uppercase tracking-wider text-amber-800">{TABLE_LABELS[tableKey] ?? tableKey}</p>
                               {tableKey === "partners" && (
                                 <button
                                   type="button"
                                   disabled={savingVisibilityRules}
-                                  className="rounded border border-white/15 bg-white/5 px-2 py-1 text-[10px] font-semibold text-slate-400 transition hover:bg-white/10 hover:text-amber-400 disabled:opacity-50"
+                                  className="rounded border border-stone-200 bg-stone-50 px-2 py-1 text-[10px] font-semibold text-stone-500 transition hover:bg-stone-100 hover:text-amber-800 disabled:opacity-50"
                                   onClick={async () => {
                                     setVisibilityRulesError(null);
                                     setSavingVisibilityRules(true);
@@ -1444,8 +1628,8 @@ export default function DashboardPage() {
                             <div className="flex flex-wrap gap-x-4 gap-y-2">
                               {cols.map(({ key, label }) => (
                                 <label key={key} className="flex cursor-pointer items-center gap-1.5">
-                                  <input type="checkbox" checked={selected.includes(key)} onChange={(e) => setVisibilityRules((p) => ({ ...p, [tableKey]: e.target.checked ? [...(p[tableKey] ?? []), key] : (p[tableKey] ?? []).filter((f) => f !== key) }))} className="h-3.5 w-3.5 rounded border-white/30 bg-white/5 text-amber-500" />
-                                  <span className="text-xs text-slate-300">{label}</span>
+                                  <input type="checkbox" checked={selected.includes(key)} onChange={(e) => setVisibilityRules((p) => ({ ...p, [tableKey]: e.target.checked ? [...(p[tableKey] ?? []), key] : (p[tableKey] ?? []).filter((f) => f !== key) }))} className="h-3.5 w-3.5 rounded border-stone-300 bg-stone-50 text-amber-500" />
+                                  <span className="text-xs text-stone-600">{label}</span>
                                 </label>
                               ))}
                             </div>
@@ -1456,35 +1640,37 @@ export default function DashboardPage() {
                   </div>
 
                   {/* 第3層：使用者可見範圍 */}
-                  <div className="rounded-xl border border-white/10 bg-slate-800/30 p-4">
+                  <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
                     <div className="mb-3 flex items-center justify-between">
-                      <h3 className="font-semibold text-amber-400">③ 使用者可見範圍</h3>
+                      <h3 className="font-semibold text-amber-800">③ 使用者可見範圍</h3>
                       <button
                         type="button"
                         onClick={() => { setCreateUserForm({ email: "", name: "", password: "", role: displayRoles.includes("經紀人") ? "經紀人" : (displayRoles[0] ?? "經紀人"), dept: "", scope: "" }); setCreateUserError(null); setShowCreateUser(true); }}
-                        className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-400 transition hover:bg-amber-500/30"
+                        className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60"
                       >
                         新增使用者
                       </button>
                     </div>
-                    <p className="mb-4 text-xs text-slate-500">點選使用者可設定其每個 Table 能看到的欄位（例：不勾選專案分潤、專案成本）</p>
-                    <div className="overflow-hidden rounded-lg border border-white/10">
-                      <table className="min-w-full divide-y divide-white/10">
-                        <thead className="bg-slate-800/80">
+                    <p className="mb-4 text-xs text-stone-500">
+                      點選使用者可設定 Table／欄位與總覽指標（例：不勾選專案成本、總覽隱藏毛利率）。
+                    </p>
+                    <div className="overflow-hidden rounded-lg border border-stone-200/90">
+                      <table className="min-w-full divide-y divide-stone-200">
+                        <thead className="bg-stone-100">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-400">Email</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-300">姓名</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-300">角色</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-300">部門</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800">Email</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">姓名</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">角色</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">部門</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-white/10 bg-slate-800/10">
+                        <tbody className="divide-y divide-stone-200 bg-amber-50/40">
                           {users.map((user) => (
-                            <tr key={user.email} className="cursor-pointer transition hover:bg-white/5" onClick={() => setSelectedUserForVisibility(user)}>
-                              <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-white">{user.email}</td>
-                              <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-white">{user.name}</td>
-                              <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">{user.role}</td>
-                              <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">{user.dept}</td>
+                            <tr key={user.email} className="cursor-pointer transition hover:bg-amber-50/80" onClick={() => setSelectedUserForVisibility(user)}>
+                              <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-stone-900">{user.email}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-stone-900">{user.name}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-600">{user.role}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-600">{user.dept}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -1497,23 +1683,23 @@ export default function DashboardPage() {
 
         {/* 總覽：與我有關的進行中專案 + 指派給我的任務；董事長可切全公司 */}
         {activeSection === "overview" && (
-          <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
+          <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h2 className="text-xl font-bold tracking-tight text-white">總覽</h2>
-                <p className="mt-1 text-sm text-slate-400">
+                <h2 className="text-xl font-bold tracking-tight text-stone-900">總覽</h2>
+                <p className="mt-1 text-sm text-stone-500">
                   {overviewDirectorCompanyView
                     ? "顯示可見範圍內的進行中專案與未完成任務（全公司視角，仍遵守②列級規則）。"
                     : "進行中且與您相關的專案，以及負責人為您的未完成任務。"}
                 </p>
               </div>
               {me?.role === "董事長" && (
-                <div className="flex shrink-0 rounded-xl border border-white/15 bg-slate-900/70 p-1">
+                <div className="flex shrink-0 rounded-xl border border-stone-200 bg-amber-50/90 p-1">
                   <button
                     type="button"
                     onClick={() => setOverviewScope("mine")}
                     className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
-                      overviewScope === "mine" ? "bg-amber-500 text-slate-900 shadow shadow-amber-500/30" : "text-slate-400 hover:text-white"
+                      overviewScope === "mine" ? "bg-amber-500 text-slate-900 shadow shadow-amber-200/40" : "text-stone-500 hover:text-stone-900"
                     }`}
                   >
                     與我有關
@@ -1522,7 +1708,7 @@ export default function DashboardPage() {
                     type="button"
                     onClick={() => setOverviewScope("company")}
                     className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
-                      overviewScope === "company" ? "bg-amber-500 text-slate-900 shadow shadow-amber-500/30" : "text-slate-400 hover:text-white"
+                      overviewScope === "company" ? "bg-amber-500 text-slate-900 shadow shadow-amber-200/40" : "text-stone-500 hover:text-stone-900"
                     }`}
                   >
                     全公司
@@ -1531,36 +1717,61 @@ export default function DashboardPage() {
               )}
             </div>
 
+            {visibleOverviewKpiKeys.length > 0 && overviewKpiMetrics && (
+              <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                {visibleOverviewKpiKeys.map((k) => (
+                  <div
+                    key={k}
+                    className="rounded-xl border border-stone-200/90 bg-white/90 px-3 py-3 shadow-inner ring-1 ring-amber-100/60 sm:px-4"
+                  >
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+                      {OVERVIEW_KPI_LABELS[k]}
+                    </p>
+                    <p className="mt-1.5 text-lg font-bold tabular-nums text-stone-900 sm:text-xl">
+                      {k === "projectCount" && overviewKpiMetrics.projectCount}
+                      {k === "pendingTasks" && overviewKpiMetrics.pendingTasks}
+                      {k === "totalRevenue" && formatAmount(String(Math.round(overviewKpiMetrics.totalRevenue)))}
+                      {k === "totalCost" && formatAmount(String(Math.round(overviewKpiMetrics.totalCost)))}
+                      {k === "grossMargin" &&
+                        (overviewKpiMetrics.grossMarginPct != null
+                          ? `${overviewKpiMetrics.grossMarginPct.toFixed(1)}%`
+                          : "—")}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="grid gap-6 lg:grid-cols-2">
-              <div className="min-w-0 rounded-xl border border-white/10 bg-slate-900/35 p-4">
-                <h3 className="mb-1 text-sm font-bold text-amber-400">
+              <div className="min-w-0 rounded-xl border border-stone-200/90 bg-white/95 p-4">
+                <h3 className="mb-1 text-sm font-bold text-amber-800">
                   {overviewDirectorCompanyView ? "進行中專案" : "與我相關的進行中專案"}
                 </h3>
                 {!overviewDirectorCompanyView && (
-                  <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+                  <p className="mb-3 text-[11px] leading-relaxed text-stone-500">
                     專案需為進行中，且您在 BDPM／引薦人／管理員／執行管理員／KOL 名稱欄位之一與登入姓名或 Email 相符，或您有被指派的任務隸屬該專案。
                   </p>
                 )}
                 {overviewProjectRows.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-slate-500">目前沒有符合條件的專案</p>
+                  <p className="py-6 text-center text-sm text-stone-500">目前沒有符合條件的專案</p>
                 ) : (
-                  <div className="max-h-[min(24rem,50vh)] overflow-auto rounded-lg border border-white/10">
-                    <table className="min-w-full divide-y divide-white/10 text-left text-sm">
-                      <thead className="sticky top-0 z-10 bg-slate-900/95">
+                  <div className="max-h-[min(24rem,50vh)] overflow-auto rounded-lg border border-stone-200/90">
+                    <table className="min-w-full divide-y divide-stone-200 text-left text-sm">
+                      <thead className="sticky top-0 z-10 bg-[#fffefb]/95">
                         <tr>
-                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-amber-400">專案名稱</th>
-                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-300">狀態</th>
-                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-300">專案ID</th>
+                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-amber-800">專案名稱</th>
+                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-stone-600">狀態</th>
+                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-stone-600">專案ID</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-white/10">
+                      <tbody className="divide-y divide-stone-200">
                         {overviewProjectRows.map((row) => (
-                          <tr key={row.id || row.專案ID} className="bg-slate-800/10 hover:bg-white/5">
-                            <td className="max-w-[10rem] truncate px-3 py-2 font-medium text-white" title={row.專案名稱 ?? ""}>
+                          <tr key={row.id || row.專案ID} className="bg-amber-50/40 hover:bg-amber-50/80">
+                            <td className="max-w-[10rem] truncate px-3 py-2 font-medium text-stone-900" title={row.專案名稱 ?? ""}>
                               {row.專案名稱 ?? "—"}
                             </td>
-                            <td className="whitespace-nowrap px-3 py-2 text-slate-300">{row.專案狀態 ?? "—"}</td>
-                            <td className="whitespace-nowrap px-3 py-2 text-slate-400">{row.專案ID}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-stone-600">{row.專案狀態 ?? "—"}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-stone-500">{row.專案ID}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1569,33 +1780,33 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              <div className="min-w-0 rounded-xl border border-white/10 bg-slate-900/35 p-4">
-                <h3 className="mb-1 text-sm font-bold text-amber-400">
+              <div className="min-w-0 rounded-xl border border-stone-200/90 bg-white/95 p-4">
+                <h3 className="mb-1 text-sm font-bold text-amber-800">
                   {overviewDirectorCompanyView ? "未完成任務" : "指派給我的任務"}
                 </h3>
-                <p className="mb-3 text-[11px] text-slate-500">以「任務負責人」等於您的姓名或 Email 為準。</p>
+                <p className="mb-3 text-[11px] text-stone-500">以「任務負責人」等於您的姓名或 Email 為準。</p>
                 {overviewTaskRows.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-slate-500">目前沒有符合條件的任務</p>
+                  <p className="py-6 text-center text-sm text-stone-500">目前沒有符合條件的任務</p>
                 ) : (
-                  <div className="max-h-[min(24rem,50vh)] overflow-auto rounded-lg border border-white/10">
-                    <table className="min-w-full divide-y divide-white/10 text-left text-sm">
-                      <thead className="sticky top-0 z-10 bg-slate-900/95">
+                  <div className="max-h-[min(24rem,50vh)] overflow-auto rounded-lg border border-stone-200/90">
+                    <table className="min-w-full divide-y divide-stone-200 text-left text-sm">
+                      <thead className="sticky top-0 z-10 bg-[#fffefb]/95">
                         <tr>
-                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-amber-400">任務</th>
-                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-300">專案</th>
-                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-300">狀態</th>
+                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-amber-800">任務</th>
+                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-stone-600">專案</th>
+                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-stone-600">狀態</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-white/10">
+                      <tbody className="divide-y divide-stone-200">
                         {overviewTaskRows.map((t, i) => (
-                          <tr key={t.任務ID ?? `${t.專案ID}-${i}`} className="bg-slate-800/10 hover:bg-white/5">
-                            <td className="max-w-[9rem] truncate px-3 py-2 font-medium text-white" title={t.任務 ?? ""}>
+                          <tr key={t.任務ID ?? `${t.專案ID}-${i}`} className="bg-amber-50/40 hover:bg-amber-50/80">
+                            <td className="max-w-[9rem] truncate px-3 py-2 font-medium text-stone-900" title={t.任務 ?? ""}>
                               {t.任務 ?? "—"}
                             </td>
-                            <td className="max-w-[7rem] truncate px-3 py-2 text-slate-400" title={t.專案名稱 ?? t.專案ID ?? ""}>
+                            <td className="max-w-[7rem] truncate px-3 py-2 text-stone-500" title={t.專案名稱 ?? t.專案ID ?? ""}>
                               {t.專案名稱 ?? t.專案ID ?? "—"}
                             </td>
-                            <td className="whitespace-nowrap px-3 py-2 text-slate-300">{t.狀態 ?? "—"}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-stone-600">{t.狀態 ?? "—"}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1609,9 +1820,9 @@ export default function DashboardPage() {
 
         {/* 大總表 */}
         {activeSection === "master" && (
-          <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
+          <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-xl font-bold tracking-tight text-white">大總表</h2>
+              <h2 className="text-xl font-bold tracking-tight text-stone-900">大總表</h2>
               <div className="flex flex-wrap items-center gap-3">
                 <div className="relative">
                   <input
@@ -1619,9 +1830,9 @@ export default function DashboardPage() {
                     value={masterSearch}
                     onChange={(e) => setMasterSearch(e.target.value)}
                     placeholder="搜尋專案ID、名稱、KOL、廠商…"
-                    className="w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
+                    className="w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
                   />
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-500">
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-stone-500">
                     搜尋
                   </span>
                 </div>
@@ -1658,30 +1869,30 @@ export default function DashboardPage() {
                     setCreateError(null);
                     setShowCreateMaster(true);
                   }}
-                  className="rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400"
+                  className="rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400"
                 >
                   新增專案
                 </button>
               </div>
             </div>
-            <div className="overflow-x-auto rounded-xl border border-white/10 ring-1 ring-white/5">
-              <table className="min-w-full table-fixed divide-y divide-white/10">
+            <div className="overflow-x-auto rounded-xl border border-stone-200/90 ring-1 ring-amber-100/60">
+              <table className="min-w-full table-fixed divide-y divide-stone-200">
                 <colgroup>
                   {masterVisibleCols.map((k) => (
                     <col key={k} className={k === "專案ID" ? "w-[5rem] min-w-[5rem]" : k === "專案名稱" ? "min-w-[12rem]" : "min-w-[5rem]"} />
                   ))}
                 </colgroup>
-                <thead className="sticky top-0 z-20 bg-slate-800/80">
+                <thead className="sticky top-0 z-20 bg-stone-100">
                   <tr>
                     {masterVisibleCols.map((k) => (
                       <th
                         key={k}
                         className={
                           k === "專案ID"
-                            ? "sticky left-0 z-30 w-[5rem] min-w-[5rem] max-w-[5rem] bg-slate-800/80 px-2 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400 whitespace-nowrap"
+                            ? "sticky left-0 z-30 w-[5rem] min-w-[5rem] max-w-[5rem] bg-stone-100 px-2 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
                             : k === "專案名稱"
-                              ? "sticky left-[5rem] z-30 w-48 min-w-[12rem] max-w-[12rem] bg-slate-800/80 px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400 whitespace-nowrap"
-                              : "min-w-[5rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-slate-300 whitespace-nowrap"
+                              ? "sticky left-[5rem] z-30 w-48 min-w-[12rem] max-w-[12rem] bg-stone-100 px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
+                              : "min-w-[5rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600 whitespace-nowrap"
                         }
                       >
                         {tableColumnLabels.master?.[k] ?? k}
@@ -1689,16 +1900,16 @@ export default function DashboardPage() {
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/10 bg-slate-800/10">
+                <tbody className="divide-y divide-stone-200 bg-amber-50/40">
                   {filteredMasterList.length === 0 ? (
                     <tr>
-                      <td colSpan={masterVisibleCols.length || 15} className="px-4 py-8 text-center text-base font-medium text-slate-500">
+                      <td colSpan={masterVisibleCols.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                         尚無大總表資料，請點「新增專案」建立第一筆
                       </td>
                     </tr>
                   ) : searchedMasterList.length === 0 ? (
                     <tr>
-                      <td colSpan={masterVisibleCols.length || 15} className="px-4 py-8 text-center text-base font-medium text-slate-500">
+                      <td colSpan={masterVisibleCols.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                         沒有符合搜尋結果
                       </td>
                     </tr>
@@ -1711,7 +1922,7 @@ export default function DashboardPage() {
                         <Fragment key={row.id ?? pid}>
                           <tr
                             key={row.id ?? pid}
-                            className="cursor-pointer transition hover:bg-white/5"
+                            className="cursor-pointer transition hover:bg-amber-50/80"
                             onClick={() => {
                               setSelectedMaster(row);
                               setIsEditingMaster(false);
@@ -1724,7 +1935,7 @@ export default function DashboardPage() {
                               const val = (row as unknown as Record<string, unknown>)[k];
                               if (k === "專案ID") {
                                 return (
-                                  <td key={k} className="sticky left-0 z-20 w-[5rem] min-w-[5rem] max-w-[5rem] bg-slate-800/20 px-2 py-3.5" title={pid}>
+                                  <td key={k} className="sticky left-0 z-20 w-[5rem] min-w-[5rem] max-w-[5rem] bg-white/90 px-2 py-3.5" title={pid}>
                                     <button
                                       type="button"
                                       onClick={(e) => {
@@ -1734,26 +1945,26 @@ export default function DashboardPage() {
                                         setAddTaskError(null);
                                         setNewTaskForm({ 任務名稱: "", 任務狀態: "", 任務負責人: "" });
                                       }}
-                                      className="mr-2 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/20 bg-white/5 text-slate-400 transition hover:bg-amber-500/20 hover:border-amber-500/40 hover:text-amber-400"
+                                      className="mr-2 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-stone-50 text-stone-500 transition hover:bg-amber-100/90 hover:border-amber-300 hover:text-amber-800"
                                       title={isExpanded ? "收合任務" : "展開任務"}
                                     >
                                       <svg className={`h-4 w-4 transition-transform ${isExpanded ? "rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                       </svg>
                                     </button>
-                                    <span className="truncate text-xs font-normal text-slate-500" title={pid || undefined}>{pid ? "SDH-…" : "—"}</span>
+                                    <span className="truncate text-xs font-normal text-stone-500" title={pid || undefined}>{pid ? "SDH-…" : "—"}</span>
                                   </td>
                                 );
                               }
                               if (k === "專案名稱") {
                                 return (
-                                  <td key={k} className="sticky left-[5rem] z-20 w-48 min-w-[12rem] max-w-[12rem] truncate bg-slate-800/20 px-4 py-3.5 text-sm font-medium text-white" title={String(val ?? "")}>
+                                  <td key={k} className="sticky left-[5rem] z-20 w-48 min-w-[12rem] max-w-[12rem] truncate bg-white/90 px-4 py-3.5 text-sm font-medium text-stone-900" title={String(val ?? "")}>
                                     {String(val ?? "—")}
                                   </td>
                                 );
                               }
                               return (
-                                <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm font-medium text-slate-300 ${isAmount ? "tabular-nums" : ""}`}>
+                                <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm font-medium text-stone-600 ${isAmount ? "tabular-nums" : ""}`}>
                                   {isAmount ? formatAmount(String(val ?? "")) : (String(val ?? "—"))}
                                 </td>
                               );
@@ -1761,23 +1972,23 @@ export default function DashboardPage() {
                           </tr>
                           {isExpanded && (
                             <tr key={`${pid}-tasks`}>
-                              <td colSpan={masterVisibleCols.length || 15} className="border-t-0 bg-slate-900/60 px-4 py-4">
-                                <div className="rounded-xl border border-white/10 bg-slate-800/30 p-4">
-                                  <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-amber-400">此專案任務</h3>
-                                  <div className="mb-4 overflow-hidden rounded-lg border border-white/10">
-                                    <table className="min-w-full divide-y divide-white/10">
-                                      <thead className="bg-slate-800/60">
+                              <td colSpan={masterVisibleCols.length || 15} className="border-t-0 bg-stone-50 px-4 py-4">
+                                <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
+                                  <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-amber-800">此專案任務</h3>
+                                  <div className="mb-4 overflow-hidden rounded-lg border border-stone-200/90">
+                                    <table className="min-w-full divide-y divide-stone-200">
+                                      <thead className="bg-amber-100/80">
                                         <tr>
-                                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-slate-400">任務</th>
-                                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-slate-400">狀態</th>
-                                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-slate-400">任務負責人</th>
-                                          <th className="px-3 py-2 text-center text-xs font-semibold uppercase text-slate-400">完成</th>
+                                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">任務</th>
+                                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">狀態</th>
+                                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">任務負責人</th>
+                                          <th className="px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">完成</th>
                                         </tr>
                                       </thead>
-                                      <tbody className="divide-y divide-white/10 bg-slate-800/20">
+                                      <tbody className="divide-y divide-stone-200 bg-white/90">
                                         {projectTasks.length === 0 ? (
                                           <tr>
-                                            <td colSpan={4} className="px-3 py-4 text-center text-sm text-slate-500">
+                                            <td colSpan={4} className="px-3 py-4 text-center text-sm text-stone-500">
                                               尚無任務，請點「新增任務」新增
                                             </td>
                                           </tr>
@@ -1785,12 +1996,12 @@ export default function DashboardPage() {
                                           projectTasks.map((t, i) => (
                                             <tr
                                               key={t.任務ID ?? i}
-                                              className="cursor-pointer hover:bg-white/5"
+                                              className="cursor-pointer hover:bg-amber-50/80"
                                               onClick={() => setSelectedTask(t)}
                                             >
-                                              <td className="px-3 py-2.5 text-sm text-white">{t.任務 ?? "—"}</td>
-                                              <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-300">{t.狀態 ?? "—"}</td>
-                                              <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-300">
+                                              <td className="px-3 py-2.5 text-sm text-stone-900">{t.任務 ?? "—"}</td>
+                                              <td className="whitespace-nowrap px-3 py-2.5 text-sm text-stone-600">{t.狀態 ?? "—"}</td>
+                                              <td className="whitespace-nowrap px-3 py-2.5 text-sm text-stone-600">
                                                 <span className="inline-flex items-center gap-1">
                                                   {t.任務負責人 ?? "—"}
                                                   {t.任務負責人 && t.任務ID && (
@@ -1811,7 +2022,7 @@ export default function DashboardPage() {
                                                         }
                                                       }}
                                                       disabled={remindingTaskId === t.任務ID}
-                                                      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-white/20 bg-white/5 text-slate-400 transition hover:border-amber-500/40 hover:bg-amber-500/10 hover:text-amber-400 disabled:opacity-50"
+                                                      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-stone-300 bg-stone-50 text-stone-500 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800 disabled:opacity-50"
                                                       title="發信提醒"
                                                     >
                                                       {remindingTaskId === t.任務ID ? (
@@ -1846,14 +2057,14 @@ export default function DashboardPage() {
                                                       /* 忽略 */
                                                     }
                                                   }}
-                                                  className="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded border-2 transition hover:border-amber-500/50 hover:bg-amber-500/10"
+                                                  className="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded border-2 transition hover:border-amber-400/70 hover:bg-amber-50"
                                                   style={{
                                                     backgroundColor: t.任務完成 ? "rgba(245,158,11,0.2)" : "transparent",
                                                     borderColor: t.任務完成 ? "rgba(245,158,11,0.5)" : "rgba(255,255,255,0.2)",
                                                   }}
                                                   title={t.任務完成 ? "點擊取消" : "點擊完成"}
                                                 >
-                                                  {t.任務完成 ? <span className="text-sm text-amber-400">✓</span> : null}
+                                                  {t.任務完成 ? <span className="text-sm text-amber-800">✓</span> : null}
                                                 </button>
                                               </td>
                                             </tr>
@@ -1864,7 +2075,7 @@ export default function DashboardPage() {
                                   </div>
                                   {addingTaskFor === pid ? (
                                     <form
-                                      className="flex flex-wrap items-end gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4"
+                                      className="flex flex-wrap items-end gap-3 rounded-lg border border-amber-200 bg-amber-500/5 p-4"
                                       onSubmit={async (e) => {
                                         e.preventDefault();
                                         setAddTaskError(null);
@@ -1900,33 +2111,33 @@ export default function DashboardPage() {
                                         setAddingTask(false);
                                       }}
                                     >
-                                      {addTaskError && <p className="w-full text-sm text-amber-400">{addTaskError}</p>}
+                                      {addTaskError && <p className="w-full text-sm text-amber-800">{addTaskError}</p>}
                                       <div>
-                                        <label className="mb-1 block text-xs font-semibold text-slate-400">任務名稱</label>
+                                        <label className="mb-1 block text-xs font-semibold text-stone-500">任務名稱</label>
                                         <input
                                           type="text"
                                           value={newTaskForm.任務名稱}
                                           onChange={(e) => setNewTaskForm((f) => ({ ...f, 任務名稱: e.target.value }))}
-                                          className="w-64 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-amber-500/50 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                                          className="w-64 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
                                           placeholder="輸入任務內容"
                                         />
                                       </div>
                                       <div>
-                                        <label className="mb-1 block text-xs font-semibold text-slate-400">狀態</label>
+                                        <label className="mb-1 block text-xs font-semibold text-stone-500">狀態</label>
                                         <input
                                           type="text"
                                           value={newTaskForm.任務狀態}
                                           onChange={(e) => setNewTaskForm((f) => ({ ...f, 任務狀態: e.target.value }))}
-                                          className="w-28 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-amber-500/50 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                                          className="w-28 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
                                           placeholder="如：進行中"
                                         />
                                       </div>
                                       <div>
-                                        <label className="mb-1 block text-xs font-semibold text-slate-400">任務負責人</label>
+                                        <label className="mb-1 block text-xs font-semibold text-stone-500">任務負責人</label>
                                         <select
                                           value={newTaskForm.任務負責人}
                                           onChange={(e) => setNewTaskForm((f) => ({ ...f, 任務負責人: e.target.value }))}
-                                          className="w-40 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white focus:border-amber-500/50 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                                          className="w-40 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
                                         >
                                           <option value="">— 未指定 —</option>
                                           {userNames.map((name) => (
@@ -1940,7 +2151,7 @@ export default function DashboardPage() {
                                         <button
                                           type="submit"
                                           disabled={addingTask}
-                                          className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400 disabled:opacity-60"
+                                          className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-60"
                                         >
                                           {addingTask ? "新增中…" : "儲存"}
                                         </button>
@@ -1951,7 +2162,7 @@ export default function DashboardPage() {
                                             setAddTaskError(null);
                                             setNewTaskForm({ 任務名稱: "", 任務狀態: "", 任務負責人: "" });
                                           }}
-                                          className="rounded-lg border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10"
+                                          className="rounded-lg border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-100"
                                         >
                                           取消
                                         </button>
@@ -1965,7 +2176,7 @@ export default function DashboardPage() {
                                         setAddTaskError(null);
                                         setNewTaskForm({ 任務名稱: "", 任務狀態: "", 任務負責人: "" });
                                       }}
-                                      className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-400 transition hover:bg-amber-500/20"
+                                      className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100/90"
                                     >
                                       + 新增任務
                                     </button>
@@ -1982,22 +2193,22 @@ export default function DashboardPage() {
               </table>
             </div>
             {searchedMasterList.length > visibleMasterRows.length && (
-              <p className="mt-2 text-right text-xs text-slate-500">載入中 {visibleMasterRows.length} / {searchedMasterList.length}</p>
+              <p className="mt-2 text-right text-xs text-stone-500">載入中 {visibleMasterRows.length} / {searchedMasterList.length}</p>
             )}
           </section>
         )}
 
         {/* 系統設定（董事長/管理者）- 分潤、專案類型、Table 參考：改為只在「可見性與權限」分頁中顯示 */}
         {canEditVisibility && activeSection === "visibility" && (
-          <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-6 shadow-xl ring-1 ring-white/5">
-            <h2 className="mb-1 text-xl font-bold tracking-tight text-white">系統設定</h2>
-            <p className="mb-4 text-sm text-slate-400">分潤成數、專案類型等，修改後點擊儲存即可生效</p>
+          <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-6 shadow-xl ring-1 ring-amber-100/60">
+            <h2 className="mb-1 text-xl font-bold tracking-tight text-stone-900">系統設定</h2>
+            <p className="mb-4 text-sm text-stone-500">分潤成數、專案類型等，修改後點擊儲存即可生效</p>
 
             <div className="space-y-6">
               {/* 分潤成數預設 */}
-              <div className="rounded-xl border border-white/10 bg-slate-800/30 p-4">
+              <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
                 <div className="mb-4 flex items-center justify-between">
-                  <h3 className="font-semibold text-amber-400">分潤成數預設</h3>
+                  <h3 className="font-semibold text-amber-800">分潤成數預設</h3>
                   <button
                     type="button"
                     disabled={savingConfig === "payout"}
@@ -2013,18 +2224,18 @@ export default function DashboardPage() {
                       } catch {}
                       setSavingConfig(null);
                     }}
-                    className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-400 transition hover:bg-amber-500/30 disabled:opacity-60"
+                    className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
                   >
                     {savingConfig === "payout" ? "儲存中" : "儲存"}
                   </button>
                 </div>
                 <div className="space-y-4">
                   <div>
-                    <p className="mb-2 text-xs font-medium text-slate-500">分潤模式 A（製作案、活動案）</p>
+                    <p className="mb-2 text-xs font-medium text-stone-500">分潤模式 A（製作案、活動案）</p>
                     <div className="flex flex-wrap gap-x-6 gap-y-2">
                       {(["專案BDPM分潤成數", "專案引薦人分潤成數", "專案管理員分潤成數", "執行管理員分潤成數"] as const).map((k) => (
                         <div key={k} className="flex items-center gap-2">
-                          <span className="text-xs text-slate-400">{k}</span>
+                          <span className="text-xs text-stone-500">{k}</span>
                           <input
                             type="text"
                             value={payoutDefaults[k] ?? ""}
@@ -2032,7 +2243,7 @@ export default function DashboardPage() {
                               const base = c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} };
                               return { ...base, master_payout_defaults: { ...base.master_payout_defaults, [k]: e.target.value } };
                             })}
-                            className="w-16 rounded border border-white/20 bg-white/5 px-2 py-1 text-xs text-white focus:border-amber-500/50 focus:outline-none"
+                            className="w-16 rounded border border-stone-300 bg-stone-50 px-2 py-1 text-xs text-stone-900 focus:border-amber-400/70 focus:outline-none"
                             placeholder="10%"
                           />
                         </div>
@@ -2040,11 +2251,11 @@ export default function DashboardPage() {
                     </div>
                   </div>
                   <div>
-                    <p className="mb-2 text-xs font-medium text-slate-500">分潤模式 B（廣告案）</p>
+                    <p className="mb-2 text-xs font-medium text-stone-500">分潤模式 B（廣告案）</p>
                     <div className="flex flex-wrap gap-x-6 gap-y-2">
                       {(["專案引薦人分潤成數", "經紀人分潤成數", "主管分潤成數", "KOL開發者分潤成數"] as const).map((k) => (
                         <div key={k} className="flex items-center gap-2">
-                          <span className="text-xs text-slate-400">{k}</span>
+                          <span className="text-xs text-stone-500">{k}</span>
                           <input
                             type="text"
                             value={payoutDefaults[k] ?? ""}
@@ -2052,7 +2263,7 @@ export default function DashboardPage() {
                               const base = c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} };
                               return { ...base, master_payout_defaults: { ...base.master_payout_defaults, [k]: e.target.value } };
                             })}
-                            className="w-16 rounded border border-white/20 bg-white/5 px-2 py-1 text-xs text-white focus:border-amber-500/50 focus:outline-none"
+                            className="w-16 rounded border border-stone-300 bg-stone-50 px-2 py-1 text-xs text-stone-900 focus:border-amber-400/70 focus:outline-none"
                             placeholder="2.5%"
                           />
                         </div>
@@ -2063,9 +2274,9 @@ export default function DashboardPage() {
               </div>
 
               {/* 分潤規則：同一人不重複計算（分模式 A / B） */}
-              <div className="rounded-xl border border-white/10 bg-slate-800/30 p-4">
+              <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
                 <div className="mb-4 flex items-center justify-between">
-                  <h3 className="font-semibold text-amber-400">分潤規則（同一人不重複計算）</h3>
+                  <h3 className="font-semibold text-amber-800">分潤規則（同一人不重複計算）</h3>
                   <button
                     type="button"
                     disabled={savingConfig === "payout_dedupe_rules"}
@@ -2085,14 +2296,14 @@ export default function DashboardPage() {
                       } catch {}
                       setSavingConfig(null);
                     }}
-                    className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-400 transition hover:bg-amber-500/30 disabled:opacity-60"
+                    className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
                   >
                     {savingConfig === "payout_dedupe_rules" ? "儲存中" : "儲存"}
                   </button>
                 </div>
-                <p className="mb-4 text-xs text-slate-500">
+                <p className="mb-4 text-xs text-stone-500">
                   設定「成對角色」規則：當指定角色為同一人時，只保留你選擇的角色（例如「專案BDPM、專案管理員同一人時只計算專案BDPM」）。
-                  點「儲存」後會依目前大總表<strong className="text-slate-400">自動重算並更新所有專案的分潤表</strong>。
+                  點「儲存」後會依目前大總表<strong className="text-stone-500">自動重算並更新所有專案的分潤表</strong>。
                 </p>
 
                 {[
@@ -2108,14 +2319,14 @@ export default function DashboardPage() {
                   },
                 ].map(({ mode, label, roles }) => (
                   <div key={mode} className="mb-4 last:mb-0">
-                    <p className="mb-2 text-xs font-medium text-slate-400">{label}</p>
+                    <p className="mb-2 text-xs font-medium text-stone-500">{label}</p>
                     <div className="space-y-2">
                       {payoutDedupeRules[mode].map((rule, idx) => (
-                        <div key={idx} className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-slate-900/50 px-3 py-2">
-                          <span className="text-xs text-slate-400">當</span>
-                          <span className="font-medium text-slate-300">{rule.roles.join("、")}</span>
-                          <span className="text-xs text-slate-400">為同一人時 → 只計算</span>
-                          <span className="font-semibold text-amber-400">{rule.keep}</span>
+                        <div key={idx} className="flex flex-wrap items-center gap-2 rounded-lg border border-stone-200/90 bg-white/90 px-3 py-2">
+                          <span className="text-xs text-stone-500">當</span>
+                          <span className="font-medium text-stone-600">{rule.roles.join("、")}</span>
+                          <span className="text-xs text-stone-500">為同一人時 → 只計算</span>
+                          <span className="font-semibold text-amber-800">{rule.keep}</span>
                           <button
                             type="button"
                             onClick={() =>
@@ -2125,7 +2336,7 @@ export default function DashboardPage() {
                                 return { ...base, payout_dedupe_rules: next };
                               })
                             }
-                            className="ml-auto text-slate-500 hover:text-red-400"
+                            className="ml-auto text-stone-500 hover:text-red-400"
                             title="刪除此規則"
                           >
                             ×
@@ -2134,20 +2345,20 @@ export default function DashboardPage() {
                       ))}
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-slate-500">新增：</span>
-                      <select id={`new-dedupe-keep-${mode}`} className="rounded border border-white/20 bg-slate-900/60 px-2 py-1 text-xs text-white">
+                      <span className="text-xs text-stone-500">新增：</span>
+                      <select id={`new-dedupe-keep-${mode}`} className="rounded border border-stone-300 bg-stone-50 px-2 py-1 text-xs text-stone-900">
                         {roles.map((r) => (
                           <option key={r} value={r}>只計算 {r}</option>
                         ))}
                       </select>
-                      <span className="text-xs text-slate-500">當</span>
+                      <span className="text-xs text-stone-500">當</span>
                       {roles.map((r) => (
-                        <label key={r} className="flex items-center gap-1 text-xs text-slate-300">
-                          <input type="checkbox" className="rounded border-white/20" id={`new-dedupe-role-${mode}-${r}`} />
+                        <label key={r} className="flex items-center gap-1 text-xs text-stone-600">
+                          <input type="checkbox" className="rounded border-stone-300" id={`new-dedupe-role-${mode}-${r}`} />
                           {r}
                         </label>
                       ))}
-                      <span className="text-xs text-slate-500">為同一人時</span>
+                      <span className="text-xs text-stone-500">為同一人時</span>
                       <button
                         type="button"
                         onClick={() => {
@@ -2165,7 +2376,7 @@ export default function DashboardPage() {
                             if (el) el.checked = false;
                           });
                         }}
-                        className="rounded bg-amber-500/20 px-2 py-1 text-xs font-medium text-amber-400 transition hover:bg-amber-500/30"
+                        className="rounded bg-amber-100/90 px-2 py-1 text-xs font-medium text-amber-800 transition hover:bg-amber-200/60"
                       >
                         新增
                       </button>
@@ -2175,9 +2386,9 @@ export default function DashboardPage() {
               </div>
 
               {/* 3. 專案類型 */}
-              <div className="rounded-xl border border-white/10 bg-slate-800/30 p-4">
+              <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
                 <div className="mb-3 flex items-center justify-between">
-                  <h3 className="font-semibold text-amber-400">專案類型</h3>
+                  <h3 className="font-semibold text-amber-800">專案類型</h3>
                   <button
                     type="button"
                     disabled={savingConfig === "project_types"}
@@ -2193,22 +2404,22 @@ export default function DashboardPage() {
                       } catch {}
                       setSavingConfig(null);
                     }}
-                    className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-400 transition hover:bg-amber-500/30 disabled:opacity-60"
+                    className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
                   >
                     {savingConfig === "project_types" ? "儲存中" : "儲存"}
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {projectTypesOptions.map((t, i) => (
-                    <span key={t} className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-xs text-slate-300">
+                    <span key={t} className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-1 text-xs text-stone-600">
                       {t}
-                      <button type="button" onClick={() => setSystemConfig((c) => ({ ...(c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} }), project_types: projectTypesOptions.filter((_, j) => j !== i) }))} className="text-slate-500 hover:text-amber-400">×</button>
+                      <button type="button" onClick={() => setSystemConfig((c) => ({ ...(c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} }), project_types: projectTypesOptions.filter((_, j) => j !== i) }))} className="text-stone-500 hover:text-amber-800">×</button>
                     </span>
                   ))}
                   <input
                     type="text"
                     placeholder="+ 新增類型"
-                    className="w-24 rounded border border-dashed border-white/20 bg-transparent px-2 py-1 text-xs text-slate-400 placeholder-slate-500 focus:border-amber-500/50 focus:outline-none"
+                    className="w-24 rounded border border-dashed border-stone-300 bg-transparent px-2 py-1 text-xs text-stone-500 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none"
                     onKeyDown={(e) => {
                       if (e.key !== "Enter") return;
                       const v = (e.target as HTMLInputElement).value.trim();
@@ -2219,9 +2430,9 @@ export default function DashboardPage() {
               </div>
 
               {/* 4. 專案權限設定 */}
-              <div className="rounded-xl border border-white/10 bg-slate-800/30 p-4">
+              <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
                 <div className="mb-3 flex items-center justify-between">
-                  <h3 className="font-semibold text-amber-400">專案權限設定</h3>
+                  <h3 className="font-semibold text-amber-800">專案權限設定</h3>
                   <button
                     type="button"
                     disabled={savingConfig === "role_permissions"}
@@ -2246,12 +2457,12 @@ export default function DashboardPage() {
                       }
                       setSavingConfig(null);
                     }}
-                    className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-400 transition hover:bg-amber-500/30 disabled:opacity-60"
+                    className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
                   >
                     {savingConfig === "role_permissions" ? "儲存中" : "儲存"}
                   </button>
                 </div>
-                <p className="mb-2 text-xs text-slate-500">
+                <p className="mb-2 text-xs text-stone-500">
                   勾選各角色可執行的操作。未勾選即沒有該操作權限。
                 </p>
                 <div className="space-y-2">
@@ -2261,15 +2472,15 @@ export default function DashboardPage() {
                     { key: "delete" as const, label: "刪除專案" },
                   ].map(({ key, label }) => (
                     <div key={key} className="flex items-center gap-3">
-                      <span className="w-20 text-xs font-medium text-slate-400">{label}</span>
+                      <span className="w-20 text-xs font-medium text-stone-500">{label}</span>
                       <div className="flex flex-wrap gap-2">
                         {displayRoles.map((role) => {
                           const checked = rolePermissions.master[key].includes(role);
                           return (
-                            <label key={role} className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2.5 py-1 text-xs text-slate-200">
+                            <label key={role} className="inline-flex items-center gap-1 rounded-full bg-stone-50 px-2.5 py-1 text-xs text-stone-700">
                               <input
                                 type="checkbox"
-                                className="h-3.5 w-3.5 rounded border-white/40 bg-slate-900 text-amber-500"
+                                className="h-3.5 w-3.5 rounded border-stone-300 bg-white text-amber-600"
                                 checked={checked}
                                 onChange={(e) => {
                                   const nextList = checked
@@ -2306,9 +2517,9 @@ export default function DashboardPage() {
               </div>
 
               {/* Table 欄位（唯讀參考） */}
-              <div className="rounded-xl border border-white/10 bg-slate-800/30 p-4">
-                <h3 className="mb-2 font-semibold text-amber-400">Table 欄位參考</h3>
-                <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-400">
+              <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
+                <h3 className="mb-2 font-semibold text-amber-800">Table 欄位參考</h3>
+                <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-stone-500">
                   {TABLE_KEYS.map((tk) => (
                     <span key={tk}>{TABLE_LABELS[tk] ?? tk}: {(TABLE_COLUMNS[tk] ?? []).map((c) => c.key).join(", ")}</span>
                   ))}
@@ -2320,17 +2531,17 @@ export default function DashboardPage() {
 
       {/* 新增使用者 Modal */}
       {showCreateUser && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#151922] shadow-2xl ring-1 ring-white/10">
-            <header className="flex items-center justify-between border-b border-white/10 bg-slate-800/50 px-6 py-4">
-              <h2 className="text-xl font-bold tracking-tight text-white">新增使用者</h2>
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-stone-900/30 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
+            <header className="flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
+              <h2 className="text-xl font-bold tracking-tight text-stone-900">新增使用者</h2>
               <button
                 type="button"
                 onClick={() => {
                   setShowCreateUser(false);
                   setCreateUserError(null);
                 }}
-                className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-amber-500/10 hover:text-amber-400"
+                className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
               >
                 關閉
               </button>
@@ -2372,7 +2583,7 @@ export default function DashboardPage() {
               }}
             >
               {createUserError && (
-                <p className="mb-4 rounded-lg bg-amber-500/20 px-3 py-2 text-sm font-medium text-amber-400">{createUserError}</p>
+                <p className="mb-4 rounded-lg bg-amber-100/90 px-3 py-2 text-sm font-medium text-amber-800">{createUserError}</p>
               )}
               <div className="space-y-4">
                 <InputField label="帳號 (Email)" type="email" value={createUserForm.email} onChange={(v) => setCreateUserForm((f) => ({ ...f, email: v }))} />
@@ -2394,14 +2605,14 @@ export default function DashboardPage() {
                     setShowCreateUser(false);
                     setCreateUserError(null);
                   }}
-                  className="rounded-xl border border-white/20 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:bg-white/10"
+                  className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-semibold text-stone-600 transition hover:bg-stone-100"
                 >
                   取消
                 </button>
                 <button
                   type="submit"
                   disabled={creatingUser}
-                  className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400 disabled:opacity-60"
+                  className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-60"
                 >
                   {creatingUser ? "新增中..." : "新增"}
                 </button>
@@ -2413,8 +2624,8 @@ export default function DashboardPage() {
 
       {/* 新增合作夥伴 / KOL Modal */}
       {showCreatePartner && (
-        <div className="fixed inset-0 z-40 flex items-center justify中心 bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-[#151922] shadow-2xl ring-1 ring-white/10">
+        <div className="fixed inset-0 z-40 flex items-center justify中心 bg-stone-900/30 backdrop-blur-sm p-4">
+          <div className="w-full max-w-3xl rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
             <form
               className="flex max-h-[90vh] flex-col"
               onSubmit={async (e) => {
@@ -2465,49 +2676,49 @@ export default function DashboardPage() {
                 }
               }}
             >
-              <header className="flex items-center justify-between border-b border-white/10 bg-slate-800/50 px-6 py-4">
-                <h2 className="text-xl font-bold tracking-tight text-white">新增合作夥伴 / KOL</h2>
+              <header className="flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
+                <h2 className="text-xl font-bold tracking-tight text-stone-900">新增合作夥伴 / KOL</h2>
                 <button
                   type="button"
                   onClick={() => {
                     setShowCreatePartner(false);
                     setCreatePartnerError(null);
                   }}
-                  className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-amber-500/10 hover:text-amber-400"
+                  className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
                 >
                   關閉
                 </button>
               </header>
-              <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4 text-sm text-slate-100">
+              <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4 text-sm text-stone-800">
                 {createPartnerError && (
-                  <p className="mb-2 rounded-lg bg-amber-500/20 px-3 py-2 text-xs font-medium text-amber-400">{createPartnerError}</p>
+                  <p className="mb-2 rounded-lg bg-amber-100/90 px-3 py-2 text-xs font-medium text-amber-800">{createPartnerError}</p>
                 )}
                 <div className="grid gap-4 md:grid-cols-2">
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">PartnerID（自動編號 KOL-001 起）*</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">PartnerID（自動編號 KOL-001 起）*</label>
                     <input
                       type="text"
                       value={createPartnerForm.PartnerID}
                       readOnly
-                      className="w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-1.5 text-sm text-slate-300"
+                      className="w-full rounded-lg border border-stone-200/90 bg-stone-100 px-3 py-1.5 text-sm text-stone-600"
                       title="依資料庫現有 KOL-編號遞增，無需手填"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">合作夥伴名稱 *</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">合作夥伴名稱 *</label>
                     <input
                       type="text"
                       value={createPartnerForm.合作夥伴名稱}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 合作夥伴名稱: e.target.value }))}
-                      className="w-full rounded-lg border border-white/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">類別一</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">類別一</label>
                     <select
                       value={createPartnerForm.類別一}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 類別一: e.target.value }))}
-                      className="w-full rounded-lg border border-white/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     >
                       <option value="">— 請選擇 —</option>
                       {createPartnerForm.類別一 &&
@@ -2522,11 +2733,11 @@ export default function DashboardPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">類別二</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">類別二</label>
                     <select
                       value={createPartnerForm.類別二}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 類別二: e.target.value }))}
-                      className="w-full rounded-lg border border-white/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     >
                       <option value="">— 請選擇 —</option>
                       {createPartnerForm.類別二 &&
@@ -2541,11 +2752,11 @@ export default function DashboardPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">類別三</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">類別三</label>
                     <select
                       value={createPartnerForm.類別三}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 類別三: e.target.value }))}
-                      className="w-full rounded-lg border border-white/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     >
                       <option value="">— 請選擇 —</option>
                       {createPartnerForm.類別三 &&
@@ -2560,60 +2771,60 @@ export default function DashboardPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">社群網站</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">社群網站</label>
                     <textarea
                       value={createPartnerForm.社群網站}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 社群網站: e.target.value }))}
                       placeholder="一行一個網址（支援 Facebook、Instagram、YouTube、Line、LinkedIn 等）"
                       rows={3}
-                      className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white placeholder:text-slate-500"
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900 placeholder:text-stone-500"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">粉絲數</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">粉絲數</label>
                     <input
                       type="text"
                       value={createPartnerForm.粉絲數}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 粉絲數: e.target.value }))}
-                      className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">頻道｜節目名稱</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">頻道｜節目名稱</label>
                     <input
                       type="text"
                       value={createPartnerForm["頻道｜節目名稱"]}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, "頻道｜節目名稱": e.target.value }))}
-                      className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">資料夾</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">資料夾</label>
                     <input
                       type="text"
                       value={createPartnerForm.資料夾}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 資料夾: e.target.value }))}
-                      className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">經紀人</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">經紀人</label>
                     <input
                       type="text"
                       value={createPartnerForm.經紀人}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 經紀人: e.target.value }))}
-                      className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">
                       KOL開發者（來自 Users）{!canEditVisibility && "— 僅董事長／管理者可指定"}
                     </label>
                     {canEditVisibility ? (
                       <select
                         value={createPartnerForm.KOL開發者}
                         onChange={(e) => setCreatePartnerForm((f) => ({ ...f, KOL開發者: e.target.value }))}
-                        className="w-full rounded-lg border border-white/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       >
                         <option value="">— 請選擇 —</option>
                         {createPartnerForm.KOL開發者 &&
@@ -2631,103 +2842,103 @@ export default function DashboardPage() {
                         ))}
                       </select>
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-500">
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-500">
                         核准後由董事長指定
                       </p>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">主管（分潤模式 B 用）</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">主管（分潤模式 B 用）</label>
                     <input
                       type="text"
                       value={createPartnerForm.主管}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 主管: e.target.value }))}
-                      className="w-full rounded-lg border border-white/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">合約開始日期</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">合約開始日期</label>
                     <input
                       type="text"
                       placeholder="例：2025-01-01"
                       value={createPartnerForm.合約開始日期}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 合約開始日期: e.target.value }))}
-                      className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">Email</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">Email</label>
                     <input
                       type="email"
                       value={createPartnerForm.Email}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, Email: e.target.value }))}
-                      className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">分級</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">分級</label>
                     <input
                       type="text"
                       value={createPartnerForm.分級}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 分級: e.target.value }))}
-                      className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
                 </div>
                 <div className="mt-2 grid gap-3 md:grid-cols-2">
-                  <label className="inline-flex items-center gap-2 text-xs text-slate-200">
+                  <label className="inline-flex items-center gap-2 text-xs text-stone-700">
                     <input
                       type="checkbox"
                       checked={createPartnerForm["是否有經營 私域群"]}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, "是否有經營 私域群": e.target.checked }))}
-                      className="h-4 w-4 rounded border-white/30 bg-white/5 text-amber-500"
+                      className="h-4 w-4 rounded border-stone-300 bg-stone-50 text-amber-500"
                     />
                     是否有經營 私域群
                   </label>
-                  <label className="inline-flex items-center gap-2 text-xs text-slate-200">
+                  <label className="inline-flex items-center gap-2 text-xs text-stone-700">
                     <input
                       type="checkbox"
                       checked={createPartnerForm.廣告經銷夥伴}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 廣告經銷夥伴: e.target.checked }))}
-                      className="h-4 w-4 rounded border白/30 bg-white/5 text-amber-500"
+                      className="h-4 w-4 rounded border-stone-300 bg-stone-50 text-amber-500"
                     />
                     廣告經銷夥伴
                   </label>
-                  <label className="inline-flex items-center gap-2 text-xs text-slate-200">
+                  <label className="inline-flex items-center gap-2 text-xs text-stone-700">
                     <input
                       type="checkbox"
                       checked={createPartnerForm.節目製作夥伴}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 節目製作夥伴: e.target.checked }))}
-                      className="h-4 w-4 rounded border白/30 bg-white/5 text-amber-500"
+                      className="h-4 w-4 rounded border-stone-300 bg-stone-50 text-amber-500"
                     />
                     節目製作夥伴
                   </label>
-                  <label className="inline-flex items-center gap-2 text-xs text-slate-200">
+                  <label className="inline-flex items-center gap-2 text-xs text-stone-700">
                     <input
                       type="checkbox"
                       checked={createPartnerForm.課程製作夥伴}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 課程製作夥伴: e.target.checked }))}
-                      className="h-4 w-4 rounded border白/30 bg白/5 text-amber-500"
+                      className="h-4 w-4 rounded border-stone-300 bg-stone-50 text-amber-500"
                     />
                     課程製作夥伴
                   </label>
                 </div>
               </div>
-              <footer className="flex justify-end gap-3 border-t border白/10 bg-slate-800/50 px-6 py-4">
+              <footer className="flex justify-end gap-3 border-t border-stone-200/90 bg-stone-100/90 px-6 py-4">
                 <button
                   type="button"
                   onClick={() => {
                     setShowCreatePartner(false);
                     setCreatePartnerError(null);
                   }}
-                  className="rounded-xl border border白/20 bg白/5 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:bg白/10"
+                  className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-semibold text-stone-600 transition hover:bg-stone-100"
                 >
                   取消
                 </button>
                 <button
                   type="submit"
                   disabled={creatingPartner}
-                  className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400 disabled:opacity-60"
+                  className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-60"
                 >
                   {creatingPartner ? "新增中..." : "新增 KOL"}
                 </button>
@@ -2739,11 +2950,11 @@ export default function DashboardPage() {
 
       {/* 編輯 / 檢視合作夥伴 Modal */}
       {showEditPartner && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-[#151922] shadow-2xl ring-1 ring-white/10">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-stone-900/30 backdrop-blur-sm p-4">
+          <div className="w-full max-w-3xl rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
             <div className="flex max-h-[90vh] flex-col">
-              <header className="flex items-center justify-between border-b border-white/10 bg-slate-800/50 px-6 py-4">
-                <h2 className="text-xl font-bold tracking-tight text-white">
+              <header className="flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
+                <h2 className="text-xl font-bold tracking-tight text-stone-900">
                   {canEditVisibility || canPartnerAgentSave ? "編輯合作夥伴 / KOL" : "合作夥伴詳情"}
                 </h2>
                 <button
@@ -2753,34 +2964,34 @@ export default function DashboardPage() {
                     setPartnerEditError(null);
                     setEditingPartnerSource(null);
                   }}
-                  className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-amber-500/10 hover:text-amber-400"
+                  className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
                 >
                   關閉
                 </button>
               </header>
-              <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4 text-sm text-slate-100">
+              <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4 text-sm text-stone-800">
                 {partnerEditError && (
-                  <p className="mb-2 rounded-lg bg-amber-500/20 px-3 py-2 text-xs font-medium text-amber-400">{partnerEditError}</p>
+                  <p className="mb-2 rounded-lg bg-amber-100/90 px-3 py-2 text-xs font-medium text-amber-800">{partnerEditError}</p>
                 )}
                 {showEditPartner && !canEditVisibility && !canPartnerAgentSave && editingPartnerSource && (
-                  <p className="mb-2 rounded-lg border border-white/10 bg-slate-800/50 px-3 py-2 text-xs text-slate-400">
-                    待審核新申請僅<strong className="text-slate-300">建立者</strong>可編輯；已上架 KOL 修改會送
-                    <strong className="text-amber-400"> 變更審核 </strong>
+                  <p className="mb-2 rounded-lg border border-stone-200/90 bg-stone-100/90 px-3 py-2 text-xs text-stone-500">
+                    待審核新申請僅<strong className="text-stone-600">建立者</strong>可編輯；已上架 KOL 修改會送
+                    <strong className="text-amber-800"> 變更審核 </strong>
                     ，主列表不變，核准後才更新。
                   </p>
                 )}
                 <div className="grid gap-4 md:grid-cols-2">
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">PartnerID</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">PartnerID</label>
                     <input
                       type="text"
                       value={editPartnerForm.PartnerID}
                       readOnly
-                      className="w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-1.5 text-sm text-slate-400"
+                      className="w-full rounded-lg border border-stone-200/90 bg-stone-100 px-3 py-1.5 text-sm text-stone-500"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">
                       合作夥伴名稱 {(canEditVisibility || partnerFieldEditable("合作夥伴名稱")) && "*"}
                     </label>
                     {partnerFieldEditable("合作夥伴名稱") ? (
@@ -2788,19 +2999,19 @@ export default function DashboardPage() {
                         type="text"
                         value={editPartnerForm.合作夥伴名稱}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 合作夥伴名稱: e.target.value }))}
-                        className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       />
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">{editPartnerForm.合作夥伴名稱 || "—"}</p>
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.合作夥伴名稱 || "—"}</p>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">類別一</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">類別一</label>
                     {partnerFieldEditable("類別一") ? (
                       <select
                         value={editPartnerForm.類別一}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 類別一: e.target.value }))}
-                        className="w-full rounded-lg border border-white/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       >
                         <option value="">— 請選擇 —</option>
                         {editPartnerForm.類別一 &&
@@ -2814,16 +3025,16 @@ export default function DashboardPage() {
                         ))}
                       </select>
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">{editPartnerForm.類別一 || "—"}</p>
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.類別一 || "—"}</p>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">類別二</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">類別二</label>
                     {partnerFieldEditable("類別二") ? (
                       <select
                         value={editPartnerForm.類別二}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 類別二: e.target.value }))}
-                        className="w-full rounded-lg border border-white/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       >
                         <option value="">— 請選擇 —</option>
                         {editPartnerForm.類別二 &&
@@ -2837,16 +3048,16 @@ export default function DashboardPage() {
                         ))}
                       </select>
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">{editPartnerForm.類別二 || "—"}</p>
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.類別二 || "—"}</p>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">類別三</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">類別三</label>
                     {partnerFieldEditable("類別三") ? (
                       <select
                         value={editPartnerForm.類別三}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 類別三: e.target.value }))}
-                        className="w-full rounded-lg border border-white/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       >
                         <option value="">— 請選擇 —</option>
                         {editPartnerForm.類別三 &&
@@ -2860,86 +3071,86 @@ export default function DashboardPage() {
                         ))}
                       </select>
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">{editPartnerForm.類別三 || "—"}</p>
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.類別三 || "—"}</p>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">社群網站</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">社群網站</label>
                     {partnerFieldEditable("社群網站") ? (
                       <textarea
                         value={editPartnerForm.社群網站}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 社群網站: e.target.value }))}
                         placeholder="一行一個網址"
                         rows={3}
-                        className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white placeholder:text-slate-500"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900 placeholder:text-stone-500"
                       />
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">
                         <SocialLinkIcons value={editPartnerForm.社群網站} />
                       </p>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">粉絲數</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">粉絲數</label>
                     {partnerFieldEditable("粉絲數") ? (
                       <input
                         type="text"
                         value={editPartnerForm.粉絲數}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 粉絲數: e.target.value }))}
-                        className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       />
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">{editPartnerForm.粉絲數 || "—"}</p>
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.粉絲數 || "—"}</p>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">頻道｜節目名稱</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">頻道｜節目名稱</label>
                     {partnerFieldEditable("頻道｜節目名稱") ? (
                       <input
                         type="text"
                         value={editPartnerForm["頻道｜節目名稱"]}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, "頻道｜節目名稱": e.target.value }))}
-                        className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       />
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">{editPartnerForm["頻道｜節目名稱"] || "—"}</p>
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm["頻道｜節目名稱"] || "—"}</p>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">資料夾</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">資料夾</label>
                     {partnerFieldEditable("資料夾") ? (
                       <input
                         type="text"
                         value={editPartnerForm.資料夾}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 資料夾: e.target.value }))}
-                        className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       />
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">{editPartnerForm.資料夾 || "—"}</p>
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.資料夾 || "—"}</p>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">經紀人</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">經紀人</label>
                     {partnerFieldEditable("經紀人") ? (
                       <input
                         type="text"
                         value={editPartnerForm.經紀人}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 經紀人: e.target.value }))}
-                        className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       />
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">{editPartnerForm.經紀人 || "—"}</p>
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.經紀人 || "—"}</p>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">
                       KOL開發者（來自 Users）{!canEditVisibility && "— 僅董事長可改"}
                     </label>
                     {partnerFieldEditable("KOL開發者") ? (
                       <select
                         value={editPartnerForm.KOL開發者}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, KOL開發者: e.target.value }))}
-                        className="w-full rounded-lg border border-white/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       >
                         <option value="">— 請選擇 —</option>
                         {editPartnerForm.KOL開發者 &&
@@ -2955,125 +3166,125 @@ export default function DashboardPage() {
                         ))}
                       </select>
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">{editPartnerForm.KOL開發者 || "—"}</p>
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.KOL開發者 || "—"}</p>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">主管（分潤模式 B 用）</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">主管（分潤模式 B 用）</label>
                     {partnerFieldEditable("主管") ? (
                       <input
                         type="text"
                         value={editPartnerForm.主管}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 主管: e.target.value }))}
-                        className="w-full rounded-lg border border-white/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       />
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">{editPartnerForm.主管 || "—"}</p>
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.主管 || "—"}</p>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">合約開始日期</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">合約開始日期</label>
                     {partnerFieldEditable("合約開始日期") ? (
                       <input
                         type="text"
                         placeholder="例：2025-01-01"
                         value={editPartnerForm.合約開始日期}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 合約開始日期: e.target.value }))}
-                        className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       />
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">{editPartnerForm.合約開始日期 || "—"}</p>
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.合約開始日期 || "—"}</p>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">Email</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">Email</label>
                     {partnerFieldEditable("Email") ? (
                       <input
                         type="email"
                         value={editPartnerForm.Email}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, Email: e.target.value }))}
-                        className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       />
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">{editPartnerForm.Email || "—"}</p>
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.Email || "—"}</p>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-400">分級</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">分級</label>
                     {partnerFieldEditable("分級") ? (
                       <input
                         type="text"
                         value={editPartnerForm.分級}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 分級: e.target.value }))}
-                        className="w-full rounded-lg border border白/20 bg-slate-900/60 px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       />
                     ) : (
-                      <p className="rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200">{editPartnerForm.分級 || "—"}</p>
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.分級 || "—"}</p>
                     )}
                   </div>
                 </div>
                 <div className="mt-2 grid gap-3 md:grid-cols-2">
-                  <label className="inline-flex items-center gap-2 text-xs text-slate-200">
+                  <label className="inline-flex items-center gap-2 text-xs text-stone-700">
                     {partnerFieldEditable("是否有經營 私域群") ? (
                       <input
                         type="checkbox"
                         checked={editPartnerForm["是否有經營 私域群"]}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, "是否有經營 私域群": e.target.checked }))}
-                        className="h-4 w-4 rounded border白/30 bg-white/5 text-amber-500"
+                        className="h-4 w-4 rounded border-stone-300 bg-stone-50 text-amber-500"
                       />
                     ) : (
-                      <span className="text-amber-400">{editPartnerForm["是否有經營 私域群"] ? "✓" : "—"}</span>
+                      <span className="text-amber-800">{editPartnerForm["是否有經營 私域群"] ? "✓" : "—"}</span>
                     )}
                     是否有經營 私域群
                   </label>
-                  <label className="inline-flex items-center gap-2 text-xs text-slate-200">
+                  <label className="inline-flex items-center gap-2 text-xs text-stone-700">
                     {partnerFieldEditable("廣告經銷夥伴") ? (
                       <input
                         type="checkbox"
                         checked={editPartnerForm.廣告經銷夥伴}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 廣告經銷夥伴: e.target.checked }))}
-                        className="h-4 w-4 rounded border白/30 bg-white/5 text-amber-500"
+                        className="h-4 w-4 rounded border-stone-300 bg-stone-50 text-amber-500"
                       />
                     ) : (
-                      <span className="text-amber-400">{editPartnerForm.廣告經銷夥伴 ? "✓" : "—"}</span>
+                      <span className="text-amber-800">{editPartnerForm.廣告經銷夥伴 ? "✓" : "—"}</span>
                     )}
                     廣告經銷夥伴
                   </label>
-                  <label className="inline-flex items-center gap-2 text-xs text-slate-200">
+                  <label className="inline-flex items-center gap-2 text-xs text-stone-700">
                     {partnerFieldEditable("節目製作夥伴") ? (
                       <input
                         type="checkbox"
                         checked={editPartnerForm.節目製作夥伴}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 節目製作夥伴: e.target.checked }))}
-                        className="h-4 w-4 rounded border白/30 bg-white/5 text-amber-500"
+                        className="h-4 w-4 rounded border-stone-300 bg-stone-50 text-amber-500"
                       />
                     ) : (
-                      <span className="text-amber-400">{editPartnerForm.節目製作夥伴 ? "✓" : "—"}</span>
+                      <span className="text-amber-800">{editPartnerForm.節目製作夥伴 ? "✓" : "—"}</span>
                     )}
                     節目製作夥伴
                   </label>
-                  <label className="inline-flex items-center gap-2 text-xs text-slate-200">
+                  <label className="inline-flex items-center gap-2 text-xs text-stone-700">
                     {partnerFieldEditable("課程製作夥伴") ? (
                       <input
                         type="checkbox"
                         checked={editPartnerForm.課程製作夥伴}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 課程製作夥伴: e.target.checked }))}
-                        className="h-4 w-4 rounded border白/30 bg-white/5 text-amber-500"
+                        className="h-4 w-4 rounded border-stone-300 bg-stone-50 text-amber-500"
                       />
                     ) : (
-                      <span className="text-amber-400">{editPartnerForm.課程製作夥伴 ? "✓" : "—"}</span>
+                      <span className="text-amber-800">{editPartnerForm.課程製作夥伴 ? "✓" : "—"}</span>
                     )}
                     課程製作夥伴
                   </label>
                 </div>
               </div>
               {(canEditVisibility || canPartnerAgentSave) && (
-                <footer className="flex flex-col gap-2 border-t border-white/10 bg-slate-800/50 px-6 py-4">
+                <footer className="flex flex-col gap-2 border-t border-stone-200/90 bg-stone-100/90 px-6 py-4">
                   {!canEditVisibility &&
                     editingPartnerSource &&
                     (editingPartnerSource.審核狀態 ?? PARTNER_STATUS.APPROVED) === PARTNER_STATUS.APPROVED && (
-                    <p className="text-xs text-amber-400/90">
-                      儲存後會送出<strong className="text-amber-300"> 變更審核 </strong>
+                    <p className="text-xs text-amber-800">
+                      儲存後會送出<strong className="text-amber-700"> 變更審核 </strong>
                       ，主列表資料維持不變；董事長核准後才會套用修改。
                     </p>
                   )}
@@ -3085,7 +3296,7 @@ export default function DashboardPage() {
                       setPartnerEditError(null);
                       setEditingPartnerSource(null);
                     }}
-                    className="rounded-xl border border白/20 bg白/5 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:bg白/10"
+                    className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-semibold text-stone-600 transition hover:bg-stone-100"
                   >
                     取消
                   </button>
@@ -3178,7 +3389,7 @@ export default function DashboardPage() {
                         setSavingPartner(false);
                       }
                     }}
-                    className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400 disabled:opacity-60"
+                    className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-60"
                   >
                     {savingPartner ? "儲存中..." : "儲存"}
                   </button>
@@ -3193,22 +3404,22 @@ export default function DashboardPage() {
       {/* 變更申請差異（舊值 / 新值 標色） */}
       {showChangeRequestDiff && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-amber-500/30 bg-[#151922] shadow-xl">
-            <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-              <h3 className="text-lg font-bold text-white">
+          <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-xl">
+            <header className="flex items-center justify-between border-b border-stone-200/90 px-4 py-3">
+              <h3 className="text-lg font-bold text-stone-900">
                 變更差異 — {showChangeRequestDiff.PartnerID}
               </h3>
               <button
                 type="button"
                 onClick={() => setShowChangeRequestDiff(null)}
-                className="rounded-lg border border-white/20 px-3 py-1 text-sm text-slate-300 hover:bg-white/10"
+                className="rounded-lg border border-stone-300 px-3 py-1 text-sm text-stone-600 hover:bg-stone-100"
               >
                 關閉
               </button>
             </header>
             <div className="max-h-[65vh] overflow-y-auto p-4 text-sm">
-              <p className="mb-3 text-xs text-slate-500">
-                僅<strong className="text-amber-400">有差異</strong>的欄位會以
+              <p className="mb-3 text-xs text-stone-500">
+                僅<strong className="text-amber-800">有差異</strong>的欄位會以
                 <span className="mx-1 rounded bg-red-500/20 px-1.5 py-0.5 text-red-300">變更前</span>
                 /
                 <span className="mx-1 rounded bg-emerald-500/20 px-1.5 py-0.5 text-emerald-300">變更後</span>
@@ -3216,7 +3427,7 @@ export default function DashboardPage() {
               </p>
               <table className="w-full border-collapse text-left">
                 <thead>
-                  <tr className="border-b border-white/10 text-xs text-slate-400">
+                  <tr className="border-b border-stone-200/90 text-xs text-stone-500">
                     <th className="py-2 pr-2">欄位</th>
                     <th className="py-2 pr-2">變更前</th>
                     <th className="py-2">變更後</th>
@@ -3241,15 +3452,15 @@ export default function DashboardPage() {
                     if (rows.length === 0) {
                       return (
                         <tr>
-                          <td colSpan={3} className="py-6 text-center text-slate-500">
+                          <td colSpan={3} className="py-6 text-center text-stone-500">
                             此申請與目前上架資料比對無差異（或僅送出未改動欄位）。
                           </td>
                         </tr>
                       );
                     }
                     return rows.map((r) => (
-                      <tr key={r.key} className="border-b border-white/5 align-top">
-                        <td className="py-2 pr-2 font-medium text-slate-300">{r.label}</td>
+                      <tr key={r.key} className="border-b border-stone-200/70 align-top">
+                        <td className="py-2 pr-2 font-medium text-stone-600">{r.label}</td>
                         <td className="py-2 pr-2 rounded bg-red-500/15 text-red-100">{r.oldStr}</td>
                         <td className="py-2 rounded bg-emerald-500/15 text-emerald-100">{r.newStr}</td>
                       </tr>
@@ -3264,23 +3475,23 @@ export default function DashboardPage() {
 
         {/* 合作夥伴 / KOL */}
         {activeSection === "partners" && (
-        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
+        <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
           {partnersLoadError && (
-            <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-              <p className="font-semibold text-amber-300">合作夥伴列表載入異常（已嘗試備援查詢）</p>
+            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-200">
+              <p className="font-semibold text-amber-700">合作夥伴列表載入異常（已嘗試備援查詢）</p>
               <p className="mt-1 text-xs text-amber-200/90">{partnersLoadError}</p>
-              <p className="mt-2 text-xs text-slate-400">若仍無資料，請在 Supabase 確認 public.partners 欄位名是否與程式一致，或表內是否有列。</p>
+              <p className="mt-2 text-xs text-stone-500">若仍無資料，請在 Supabase 確認 public.partners 欄位名是否與程式一致，或表內是否有列。</p>
             </div>
           )}
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3">
-              <h2 className="text-xl font-bold tracking-tight text-white">合作夥伴 / KOL</h2>
-              <div className="flex rounded-lg border border-white/15 bg-slate-900/50 p-0.5">
+              <h2 className="text-xl font-bold tracking-tight text-stone-900">合作夥伴 / KOL</h2>
+              <div className="flex rounded-lg border border-stone-200 bg-white/90 p-0.5">
                 <button
                   type="button"
                   onClick={() => setPartnersTab("approved")}
                   className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
-                    partnersTab === "approved" ? "bg-amber-500 text-slate-900" : "text-slate-400 hover:text-white"
+                    partnersTab === "approved" ? "bg-amber-500 text-slate-900" : "text-stone-500 hover:text-stone-900"
                   }`}
                 >
                   已上架
@@ -3292,12 +3503,12 @@ export default function DashboardPage() {
                     fetchPartnersPending();
                   }}
                   className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
-                    partnersTab === "pending" ? "bg-amber-500 text-slate-900" : "text-slate-400 hover:text-white"
+                    partnersTab === "pending" ? "bg-amber-500 text-slate-900" : "text-stone-500 hover:text-stone-900"
                   }`}
                 >
                   待審核
                   {(partnersPending.length > 0 || partnerChangeRequests.length > 0) && (
-                    <span className="ml-1 rounded-full bg-slate-800 px-1.5 py-0.5 text-[10px] text-amber-300">
+                    <span className="ml-1 rounded-full bg-amber-200/80 px-1.5 py-0.5 text-[10px] text-amber-800">
                       {partnersPending.length + partnerChangeRequests.length}
                     </span>
                   )}
@@ -3310,7 +3521,7 @@ export default function DashboardPage() {
                 value={partnersSearch}
                 onChange={(e) => setPartnersSearch(e.target.value)}
                 placeholder="搜尋 PartnerID、合作夥伴名稱、Email…"
-                className="w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
+                className="w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
               />
               <>
                   {canEditVisibility && (
@@ -3337,7 +3548,7 @@ export default function DashboardPage() {
                         setRefreshingFollowers(false);
                       }
                     }}
-                    className="rounded-full border border-amber-500/60 bg-amber-500/10 px-4 py-1.5 text-xs font-bold text-amber-400 transition hover:bg-amber-500/20 disabled:opacity-60"
+                    className="rounded-full border border-amber-500/60 bg-amber-50 px-4 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-100/90 disabled:opacity-60"
                   >
                     {refreshingFollowers ? "更新粉絲數中…" : "更新粉絲數"}
                   </button>
@@ -3370,44 +3581,44 @@ export default function DashboardPage() {
                       setCreatePartnerError(null);
                       setShowCreatePartner(true);
                     }}
-                    className="rounded-full bg-amber-500 px-4 py-1.5 text-xs font-bold text-slate-900 shadow shadow-amber-500/30 transition hover:bg-amber-400"
+                    className="rounded-full bg-amber-500 px-4 py-1.5 text-xs font-bold text-slate-900 shadow shadow-amber-200/40 transition hover:bg-amber-400"
                   >
                     新增 KOL
                   </button>
               </>
             </div>
             {refreshFollowersMessage && (
-              <p className="mt-2 text-xs text-amber-400/90">{refreshFollowersMessage}</p>
+              <p className="mt-2 text-xs text-amber-800">{refreshFollowersMessage}</p>
             )}
           </div>
           {/* 已上架：原主列表 */}
           {partnersTab === "approved" && (
           <>
-          <div className="max-h-[60vh] overflow-y-auto overflow-x-auto rounded-xl border border-white/10">
-            <table className="min-w-full divide-y divide-white/10">
-              <thead className="sticky top-0 z-20 bg-slate-900">
+          <div className="max-h-[60vh] overflow-y-auto overflow-x-auto rounded-xl border border-stone-200/90">
+            <table className="min-w-full divide-y divide-stone-200">
+              <thead className="sticky top-0 z-20 bg-amber-100/90">
                 <tr>
-                  <th className="w-10 px-2 py-3.5 text-left text-sm font-semibold tracking-wider text-amber-300 border-b border-amber-400/60" />
+                  <th className="w-10 px-2 py-3.5 text-left text-sm font-semibold tracking-wider text-amber-700 border-b border-amber-400/60" />
                   {partnerListCols.map((k) => (
                     <th
                       key={k}
-                      className="px-4 py-3.5 text-left text-sm font-semibold tracking-wider text-amber-300 border-b border-amber-400/60"
+                      className="px-4 py-3.5 text-left text-sm font-semibold tracking-wider text-amber-700 border-b border-amber-400/60"
                     >
                       {tableColumnLabels.partners?.[k] ?? k}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/10 bg-slate-800/10">
+              <tbody className="divide-y divide-stone-200 bg-amber-50/40">
                 {partners.length === 0 ? (
                   <tr>
-                    <td colSpan={(partnerListCols.length || 6) + 1} className="px-4 py-8 text-center text-base font-medium text-slate-500">
+                    <td colSpan={(partnerListCols.length || 6) + 1} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                       尚無合作夥伴資料
                     </td>
                   </tr>
                 ) : searchedPartners.length === 0 ? (
                   <tr>
-                    <td colSpan={(partnerListCols.length || 6) + 1} className="px-4 py-8 text-center text-base font-medium text-slate-500">
+                    <td colSpan={(partnerListCols.length || 6) + 1} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                       沒有符合搜尋結果
                     </td>
                   </tr>
@@ -3444,7 +3655,7 @@ export default function DashboardPage() {
                           setPartnerEditError(null);
                           setShowEditPartner(true);
                         }}
-                        className="cursor-pointer transition hover:bg-white/5"
+                        className="cursor-pointer transition hover:bg-amber-50/80"
                       >
                         <td
                           className="w-10 px-2 py-3.5"
@@ -3455,7 +3666,7 @@ export default function DashboardPage() {
                         >
                           <button
                             type="button"
-                            className="inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 transition hover:bg-white/10 hover:text-amber-400"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded text-stone-500 transition hover:bg-stone-100 hover:text-amber-800"
                             aria-label={expanded ? "收起" : "展開"}
                           >
                             <svg
@@ -3479,7 +3690,7 @@ export default function DashboardPage() {
                             const checked = Boolean(val);
                             return (
                               <td key={k} className="px-4 py-3.5 text-center text-sm">
-                                {checked ? <span className="text-amber-400">✓</span> : <span className="text-slate-600">—</span>}
+                                {checked ? <span className="text-amber-800">✓</span> : <span className="text-stone-500">—</span>}
                               </td>
                             );
                           }
@@ -3494,7 +3705,7 @@ export default function DashboardPage() {
                           return (
                             <td
                               key={k}
-                              className={`px-4 py-3.5 text-sm font-medium ${k === "PartnerID" || k === "合作夥伴名稱" ? "whitespace-nowrap text-white" : "text-slate-300"} ${(k === "Email" || k === "頻道｜節目名稱") ? "max-w-[220px] truncate" : ""}`}
+                              className={`px-4 py-3.5 text-sm font-medium ${k === "PartnerID" || k === "合作夥伴名稱" ? "whitespace-nowrap text-stone-900" : "text-stone-600"} ${(k === "Email" || k === "頻道｜節目名稱") ? "max-w-[220px] truncate" : ""}`}
                               title={k === "Email" || k === "頻道｜節目名稱" ? str : undefined}
                             >
                               {str}
@@ -3503,7 +3714,7 @@ export default function DashboardPage() {
                         })}
                       </tr>,
                       expanded && (
-                        <tr key={`${pt.PartnerID ?? i}-detail`} className="bg-slate-900/50">
+                        <tr key={`${pt.PartnerID ?? i}-detail`} className="bg-white/90">
                           <td
                             colSpan={(partnerListCols.length || 6) + 1}
                             className="px-6 py-4 text-sm"
@@ -3522,7 +3733,7 @@ export default function DashboardPage() {
                                 if (display === null && c.key === "社群網站") {
                                   return (
                                     <div key={c.key} className="md:col-span-2">
-                                      <span className="text-xs font-medium text-slate-500">{c.label}：</span>
+                                      <span className="text-xs font-medium text-stone-500">{c.label}：</span>
                                       <span className="ml-1">
                                         <SocialLinkIcons value={val as string} />
                                       </span>
@@ -3531,8 +3742,8 @@ export default function DashboardPage() {
                                 }
                                 return (
                                   <div key={c.key}>
-                                    <span className="text-xs font-medium text-slate-500">{c.label}：</span>
-                                    <span className="ml-1 text-slate-300">{display}</span>
+                                    <span className="text-xs font-medium text-stone-500">{c.label}：</span>
+                                    <span className="ml-1 text-stone-600">{display}</span>
                                   </div>
                                 );
                               })}
@@ -3547,44 +3758,44 @@ export default function DashboardPage() {
             </table>
           </div>
           {searchedPartners.length > visiblePartnersRows.length && (
-            <p className="mt-2 text-right text-xs text-slate-500">載入中 {visiblePartnersRows.length} / {searchedPartners.length}</p>
+            <p className="mt-2 text-right text-xs text-stone-500">載入中 {visiblePartnersRows.length} / {searchedPartners.length}</p>
           )}
           </>
           )}
 
           {/* 待審核 */}
           {partnersTab === "pending" && (
-            <div className="max-h-[60vh] overflow-y-auto rounded-xl border border-white/10">
+            <div className="max-h-[60vh] overflow-y-auto rounded-xl border border-stone-200/90">
               {partnersPendingLoading ? (
-                <p className="px-4 py-8 text-center text-slate-500">載入中…</p>
+                <p className="px-4 py-8 text-center text-stone-500">載入中…</p>
               ) : partnersPending.length === 0 && partnerChangeRequests.length === 0 ? (
-                <p className="px-4 py-8 text-center text-slate-500">目前沒有待審核或已駁回的申請</p>
+                <p className="px-4 py-8 text-center text-stone-500">目前沒有待審核或已駁回的申請</p>
               ) : (
                 <>
                 {partnerChangeRequests.length > 0 && (
                   <div className="mb-6">
-                    <h3 className="mb-2 px-2 text-sm font-bold text-amber-300">已上架 KOL 變更申請（主列表仍為舊資料，核准後才更新）</h3>
-                    <table className="min-w-full divide-y divide-white/10 rounded-xl border border-amber-500/30">
-                      <thead className="bg-slate-900/90">
+                    <h3 className="mb-2 px-2 text-sm font-bold text-amber-700">已上架 KOL 變更申請（主列表仍為舊資料，核准後才更新）</h3>
+                    <table className="min-w-full divide-y divide-stone-200 rounded-xl border border-amber-200">
+                      <thead className="bg-amber-50/95">
                         <tr>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-300">類型</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-300">PartnerID</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-300">狀態</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-300">駁回理由</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-300">操作</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-700">類型</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-700">PartnerID</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-700">狀態</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-700">駁回理由</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-700">操作</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-white/10">
+                      <tbody className="divide-y divide-stone-200">
                         {partnerChangeRequests.map((cr) => (
                           <tr key={cr.id} className="bg-amber-950/20">
-                            <td className="px-4 py-2 text-xs font-semibold text-amber-400">變更審核</td>
-                            <td className="px-4 py-2 text-sm text-white">{cr.PartnerID}</td>
+                            <td className="px-4 py-2 text-xs font-semibold text-amber-800">變更審核</td>
+                            <td className="px-4 py-2 text-sm text-stone-900">{cr.PartnerID}</td>
                             <td className="px-4 py-2 text-sm">
-                              <span className={cr.審核狀態 === PARTNER_STATUS.REJECTED ? "text-red-400" : "text-amber-400"}>
+                              <span className={cr.審核狀態 === PARTNER_STATUS.REJECTED ? "text-red-400" : "text-amber-800"}>
                                 {cr.審核狀態 === PARTNER_STATUS.REJECTED ? "審核未通過" : cr.審核狀態}
                               </span>
                             </td>
-                            <td className="max-w-xs truncate px-4 py-2 text-xs text-slate-400" title={cr.駁回理由}>
+                            <td className="max-w-xs truncate px-4 py-2 text-xs text-stone-500" title={cr.駁回理由}>
                               {cr.駁回理由 ?? "—"}
                             </td>
                             <td className="px-4 py-2">
@@ -3600,7 +3811,7 @@ export default function DashboardPage() {
                                   <>
                                     <button
                                       type="button"
-                                      className="rounded-lg bg-emerald-600 px-2 py-1 text-xs font-bold text-white hover:bg-emerald-500"
+                                      className="rounded-lg bg-emerald-600 px-2 py-1 text-xs font-bold text-stone-900 hover:bg-emerald-500"
                                       onClick={async () => {
                                         const res = await fetch("/api/partners/change-requests", {
                                           method: "PATCH",
@@ -3623,7 +3834,7 @@ export default function DashboardPage() {
                                     </button>
                                     <button
                                       type="button"
-                                      className="rounded-lg bg-red-600/80 px-2 py-1 text-xs font-bold text-white hover:bg-red-500"
+                                      className="rounded-lg bg-red-600/80 px-2 py-1 text-xs font-bold text-stone-900 hover:bg-red-500"
                                       onClick={() => {
                                         const reason = window.prompt("駁回理由（可留空）", "");
                                         if (reason === null) return;
@@ -3657,35 +3868,35 @@ export default function DashboardPage() {
                   </div>
                 )}
                 {partnersPending.length > 0 && (
-                <table className="min-w-full divide-y divide-white/10">
-                  <thead className="sticky top-0 z-10 bg-slate-900">
+                <table className="min-w-full divide-y divide-stone-200">
+                  <thead className="sticky top-0 z-10 bg-amber-100/90">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-300">PartnerID</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-300">合作夥伴名稱</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-300">經紀人</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-300">狀態</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-300">駁回理由</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-300">操作</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">PartnerID</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">合作夥伴名稱</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">經紀人</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">狀態</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">駁回理由</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">操作</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/10">
+                  <tbody className="divide-y divide-stone-200">
                     {partnersPending.map((pt) => (
-                      <tr key={pt.PartnerID} className="bg-slate-800/10">
-                        <td className="px-4 py-3 text-sm text-slate-300">{pt.PartnerID}</td>
-                        <td className="px-4 py-3 text-sm text-white">{pt.合作夥伴名稱 ?? "—"}</td>
-                        <td className="px-4 py-3 text-sm text-slate-300">{pt.經紀人 ?? "—"}</td>
+                      <tr key={pt.PartnerID} className="bg-amber-50/40">
+                        <td className="px-4 py-3 text-sm text-stone-600">{pt.PartnerID}</td>
+                        <td className="px-4 py-3 text-sm text-stone-900">{pt.合作夥伴名稱 ?? "—"}</td>
+                        <td className="px-4 py-3 text-sm text-stone-600">{pt.經紀人 ?? "—"}</td>
                         <td className="px-4 py-3 text-sm">
                           <span
                             className={
                               pt.審核狀態 === PARTNER_STATUS.REJECTED
                                 ? "text-red-400"
-                                : "text-amber-400"
+                                : "text-amber-800"
                             }
                           >
                             {pt.審核狀態 ?? PARTNER_STATUS.PENDING}
                           </span>
                         </td>
-                        <td className="max-w-xs truncate px-4 py-3 text-xs text-slate-400" title={pt.駁回理由}>
+                        <td className="max-w-xs truncate px-4 py-3 text-xs text-stone-500" title={pt.駁回理由}>
                           {pt.駁回理由 ?? "—"}
                         </td>
                         <td className="px-4 py-3">
@@ -3693,7 +3904,7 @@ export default function DashboardPage() {
                             <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
-                                className="rounded-lg bg-emerald-600 px-2 py-1 text-xs font-bold text-white hover:bg-emerald-500"
+                                className="rounded-lg bg-emerald-600 px-2 py-1 text-xs font-bold text-stone-900 hover:bg-emerald-500"
                                 onClick={async () => {
                                   const res = await fetch("/api/partners", {
                                     method: "PATCH",
@@ -3718,7 +3929,7 @@ export default function DashboardPage() {
                               </button>
                               <button
                                 type="button"
-                                className="rounded-lg bg-red-600/80 px-2 py-1 text-xs font-bold text-white hover:bg-red-500"
+                                className="rounded-lg bg-red-600/80 px-2 py-1 text-xs font-bold text-stone-900 hover:bg-red-500"
                                 onClick={() => {
                                   const reason = window.prompt("駁回理由（可留空）", "");
                                   if (reason === null) return;
@@ -3746,7 +3957,7 @@ export default function DashboardPage() {
                               </button>
                               <button
                                 type="button"
-                                className="rounded-lg border border-white/20 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
+                                className="rounded-lg border border-stone-300 px-2 py-1 text-xs text-stone-600 hover:bg-stone-100"
                                 onClick={() => {
                                   setEditingPartnerSource(pt);
                                   setEditPartnerForm({
@@ -3780,7 +3991,7 @@ export default function DashboardPage() {
                           ) : (
                             <button
                               type="button"
-                              className="rounded-lg border border-white/20 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
+                              className="rounded-lg border border-stone-300 px-2 py-1 text-xs text-stone-600 hover:bg-stone-100"
                               onClick={() => {
                                 setEditingPartnerSource(pt);
                                 setEditPartnerForm({
@@ -3826,64 +4037,64 @@ export default function DashboardPage() {
 
         {/* 任務 */}
         {activeSection === "tasks" && (
-        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
+        <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-xl font-bold tracking-tight text-white">任務</h2>
+            <h2 className="text-xl font-bold tracking-tight text-stone-900">任務</h2>
             <input
               type="text"
               value={tasksSearch}
               onChange={(e) => setTasksSearch(e.target.value)}
               placeholder="搜尋專案名稱、任務、負責人…"
-              className="w-full min-w-0 max-w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
+              className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
             />
           </div>
           {/* 小螢幕：任務卡片 */}
           <div className="space-y-3 md:hidden">
             {filteredTasks.length === 0 ? (
-              <p className="rounded-xl border border-white/10 px-4 py-8 text-center text-slate-500">尚無任務資料（請在大總表展開專案後新增任務）</p>
+              <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">尚無任務資料（請在大總表展開專案後新增任務）</p>
             ) : searchedTasks.length === 0 ? (
-              <p className="rounded-xl border border-white/10 px-4 py-8 text-center text-slate-500">沒有符合搜尋結果</p>
+              <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">沒有符合搜尋結果</p>
             ) : (
               visibleTasksRows.map((t, i) => (
                 <div
                   key={t.任務ID ?? i}
-                  className="cursor-pointer rounded-xl border border-white/10 bg-slate-800/40 p-4 transition hover:bg-white/5"
+                  className="cursor-pointer rounded-xl border border-stone-200/90 bg-amber-50/50 p-4 transition hover:bg-amber-50/80"
                   onClick={() => setSelectedTask(t)}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-white">{t.任務 ?? "—"}</p>
-                      <p className="mt-0.5 text-xs text-slate-400">{t.專案名稱 ?? "—"}</p>
+                      <p className="truncate text-sm font-medium text-stone-900">{t.任務 ?? "—"}</p>
+                      <p className="mt-0.5 text-xs text-stone-500">{t.專案名稱 ?? "—"}</p>
                     </div>
-                    <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${t.任務完成 ? "bg-amber-500/25 text-amber-400" : "bg-slate-700/60 text-slate-400"}`}>{t.任務完成 ? "已完成" : "進行中"}</span>
+                    <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${t.任務完成 ? "bg-amber-100 text-amber-800" : "bg-stone-200 text-stone-500"}`}>{t.任務完成 ? "已完成" : "進行中"}</span>
                   </div>
-                  <p className="mt-2 text-xs text-slate-500">負責人：{t.任務負責人 ?? "—"}</p>
+                  <p className="mt-2 text-xs text-stone-500">負責人：{t.任務負責人 ?? "—"}</p>
                 </div>
               ))
             )}
           </div>
           {/* 大螢幕：表格 */}
-          <div className="hidden overflow-x-auto rounded-xl border border-white/10 md:block">
-            <table className="min-w-full divide-y divide-white/10">
-              <thead className="bg-slate-800/80">
+          <div className="hidden overflow-x-auto rounded-xl border border-stone-200/90 md:block">
+            <table className="min-w-full divide-y divide-stone-200">
+              <thead className="bg-stone-100">
                 <tr>
                   {tasksVisibleCols.map((k) => (
-                    <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400" : k === "任務完成" ? "px-4 py-3.5 text-center text-xs font-bold uppercase tracking-wider text-slate-300" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-slate-300"}>
+                    <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800" : k === "任務完成" ? "px-4 py-3.5 text-center text-xs font-bold uppercase tracking-wider text-stone-600" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600"}>
                       {tableColumnLabels.tasks?.[k] ?? k}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/10 bg-slate-800/10">
+              <tbody className="divide-y divide-stone-200 bg-amber-50/40">
                 {filteredTasks.length === 0 ? (
                   <tr>
-                    <td colSpan={tasksVisibleCols.length || 6} className="px-4 py-8 text-center text-base font-medium text-slate-500">
+                    <td colSpan={tasksVisibleCols.length || 6} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                       尚無任務資料（請在大總表展開專案後新增任務）
                     </td>
                   </tr>
                 ) : searchedTasks.length === 0 ? (
                   <tr>
-                    <td colSpan={tasksVisibleCols.length || 6} className="px-4 py-8 text-center text-base font-medium text-slate-500">
+                    <td colSpan={tasksVisibleCols.length || 6} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                       沒有符合搜尋結果
                     </td>
                   </tr>
@@ -3891,18 +4102,18 @@ export default function DashboardPage() {
                   visibleTasksRows.map((t, i) => (
                     <tr
                       key={t.任務ID ?? i}
-                      className="cursor-pointer transition hover:bg-white/5"
+                      className="cursor-pointer transition hover:bg-amber-50/80"
                       onClick={() => setSelectedTask(t)}
                     >
                       {tasksVisibleCols.map((k) => {
                         if (k === "專案ID") {
                           return (
-                            <td key={k} className="whitespace-nowrap px-4 py-3.5 text-xs font-normal text-slate-500" title={t.專案ID}>{t.專案ID ? "SDH-…" : "—"}</td>
+                            <td key={k} className="whitespace-nowrap px-4 py-3.5 text-xs font-normal text-stone-500" title={t.專案ID}>{t.專案ID ? "SDH-…" : "—"}</td>
                           );
                         }
                         if (k === "任務負責人") {
                           return (
-                            <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm font-medium text-slate-300">
+                            <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm font-medium text-stone-600">
                               <span className="inline-flex items-center gap-1.5">
                                 {t.任務負責人 ?? "—"}
                                 {t.任務負責人 && t.任務ID && (
@@ -3919,7 +4130,7 @@ export default function DashboardPage() {
                                       } finally { setRemindingTaskId(null); }
                                     }}
                                     disabled={remindingTaskId === t.任務ID}
-                                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-white/20 bg-white/5 text-slate-400 transition hover:border-amber-500/40 hover:bg-amber-500/10 hover:text-amber-400 disabled:opacity-50"
+                                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-stone-300 bg-stone-50 text-stone-500 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800 disabled:opacity-50"
                                     title="發信提醒"
                                   >
                                     {remindingTaskId === t.任務ID ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" /> : <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>}
@@ -3944,11 +4155,11 @@ export default function DashboardPage() {
                                     if (res.ok && data.ok) setTasks((prev) => prev.map((x) => (x.任務ID === t.任務ID ? data.task! : x)));
                                   } catch { /* 忽略 */ }
                                 }}
-                                className="inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md border-2 transition hover:border-amber-500/50 hover:bg-amber-500/10"
+                                className="inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md border-2 transition hover:border-amber-400/70 hover:bg-amber-50"
                                 style={{ backgroundColor: t.任務完成 ? "rgba(245,158,11,0.25)" : "transparent", borderColor: t.任務完成 ? "rgba(245,158,11,0.5)" : "rgba(255,255,255,0.2)" }}
                                 title={t.任務完成 ? "點擊取消完成" : "點擊標記完成"}
                               >
-                                {t.任務完成 ? <span className="text-amber-400">✓</span> : null}
+                                {t.任務完成 ? <span className="text-amber-800">✓</span> : null}
                               </button>
                             </td>
                           );
@@ -3956,7 +4167,7 @@ export default function DashboardPage() {
                         const val = (t as unknown as Record<string, unknown>)[k];
                         const str = String(val ?? "—");
                         return (
-                          <td key={k} className={k === "任務" ? "max-w-[240px] truncate px-4 py-3.5 text-sm font-medium text-white" : k === "專案名稱" ? "max-w-[180px] truncate px-4 py-3.5 text-sm font-medium text-slate-300" : "whitespace-nowrap px-4 py-3.5 text-sm font-medium text-slate-300"} title={k === "專案名稱" || k === "任務" ? str : undefined}>
+                          <td key={k} className={k === "任務" ? "max-w-[240px] truncate px-4 py-3.5 text-sm font-medium text-stone-900" : k === "專案名稱" ? "max-w-[180px] truncate px-4 py-3.5 text-sm font-medium text-stone-600" : "whitespace-nowrap px-4 py-3.5 text-sm font-medium text-stone-600"} title={k === "專案名稱" || k === "任務" ? str : undefined}>
                             {str}
                           </td>
                         );
@@ -3968,32 +4179,32 @@ export default function DashboardPage() {
             </table>
           </div>
           {searchedTasks.length > visibleTasksRows.length && (
-            <p className="mt-2 text-right text-xs text-slate-500">載入中 {visibleTasksRows.length} / {searchedTasks.length}</p>
+            <p className="mt-2 text-right text-xs text-stone-500">載入中 {visibleTasksRows.length} / {searchedTasks.length}</p>
           )}
         </section>
         )}
 
         {/* 分潤表 */}
         {activeSection === "payout" && (
-        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
+        <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-xl font-bold tracking-tight text-white">分潤表</h2>
+            <h2 className="text-xl font-bold tracking-tight text-stone-900">分潤表</h2>
             <input
               type="text"
               value={payoutSearch}
               onChange={(e) => setPayoutSearch(e.target.value)}
               placeholder="搜尋專案ID、類型、領取人…"
-              className="w-full min-w-0 max-w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
+              className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
             />
           </div>
           {filteredPayout.length === 0 ? (
-            <p className="rounded-xl border border-white/10 px-4 py-8 text-center text-slate-500">尚無分潤表資料</p>
+            <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">尚無分潤表資料</p>
           ) : (
             <>
               {/* 小螢幕：卡片式收納顯示（分潤金額為主、次要資訊、其他可摺疊） */}
               <div className="space-y-3 md:hidden">
                 {searchedPayout.length === 0 ? (
-                  <p className="rounded-xl border border-white/10 px-4 py-8 text-center text-slate-500">沒有符合搜尋結果</p>
+                  <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">沒有符合搜尋結果</p>
                 ) : (
                   visiblePayoutRows.map((row, i) => {
                     const r = row as unknown as Record<string, unknown>;
@@ -4005,25 +4216,25 @@ export default function DashboardPage() {
                     const detailKeys = ["專案ID", "專案預計匯款日", "專案實際入帳日期", "分潤匯款日期", "專案營收", "專案總金額未稅", "分潤類型", "領取人"] as const;
                     const hasExpandable = detailKeys.some((k) => payoutVisibleCols.includes(k));
                     return (
-                      <div key={cardKey} className="rounded-xl border border-white/10 bg-slate-800/40 p-4">
+                      <div key={cardKey} className="rounded-xl border border-stone-200/90 bg-amber-50/50 p-4">
                         {/* 主要：分潤金額（與 ③ 可見欄位一致，所有人同一套 UI） */}
                         {showAmt && (
                           <div className="flex items-baseline justify-between gap-2">
-                            <span className="text-xs font-semibold uppercase tracking-wider text-amber-400/90">分潤金額</span>
-                            <span className="text-2xl font-bold tabular-nums text-amber-400">{formatAmount(String(r.分潤金額 ?? ""))}</span>
+                            <span className="text-xs font-semibold uppercase tracking-wider text-amber-800">分潤金額</span>
+                            <span className="text-2xl font-bold tabular-nums text-amber-800">{formatAmount(String(r.分潤金額 ?? ""))}</span>
                           </div>
                         )}
                         {/* 次要：分潤成數、專案名稱 */}
                         {(showPct || showTitle) && (
-                          <div className={`space-y-1 border-b border-white/10 pb-3 ${showAmt ? "mt-3" : ""}`}>
+                          <div className={`space-y-1 border-b border-stone-200/90 pb-3 ${showAmt ? "mt-3" : ""}`}>
                             {showPct && (
-                              <p className="text-sm font-medium text-slate-300">
-                                <span className="text-slate-500">分潤成數</span> <span className="text-amber-400/90">{String(r.分潤成數 ?? "—")}</span>
+                              <p className="text-sm font-medium text-stone-600">
+                                <span className="text-stone-500">分潤成數</span> <span className="text-amber-800">{String(r.分潤成數 ?? "—")}</span>
                               </p>
                             )}
                             {showTitle && (
-                              <p className="truncate text-sm text-slate-300" title={String(r.專案名稱 ?? "")}>
-                                <span className="text-slate-500">專案</span> {String(r.專案名稱 ?? "—")}
+                              <p className="truncate text-sm text-stone-600" title={String(r.專案名稱 ?? "")}>
+                                <span className="text-stone-500">專案</span> {String(r.專案名稱 ?? "—")}
                               </p>
                             )}
                           </div>
@@ -4034,36 +4245,36 @@ export default function DashboardPage() {
                             <button
                               type="button"
                               onClick={() => setExpandedPayoutCardKey((k) => (k === cardKey ? null : cardKey))}
-                              className="flex w-full items-center justify-between rounded-lg py-1.5 text-xs text-slate-500 transition hover:bg-white/5 hover:text-slate-400"
+                              className="flex w-full items-center justify-between rounded-lg py-1.5 text-xs text-stone-500 transition hover:bg-amber-50/80 hover:text-stone-500"
                             >
                               <span>{isExpanded ? "收起詳情" : "展開詳情"}</span>
-                              <span className="text-slate-600">{isExpanded ? "▲" : "▼"}</span>
+                              <span className="text-stone-500">{isExpanded ? "▲" : "▼"}</span>
                             </button>
                             {isExpanded && (
-                              <div className="mt-2 space-y-1 rounded-lg bg-slate-900/50 px-3 py-2 text-xs text-slate-400">
+                              <div className="mt-2 space-y-1 rounded-lg bg-white/90 px-3 py-2 text-xs text-stone-500">
                                 {payoutVisibleCols.includes("專案ID") && (
-                                  <p><span className="text-slate-500">專案ID</span> {String(r.專案ID ?? "—")}</p>
+                                  <p><span className="text-stone-500">專案ID</span> {String(r.專案ID ?? "—")}</p>
                                 )}
                                 {payoutVisibleCols.includes("專案營收") && (
-                                  <p><span className="text-slate-500">專案營收</span> {formatAmount(String(r.專案營收 ?? ""))}</p>
+                                  <p><span className="text-stone-500">專案營收</span> {formatAmount(String(r.專案營收 ?? ""))}</p>
                                 )}
                                 {payoutVisibleCols.includes("專案總金額未稅") && (
-                                  <p><span className="text-slate-500">專案總金額未稅</span> {formatAmount(String(r.專案總金額未稅 ?? ""))}</p>
+                                  <p><span className="text-stone-500">專案總金額未稅</span> {formatAmount(String(r.專案總金額未稅 ?? ""))}</p>
                                 )}
                                 {payoutVisibleCols.includes("專案預計匯款日") && (
-                                  <p><span className="text-slate-500">專案預計匯款日</span> {String(r.專案預計匯款日 ?? "—")}</p>
+                                  <p><span className="text-stone-500">專案預計匯款日</span> {String(r.專案預計匯款日 ?? "—")}</p>
                                 )}
                                 {payoutVisibleCols.includes("專案實際入帳日期") && (
-                                  <p><span className="text-slate-500">專案實際入帳日期</span> {String(r.專案實際入帳日期 ?? "—")}</p>
+                                  <p><span className="text-stone-500">專案實際入帳日期</span> {String(r.專案實際入帳日期 ?? "—")}</p>
                                 )}
                                 {payoutVisibleCols.includes("分潤匯款日期") && (
-                                  <p><span className="text-slate-500">分潤匯款日期</span> {String(r.分潤匯款日期 ?? "—")}</p>
+                                  <p><span className="text-stone-500">分潤匯款日期</span> {String(r.分潤匯款日期 ?? "—")}</p>
                                 )}
                                 {payoutVisibleCols.includes("分潤類型") && (
-                                  <p><span className="text-slate-500">分潤類型</span> {String(r.分潤類型 ?? "—")}</p>
+                                  <p><span className="text-stone-500">分潤類型</span> {String(r.分潤類型 ?? "—")}</p>
                                 )}
                                 {payoutVisibleCols.includes("領取人") && (
-                                  <p><span className="text-slate-500">領取人</span> {String(r.領取人 ?? "—")}</p>
+                                  <p><span className="text-stone-500">領取人</span> {String(r.領取人 ?? "—")}</p>
                                 )}
                               </div>
                             )}
@@ -4075,19 +4286,19 @@ export default function DashboardPage() {
                 )}
               </div>
               {/* 大螢幕：表格 */}
-              <div className="hidden overflow-x-auto rounded-xl border border-white/10 md:block">
-                <table className="min-w-full divide-y divide-white/10">
-                  <thead className="bg-slate-800/80">
+              <div className="hidden overflow-x-auto rounded-xl border border-stone-200/90 md:block">
+                <table className="min-w-full divide-y divide-stone-200">
+                  <thead className="bg-stone-100">
                     <tr>
                       {payoutColsForDisplay.map((k) => (
                         <th
                           key={k}
                           className={
                             k === "分潤金額"
-                              ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400"
+                              ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800"
                               : k === "專案ID"
-                                ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400/80"
-                                : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-slate-300"
+                                ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800/80"
+                                : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600"
                           }
                         >
                           {tableColumnLabels.payout?.[k] ?? k}
@@ -4095,16 +4306,16 @@ export default function DashboardPage() {
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/10 bg-slate-800/10">
+                  <tbody className="divide-y divide-stone-200 bg-amber-50/40">
                     {searchedPayout.length === 0 ? (
                       <tr>
-                        <td colSpan={payoutColsForDisplay.length || 7} className="px-4 py-8 text-center text-base font-medium text-slate-500">
+                        <td colSpan={payoutColsForDisplay.length || 7} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                           沒有符合搜尋結果
                         </td>
                       </tr>
                     ) : (
                       visiblePayoutRows.map((row, i) => (
-                        <tr key={row.id ?? i} className="hover:bg-white/5">
+                        <tr key={row.id ?? i} className="hover:bg-amber-50/80">
                           {payoutColsForDisplay.map((k) => {
                             const val = (row as unknown as Record<string, unknown>)[k];
                             const str = k === "分潤金額" ? formatAmount(String(val ?? "")) : String(val ?? "—");
@@ -4112,7 +4323,7 @@ export default function DashboardPage() {
                               <td
                                 key={k}
                                 className={`whitespace-nowrap px-4 py-3.5 text-sm ${
-                                  k === "分潤金額" ? "font-bold tabular-nums text-amber-400" : k === "專案ID" ? "font-medium text-slate-500" : "font-medium text-slate-300"
+                                  k === "分潤金額" ? "font-bold tabular-nums text-amber-800" : k === "專案ID" ? "font-medium text-stone-500" : "font-medium text-stone-600"
                                 }`}
                               >
                                 {str}
@@ -4126,7 +4337,7 @@ export default function DashboardPage() {
                 </table>
               </div>
               {searchedPayout.length > visiblePayoutRows.length && (
-                <p className="mt-2 text-right text-xs text-slate-500">載入中 {visiblePayoutRows.length} / {searchedPayout.length}</p>
+                <p className="mt-2 text-right text-xs text-stone-500">載入中 {visiblePayoutRows.length} / {searchedPayout.length}</p>
               )}
             </>
           )}
@@ -4135,44 +4346,44 @@ export default function DashboardPage() {
 
         {/* 財務（DB：財務） */}
         {activeSection === "finance" && (
-        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
+        <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-xl font-bold tracking-tight text-white">財務</h2>
+            <h2 className="text-xl font-bold tracking-tight text-stone-900">財務</h2>
             <input
               type="text"
               value={financeSearch}
               onChange={(e) => setFinanceSearch(e.target.value)}
               placeholder="搜尋專案ID、利潤、狀態…"
-              className="w-full min-w-0 max-w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
+              className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
             />
           </div>
-          <div className="overflow-x-auto rounded-xl border border-white/10">
+          <div className="overflow-x-auto rounded-xl border border-stone-200/90">
             {finance.length === 0 ? (
-              <p className="px-4 py-8 text-center text-slate-500">尚無財務資料</p>
+              <p className="px-4 py-8 text-center text-stone-500">尚無財務資料</p>
             ) : (
-              <table className="min-w-full divide-y divide-white/10">
-                <thead className="bg-slate-800/80">
+              <table className="min-w-full divide-y divide-stone-200">
+                <thead className="bg-stone-100">
                   <tr>
                     {financeVisibleCols.map((k) => (
-                      <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-slate-300"}>
+                      <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600"}>
                         {tableColumnLabels.finance?.[k] ?? k}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/10 bg-slate-800/10">
+                <tbody className="divide-y divide-stone-200 bg-amber-50/40">
                   {searchedFinance.length === 0 ? (
                     <tr>
-                      <td colSpan={financeVisibleCols.length || 9} className="px-4 py-8 text-center text-base font-medium text-slate-500">
+                      <td colSpan={financeVisibleCols.length || 9} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                         沒有符合搜尋結果
                       </td>
                     </tr>
                   ) : (
                     visibleFinanceRows.map((row, i) => (
-                      <tr key={i} className="hover:bg-white/5">
+                      <tr key={i} className="hover:bg-amber-50/80">
                         {financeVisibleCols.map((k) => {
                           const v = (row as unknown as Record<string, unknown>)[k];
-                          return <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm text-slate-300">{String(v ?? "—")}</td>;
+                          return <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm text-stone-600">{String(v ?? "—")}</td>;
                         })}
                       </tr>
                     ))
@@ -4182,52 +4393,52 @@ export default function DashboardPage() {
             )}
           </div>
           {searchedFinance.length > visibleFinanceRows.length && (
-            <p className="mt-2 text-right text-xs text-slate-500">載入中 {visibleFinanceRows.length} / {searchedFinance.length}</p>
+            <p className="mt-2 text-right text-xs text-stone-500">載入中 {visibleFinanceRows.length} / {searchedFinance.length}</p>
           )}
         </section>
         )}
 
         {/* 發票（DB：發票） */}
         {activeSection === "invoices" && (
-        <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
+        <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-xl font-bold tracking-tight text-white">發票</h2>
+            <h2 className="text-xl font-bold tracking-tight text-stone-900">發票</h2>
             <input
               type="text"
               value={invoicesSearch}
               onChange={(e) => setInvoicesSearch(e.target.value)}
               placeholder="搜尋專案ID、發票號碼、廠商…"
-              className="w-full min-w-0 max-w-60 rounded-full border border-white/15 bg-slate-900/60 px-3.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500/60 focus:outline-none"
+              className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
             />
           </div>
-          <div className="overflow-x-auto rounded-xl border border-white/10">
+          <div className="overflow-x-auto rounded-xl border border-stone-200/90">
             {invoices.length === 0 ? (
-              <p className="px-4 py-8 text-center text-slate-500">尚無發票資料</p>
+              <p className="px-4 py-8 text-center text-stone-500">尚無發票資料</p>
             ) : (
-              <table className="min-w-full divide-y divide-white/10">
-                <thead className="bg-slate-800/80">
+              <table className="min-w-full divide-y divide-stone-200">
+                <thead className="bg-stone-100">
                   <tr>
                     {invoicesVisibleCols.map((k) => (
-                      <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-400" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-slate-300"}>
+                      <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600"}>
                         {tableColumnLabels.invoices?.[k] ?? k}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/10 bg-slate-800/10">
+                <tbody className="divide-y divide-stone-200 bg-amber-50/40">
                   {searchedInvoices.length === 0 ? (
                     <tr>
-                      <td colSpan={invoicesVisibleCols.length || 10} className="px-4 py-8 text-center text-base font-medium text-slate-500">
+                      <td colSpan={invoicesVisibleCols.length || 10} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                         沒有符合搜尋結果
                       </td>
                     </tr>
                   ) : (
                     visibleInvoicesRows.map((inv, i) => (
-                      <tr key={i} className="hover:bg-white/5">
+                      <tr key={i} className="hover:bg-amber-50/80">
                         {invoicesVisibleCols.map((k) => {
                           const v = (inv as unknown as Record<string, unknown>)[k];
                           return (
-                            <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm ${k === "專案ID" ? "font-medium text-white" : "text-slate-300"}`}>
+                            <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm ${k === "專案ID" ? "font-medium text-stone-900" : "text-stone-600"}`}>
                               {String(v ?? "—")}
                             </td>
                           );
@@ -4240,7 +4451,7 @@ export default function DashboardPage() {
             )}
           </div>
           {searchedInvoices.length > visibleInvoicesRows.length && (
-            <p className="mt-2 text-right text-xs text-slate-500">載入中 {visibleInvoicesRows.length} / {searchedInvoices.length}</p>
+            <p className="mt-2 text-right text-xs text-stone-500">載入中 {visibleInvoicesRows.length} / {searchedInvoices.length}</p>
           )}
         </section>
         )}
@@ -4250,8 +4461,8 @@ export default function DashboardPage() {
 
       {/* 大總表 新增專案 Modal */}
       {showCreateMaster && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-white/10 bg-[#151922] shadow-2xl ring-1 ring-white/10">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-stone-900/30 backdrop-blur-sm">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
             <form
               className="flex max-h-[90vh] flex-col"
               onSubmit={async (e) => {
@@ -4288,8 +4499,8 @@ export default function DashboardPage() {
                 }
               }}
             >
-              <header className="flex items-center justify-between border-b border-white/10 bg-slate-800/50 px-6 py-4">
-                <h2 className="text-xl font-bold tracking-tight text-white">新增大總表專案</h2>
+              <header className="flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
+                <h2 className="text-xl font-bold tracking-tight text-stone-900">新增大總表專案</h2>
                 <button
                   type="button"
                   onClick={() => {
@@ -4297,23 +4508,23 @@ export default function DashboardPage() {
                     setCreating(false);
                     setCreateError(null);
                   }}
-                  className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-amber-500/10 hover:text-amber-400"
+                  className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
                 >
                   關閉
                 </button>
               </header>
               <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
-                {createError && <p className="rounded-lg bg-amber-500/20 px-3 py-2 text-sm font-medium text-amber-400">{createError}</p>}
+                {createError && <p className="rounded-lg bg-amber-100/90 px-3 py-2 text-sm font-medium text-amber-800">{createError}</p>}
 
                 <section>
-                  <h3 className="mb-3 text-base font-bold text-amber-400">基本資料</h3>
+                  <h3 className="mb-3 text-base font-bold text-amber-800">基本資料</h3>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-4">
                     <div>
-                      <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">專案ID</label>
-                      <div className="rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-sm font-semibold text-white">
+                      <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-stone-500">專案ID</label>
+                      <div className="rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-semibold text-stone-900">
                         {createForm.專案ID}
                       </div>
-                      <p className="mt-1 text-xs font-medium text-slate-500">自動產生（SDH-日期時間-隨機碼）</p>
+                      <p className="mt-1 text-xs font-medium text-stone-500">自動產生（SDH-日期時間-隨機碼）</p>
                     </div>
                     <InputField label="專案名稱" value={createForm.專案名稱} onChange={(v) => setCreateForm((f) => ({ ...f, 專案名稱: v }))} />
                     <SelectField label="專案類型" value={createForm.專案類型} onChange={(v) => setCreateForm((f) => ({ ...f, 專案類型: v }))} options={projectTypesOptions} />
@@ -4325,7 +4536,7 @@ export default function DashboardPage() {
                 </section>
 
                 <section>
-                  <h3 className="mb-3 text-base font-bold text-amber-400">金額與成本</h3>
+                  <h3 className="mb-3 text-base font-bold text-amber-800">金額與成本</h3>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-4">
                     <NumberField
                       label="專案總金額未稅"
@@ -4339,11 +4550,11 @@ export default function DashboardPage() {
                       }
                     />
                     <div>
-                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400">專案營收</label>
-                      <div className="w-full rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-sm font-medium text-slate-300 tabular-nums">
+                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">專案營收</label>
+                      <div className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-600 tabular-nums">
                         {formatAmount(createForm.專案營收)}
                       </div>
-                      <p className="mt-1 text-xs text-slate-500">自動計算：專案總金額未稅 − 專案成本 − KOL費用未稅</p>
+                      <p className="mt-1 text-xs text-stone-500">自動計算：專案總金額未稅 − 專案成本 − KOL費用未稅</p>
                     </div>
                     <NumberField
                       label="專案成本"
@@ -4372,7 +4583,7 @@ export default function DashboardPage() {
                 </section>
 
                 <section>
-                  <h3 className="mb-3 text-base font-bold text-amber-400">人員與分潤設定</h3>
+                  <h3 className="mb-3 text-base font-bold text-amber-800">人員與分潤設定</h3>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-4">
                     <InputField label="KOL名稱" value={createForm.KOL名稱} onChange={(v) => setCreateForm((f) => ({ ...f, KOL名稱: v }))} />
                     <InputField label="廠商名稱" value={createForm.廠商名稱} onChange={(v) => setCreateForm((f) => ({ ...f, 廠商名稱: v }))} />
@@ -4424,7 +4635,7 @@ export default function DashboardPage() {
                 </section>
 
                 <section>
-                  <h3 className="mb-3 text-base font-bold text-amber-400">內容與備註</h3>
+                  <h3 className="mb-3 text-base font-bold text-amber-800">內容與備註</h3>
                   <div className="space-y-4">
                     <TextAreaField
                       label="專案內容"
@@ -4440,10 +4651,10 @@ export default function DashboardPage() {
                 </section>
               </div>
 
-              <footer className="flex items-center justify-end gap-3 border-t border-white/10 bg-slate-800/50 px-6 py-4">
+              <footer className="flex items-center justify-end gap-3 border-t border-stone-200/90 bg-stone-100/90 px-6 py-4">
                 <button
                   type="button"
-                  className="rounded-xl border border-white/20 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:bg-white/10"
+                  className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-semibold text-stone-600 transition hover:bg-stone-100"
                   onClick={() => {
                     setShowCreateMaster(false);
                     setCreating(false);
@@ -4455,7 +4666,7 @@ export default function DashboardPage() {
                 <button
                   type="submit"
                   disabled={creating}
-                  className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400 disabled:opacity-60"
+                  className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-60"
                 >
                   {creating ? "儲存中..." : "儲存"}
                 </button>
@@ -4467,10 +4678,10 @@ export default function DashboardPage() {
 
       {/* 使用者可見範圍設定 Modal */}
       {selectedUserForVisibility && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#151922] shadow-2xl ring-1 ring-white/10">
-            <header className="shrink-0 flex items-center justify-between border-b border-white/10 bg-slate-800/50 px-6 py-4">
-              <h2 className="text-xl font-bold tracking-tight text-white">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-stone-900/30 backdrop-blur-sm p-4">
+          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
+            <header className="shrink-0 flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
+              <h2 className="text-xl font-bold tracking-tight text-stone-900">
                 ③ 設定 {selectedUserForVisibility.name}（{selectedUserForVisibility.email}）可見欄位
               </h2>
               <button
@@ -4479,26 +4690,26 @@ export default function DashboardPage() {
                   setSelectedUserForVisibility(null);
                   setVisibilityError(null);
                 }}
-                className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-amber-500/10 hover:text-amber-400"
+                className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
               >
                 關閉
               </button>
             </header>
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-6 py-5">
               {editUserError && (
-                <p className="rounded-lg bg-amber-500/20 px-3 py-2 text-sm font-medium text-amber-400">{editUserError}</p>
+                <p className="rounded-lg bg-amber-100/90 px-3 py-2 text-sm font-medium text-amber-800">{editUserError}</p>
               )}
               {visibilityError && (
-                <p className="rounded-lg bg-amber-500/20 px-3 py-2 text-sm font-medium text-amber-400">{visibilityError}</p>
+                <p className="rounded-lg bg-amber-100/90 px-3 py-2 text-sm font-medium text-amber-800">{visibilityError}</p>
               )}
 
               {/* 基本資料：可修改姓名、角色、部門、scope、密碼 */}
-              <div className="rounded-xl border border-white/10 bg-slate-800/20 p-4">
-                <h3 className="mb-3 text-sm font-semibold text-amber-400">基本資料</h3>
+              <div className="rounded-xl border border-stone-200/90 bg-white/90 p-4">
+                <h3 className="mb-3 text-sm font-semibold text-amber-800">基本資料</h3>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="sm:col-span-2">
-                    <label className="mb-1 block text-xs font-medium text-slate-500">帳號 (Email)</label>
-                    <p className="rounded-lg border border-white/10 bg-slate-900/50 px-3 py-2 text-sm text-slate-400">{selectedUserForVisibility.email}</p>
+                    <label className="mb-1 block text-xs font-medium text-stone-500">帳號 (Email)</label>
+                    <p className="rounded-lg border border-stone-200/90 bg-white/90 px-3 py-2 text-sm text-stone-500">{selectedUserForVisibility.email}</p>
                   </div>
                   <InputField label="姓名" value={editUserForm.name} onChange={(v) => setEditUserForm((f) => ({ ...f, name: v }))} />
                   <SelectField
@@ -4557,15 +4768,58 @@ export default function DashboardPage() {
                         setSavingUser(false);
                       }
                     }}
-                    className="rounded-lg bg-amber-500/20 px-4 py-2 text-sm font-bold text-amber-400 transition hover:bg-amber-500/30 disabled:opacity-60"
+                    className="rounded-lg bg-amber-100/90 px-4 py-2 text-sm font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
                   >
                     {savingUser ? "儲存中..." : "儲存基本資料"}
                   </button>
                 </div>
               </div>
 
-              <h3 className="text-sm font-semibold text-amber-400">可見欄位</h3>
-              <p className="text-sm text-slate-400">勾選此使用者可看到的 Table 與欄位。未勾選的欄位（如專案分潤、專案成本）將不顯示。未設定時依角色預設顯示。</p>
+              <div className="rounded-xl border border-amber-200/80 bg-stone-50/95 p-4">
+                <h3 className="text-sm font-semibold text-amber-800">總覽指標可見性</h3>
+                <p className="mt-1 text-xs text-stone-500">
+                  未按「還原」時可覆寫 ④ 中該角色的預設；儲存後寫入 user_visibility。還原後改依①角色設定。
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setVisibilityOverviewKpis(null)}
+                  className="mt-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-100"
+                >
+                  還原為①角色預設
+                </button>
+                <div className="mt-3 flex flex-wrap gap-x-3 gap-y-2">
+                  {OVERVIEW_KPI_KEYS.map((k) => {
+                    const roleK =
+                      systemConfig?.overview_kpi_by_role?.[selectedUserForVisibility.role] ??
+                      getDefaultOverviewKpisForRole(selectedUserForVisibility.role);
+                    const effective = visibilityOverviewKpis ?? roleK;
+                    const checked = effective.includes(k);
+                    return (
+                      <label key={k} className="flex cursor-pointer items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const roleKeys =
+                              systemConfig?.overview_kpi_by_role?.[selectedUserForVisibility.role] ??
+                              getDefaultOverviewKpisForRole(selectedUserForVisibility.role);
+                            const start = visibilityOverviewKpis ?? [...roleKeys];
+                            const next = e.target.checked
+                              ? Array.from(new Set([...start, k]))
+                              : start.filter((x) => x !== k);
+                            setVisibilityOverviewKpis(next);
+                          }}
+                          className="h-3.5 w-3.5 rounded border-stone-300 bg-stone-50 text-amber-500"
+                        />
+                        <span className="text-xs text-stone-600">{OVERVIEW_KPI_LABELS[k]}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <h3 className="text-sm font-semibold text-amber-800">可見欄位</h3>
+              <p className="text-sm text-stone-500">勾選此使用者可看到的 Table 與欄位。未勾選的欄位（如專案分潤、專案成本）將不顯示。未設定時依角色預設顯示。</p>
               <div className="space-y-4">
                 {TABLE_KEYS.map((tableKey) => {
                   const cols = TABLE_COLUMNS[tableKey] ?? [];
@@ -4573,7 +4827,7 @@ export default function DashboardPage() {
                   const selectedCols = visibilityColumns[tableKey] ?? [];
                   const hasAllCols = selectedCols.includes("*") || (isTableChecked && selectedCols.length === 0);
                   return (
-                    <div key={tableKey} className="rounded-xl border border-white/10 bg-slate-800/20 p-4">
+                    <div key={tableKey} className="rounded-xl border border-stone-200/90 bg-white/90 p-4">
                       <label className="mb-3 flex cursor-pointer items-center gap-3">
                         <input
                           type="checkbox"
@@ -4591,13 +4845,13 @@ export default function DashboardPage() {
                               });
                             }
                           }}
-                          className="h-4 w-4 rounded border-white/30 bg-white/5 text-amber-500 focus:ring-amber-500/50"
+                          className="h-4 w-4 rounded border-stone-300 bg-stone-50 text-amber-500 focus:ring-amber-500/50"
                         />
-                        <span className="font-semibold text-white">{TABLE_LABELS[tableKey] ?? tableKey}</span>
+                        <span className="font-semibold text-stone-900">{TABLE_LABELS[tableKey] ?? tableKey}</span>
                       </label>
                       {isTableChecked && (
-                        <div className="ml-7 mt-3 space-y-2 border-l-2 border-white/10 pl-4">
-                          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">可見欄位</p>
+                        <div className="ml-7 mt-3 space-y-2 border-l-2 border-stone-200/90 pl-4">
+                          <p className="text-xs font-medium uppercase tracking-wide text-stone-500">可見欄位</p>
                           {cols.map(({ key, label }) => {
                             const colChecked =
                               hasAllCols || selectedCols.includes("*") || selectedCols.includes(key);
@@ -4620,9 +4874,9 @@ export default function DashboardPage() {
                                       return { ...prev, [tableKey]: newList };
                                     });
                                   }}
-                                  className="h-3.5 w-3.5 rounded border-white/30 bg-white/5 text-amber-500 focus:ring-amber-500/50"
+                                  className="h-3.5 w-3.5 rounded border-stone-300 bg-stone-50 text-amber-500 focus:ring-amber-500/50"
                                 />
-                                <span className="text-sm text-slate-300">{label}</span>
+                                <span className="text-sm text-stone-600">{label}</span>
                               </label>
                             );
                           })}
@@ -4633,14 +4887,14 @@ export default function DashboardPage() {
                 })}
               </div>
             </div>
-            <footer className="shrink-0 flex items-center justify-end gap-3 border-t border-white/10 bg-slate-800/50 px-6 py-4">
+            <footer className="shrink-0 flex items-center justify-end gap-3 border-t border-stone-200/90 bg-stone-100/90 px-6 py-4">
               <button
                 type="button"
                 onClick={() => {
                   setSelectedUserForVisibility(null);
                   setVisibilityError(null);
                 }}
-                className="rounded-xl border border-white/20 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:bg-white/10"
+                className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-semibold text-stone-600 transition hover:bg-stone-100"
               >
                 取消
               </button>
@@ -4664,6 +4918,7 @@ export default function DashboardPage() {
                           },
                           {} as Record<string, string[]>
                         ),
+                        overview_kpis: visibilityOverviewKpis,
                       }),
                     });
                     const data = (await safeResJson(res)) as { ok?: boolean; error?: string };
@@ -4679,7 +4934,7 @@ export default function DashboardPage() {
                     setSavingVisibility(false);
                   }
                 }}
-                className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400 disabled:opacity-60"
+                className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-60"
               >
                 {savingVisibility ? "儲存中..." : "儲存可見範圍"}
               </button>
@@ -4690,14 +4945,14 @@ export default function DashboardPage() {
 
       {/* 大總表 詳情抽屜 */}
       {selectedMaster && (
-        <div className="fixed inset-0 z-40 flex items-start justify-end bg-black/60 backdrop-blur-sm">
-          <div className="flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-[#151922] shadow-2xl ring-1 ring-white/10">
-            <header className="flex items-center justify-between border-b border-white/10 bg-slate-800/50 px-6 py-4">
+        <div className="fixed inset-0 z-40 flex items-start justify-end bg-stone-900/30 backdrop-blur-sm">
+          <div className="flex h-full w-full max-w-xl flex-col border-l border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
+            <header className="flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
               <div>
-                <h2 className="text-xl font-bold tracking-tight text-white">
+                <h2 className="text-xl font-bold tracking-tight text-stone-900">
                   專案詳情 · {selectedMaster.專案名稱 ?? selectedMaster.專案ID}
                 </h2>
-                <p className="mt-1.5 text-sm font-medium text-slate-400">
+                <p className="mt-1.5 text-sm font-medium text-stone-500">
                   專案ID：{selectedMaster.專案ID} · 狀態：{selectedMaster.專案狀態 ?? "—"}
                 </p>
               </div>
@@ -4743,7 +4998,7 @@ export default function DashboardPage() {
                       備註: selectedMaster.備註 ?? "",
                     });
                   }}
-                  className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-amber-500/10 hover:text-amber-400"
+                  className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
                 >
                   {isEditingMaster ? "取消編輯" : "編輯"}
                 </button>
@@ -4754,7 +5009,7 @@ export default function DashboardPage() {
                     setIsEditingMaster(false);
                     setSaveMasterError(null);
                   }}
-                  className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-amber-500/10 hover:text-amber-400"
+                  className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
                 >
                   關閉
                 </button>
@@ -4763,7 +5018,7 @@ export default function DashboardPage() {
 
             <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
               {saveMasterError && (
-                <p className="rounded-lg bg-amber-500/20 px-3 py-2 text-sm font-medium text-amber-400">{saveMasterError}</p>
+                <p className="rounded-lg bg-amber-100/90 px-3 py-2 text-sm font-medium text-amber-800">{saveMasterError}</p>
               )}
 
               {isEditingMaster && (
@@ -4808,7 +5063,7 @@ export default function DashboardPage() {
                         setSavingMaster(false);
                       }
                     }}
-                    className="rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400 disabled:opacity-60"
+                    className="rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-60"
                   >
                     {savingMaster ? "儲存中..." : "儲存變更"}
                   </button>
@@ -4816,7 +5071,7 @@ export default function DashboardPage() {
               )}
 
               <section>
-                <h3 className="mb-3 text-base font-bold text-amber-400">基本資料</h3>
+                <h3 className="mb-3 text-base font-bold text-amber-800">基本資料</h3>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                   <Field label="專案ID" value={selectedMaster.專案ID} />
                   {isEditingMaster ? (
@@ -4860,7 +5115,7 @@ export default function DashboardPage() {
               </section>
 
               <section>
-                <h3 className="mb-3 text-base font-bold text-amber-400">金額與成本</h3>
+                <h3 className="mb-3 text-base font-bold text-amber-800">金額與成本</h3>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                   {isEditingMaster ? (
                     <NumberField
@@ -4880,9 +5135,9 @@ export default function DashboardPage() {
 
                   {isEditingMaster ? (
                     <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">專案營收</p>
-                      <p className="text-sm font-medium text-slate-200 tabular-nums">{formatAmount(editMasterForm.專案營收)}</p>
-                      <p className="mt-1 text-xs text-slate-500">自動計算：專案總金額未稅 − 專案成本 − KOL費用未稅</p>
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-500">專案營收</p>
+                      <p className="text-sm font-medium text-stone-700 tabular-nums">{formatAmount(editMasterForm.專案營收)}</p>
+                      <p className="mt-1 text-xs text-stone-500">自動計算：專案總金額未稅 − 專案成本 − KOL費用未稅</p>
                     </div>
                   ) : (
                     <Field label="專案營收" value={formatAmount(selectedMaster.專案營收)} />
@@ -4936,7 +5191,7 @@ export default function DashboardPage() {
               </section>
 
               <section>
-                <h3 className="mb-3 text-base font-bold text-amber-400">人員與分潤設定</h3>
+                <h3 className="mb-3 text-base font-bold text-amber-800">人員與分潤設定</h3>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                   {isEditingMaster ? (
                     <InputField label="KOL名稱" value={editMasterForm.KOL名稱} onChange={(v) => setEditMasterForm((f) => ({ ...f, KOL名稱: v }))} />
@@ -5001,7 +5256,7 @@ export default function DashboardPage() {
               </section>
 
               <section>
-                <h3 className="mb-3 text-base font-bold text-amber-400">內容與備註</h3>
+                <h3 className="mb-3 text-base font-bold text-amber-800">內容與備註</h3>
                 {isEditingMaster ? (
                   <div className="space-y-4">
                     <TextAreaField label="專案內容" value={editMasterForm.專案內容} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案內容: v }))} />
@@ -5010,14 +5265,14 @@ export default function DashboardPage() {
                 ) : (
                   <div className="space-y-4">
                     <div>
-                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">專案內容</p>
-                      <p className="whitespace-pre-wrap rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-slate-200">
+                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-stone-500">專案內容</p>
+                      <p className="whitespace-pre-wrap rounded-xl border border-stone-200/90 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-700">
                         {selectedMaster.專案內容 || "—"}
                       </p>
                     </div>
                     <div>
-                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">備註</p>
-                      <p className="whitespace-pre-wrap rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-slate-200">
+                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-stone-500">備註</p>
+                      <p className="whitespace-pre-wrap rounded-xl border border-stone-200/90 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-700">
                         {selectedMaster.備註 || "—"}
                       </p>
                     </div>
@@ -5031,14 +5286,14 @@ export default function DashboardPage() {
 
       {/* 任務 編輯抽屜 */}
       {selectedTask && (
-        <div className="fixed inset-0 z-40 flex items-start justify-end bg-black/60 backdrop-blur-sm">
-          <div className="flex h-full w-full max-w-md flex-col border-l border-white/10 bg-[#151922] shadow-2xl ring-1 ring-white/10">
-            <header className="flex items-center justify-between border-b border-white/10 bg-slate-800/50 px-6 py-4">
-              <h2 className="text-xl font-bold tracking-tight text-white">編輯任務</h2>
+        <div className="fixed inset-0 z-40 flex items-start justify-end bg-stone-900/30 backdrop-blur-sm">
+          <div className="flex h-full w-full max-w-md flex-col border-l border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
+            <header className="flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
+              <h2 className="text-xl font-bold tracking-tight text-stone-900">編輯任務</h2>
               <button
                 type="button"
                 onClick={() => { setSelectedTask(null); setSaveTaskError(null); }}
-                className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10"
+                className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-100"
               >
                 關閉
               </button>
@@ -5083,37 +5338,37 @@ export default function DashboardPage() {
                 setSavingTask(false);
               }}
             >
-              {saveTaskError && <p className="mb-4 rounded-lg bg-amber-500/20 px-3 py-2 text-sm text-amber-400">{saveTaskError}</p>}
+              {saveTaskError && <p className="mb-4 rounded-lg bg-amber-100/90 px-3 py-2 text-sm text-amber-800">{saveTaskError}</p>}
               <div className="mb-4 space-y-1">
-                <p className="text-xs font-medium text-slate-500">專案ID：{selectedTask.專案ID ?? "—"}</p>
-                <p className="text-sm font-semibold text-amber-400">{selectedTask.專案名稱 ?? "—"}</p>
+                <p className="text-xs font-medium text-stone-500">專案ID：{selectedTask.專案ID ?? "—"}</p>
+                <p className="text-sm font-semibold text-amber-800">{selectedTask.專案名稱 ?? "—"}</p>
               </div>
               <div className="space-y-4">
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400">任務名稱</label>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">任務名稱</label>
                   <input
                     type="text"
                     value={editTaskForm.任務名稱}
                     onChange={(e) => setEditTaskForm((f) => ({ ...f, 任務名稱: e.target.value }))}
-                    className="w-full rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-sm font-medium text-white focus:border-amber-500/50 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                    className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
                   />
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400">狀態</label>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">狀態</label>
                   <input
                     type="text"
                     value={editTaskForm.任務狀態}
                     onChange={(e) => setEditTaskForm((f) => ({ ...f, 任務狀態: e.target.value }))}
-                    className="w-full rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-sm font-medium text-white focus:border-amber-500/50 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                    className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
                     placeholder="如：進行中"
                   />
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400">任務負責人</label>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">任務負責人</label>
                   <select
                     value={editTaskForm.任務負責人}
                     onChange={(e) => setEditTaskForm((f) => ({ ...f, 任務負責人: e.target.value }))}
-                    className="w-full rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-sm font-medium text-white focus:border-amber-500/50 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                    className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
                   >
                     <option value="">— 未指定 —</option>
                     {userNames.map((name) => (
@@ -5121,21 +5376,21 @@ export default function DashboardPage() {
                     ))}
                   </select>
                 </div>
-                <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/20 bg-white/5 px-4 py-3 transition hover:bg-white/10">
+                <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-stone-300 bg-stone-50 px-4 py-3 transition hover:bg-stone-100">
                   <input
                     type="checkbox"
                     checked={editTaskForm.任務完成}
                     onChange={(e) => setEditTaskForm((f) => ({ ...f, 任務完成: e.target.checked }))}
-                    className="h-5 w-5 rounded border-white/30 bg-white/5 text-amber-500 focus:ring-amber-500/50"
+                    className="h-5 w-5 rounded border-stone-300 bg-stone-50 text-amber-500 focus:ring-amber-500/50"
                   />
-                  <span className="text-sm font-medium text-slate-200">任務完成</span>
+                  <span className="text-sm font-medium text-stone-700">任務完成</span>
                 </label>
               </div>
               <div className="mt-8">
                 <button
                   type="submit"
                   disabled={savingTask}
-                  className="w-full rounded-xl bg-amber-500 py-3 text-sm font-bold text-slate-900 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400 disabled:opacity-60"
+                  className="w-full rounded-xl bg-amber-500 py-3 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-60"
                 >
                   {savingTask ? "儲存中…" : "儲存"}
                 </button>
@@ -5156,8 +5411,8 @@ interface FieldProps {
 function Field({ label, value }: FieldProps) {
   return (
     <div>
-      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="text-sm font-medium text-slate-200">{value && String(value).trim() ? value : "—"}</p>
+      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</p>
+      <p className="text-sm font-medium text-stone-700">{value && String(value).trim() ? value : "—"}</p>
     </div>
   );
 }
@@ -5173,10 +5428,10 @@ interface InputFieldProps {
 function InputField({ label, value, onChange, type = "text", className = "" }: InputFieldProps) {
   return (
     <div className={className}>
-      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</label>
+      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</label>
       <input
         type={type}
-        className="w-full rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-sm font-medium text-white placeholder:text-slate-500 focus:border-amber-500/50 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+        className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 placeholder:text-stone-500 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
@@ -5194,13 +5449,13 @@ interface NumberFieldProps {
 function NumberField({ label, value, onChange, className = "" }: NumberFieldProps) {
   return (
     <div className={className}>
-      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</label>
+      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</label>
       <input
         type="number"
         inputMode="decimal"
         step="0.01"
         min={0}
-        className="w-full rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-sm font-medium text-white tabular-nums placeholder:text-slate-500 focus:border-amber-500/50 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+        className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 tabular-nums placeholder:text-stone-500 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
@@ -5219,9 +5474,9 @@ interface SelectFieldProps {
 function SelectField({ label, value, onChange, options, className = "" }: SelectFieldProps) {
   return (
     <div className={className}>
-      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</label>
+      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</label>
       <select
-        className="w-full rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-sm font-medium text-white focus:border-amber-500/50 focus:outline-none focus:ring-2 focus:ring-amber-500/20 [color-scheme:dark]"
+        className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20 [color-scheme:light]"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
@@ -5245,10 +5500,10 @@ interface DateFieldProps {
 function DateField({ label, value, onChange }: DateFieldProps) {
   return (
     <div>
-      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</label>
+      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</label>
       <input
         type="date"
-        className="w-full rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-sm font-medium text-white outline-none transition focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/20 [color-scheme:dark]"
+        className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 outline-none transition focus:border-amber-400/70 focus:ring-2 focus:ring-amber-500/20 [color-scheme:light]"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
@@ -5265,9 +5520,9 @@ interface TextAreaFieldProps {
 function TextAreaField({ label, value, onChange }: TextAreaFieldProps) {
   return (
     <div>
-      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</label>
+      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</label>
       <textarea
-        className="w-full rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-sm font-medium text-white placeholder:text-slate-500 focus:border-amber-500/50 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+        className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 placeholder:text-stone-500 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
         rows={3}
         value={value}
         onChange={(e) => onChange(e.target.value)}

@@ -44,6 +44,7 @@ export async function GET(request: NextRequest) {
       ok: true,
       tables: visibility.tables,
       columns: visibility.columns,
+      overview_kpis: visibility.overview_kpis,
       source: "custom",
     });
   }
@@ -57,6 +58,7 @@ export async function GET(request: NextRequest) {
     ok: true,
     tables: defaultTables,
     columns: {},
+    overview_kpis: visibility?.overview_kpis ?? null,
     source: "role",
   });
 }

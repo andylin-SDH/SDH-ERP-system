@@ -11,17 +11,21 @@ export interface UserVisibilityRow {
   user_email: string;
   tables: string[];
   columns: Record<string, string[]>;
+  /** null = 依①角色「總覽指標」設定 */
+  overview_kpis: string[] | null;
   created_at?: string;
   updated_at?: string;
 }
 
 function rowToVisibility(r: Record<string, unknown>): UserVisibilityRow {
   const cols = r.columns as Record<string, string[]> | null;
+  const ok = r.overview_kpis;
   return {
     id: String(r.id ?? ""),
     user_email: String(r.user_email ?? ""),
     tables: Array.isArray(r.tables) ? r.tables : [],
     columns: cols && typeof cols === "object" ? cols : {},
+    overview_kpis: Array.isArray(ok) ? ok.map(String) : null,
     created_at: r.created_at as string | undefined,
     updated_at: r.updated_at as string | undefined,
   };
@@ -49,23 +53,27 @@ export interface UpsertUserVisibilityInput {
   user_email: string;
   tables: string[];
   columns: Record<string, string[]>;
+  /** 傳 null 表示清除覆寫、改依①角色預設 */
+  overview_kpis?: string[] | null;
 }
 
 export async function upsertUserVisibility(payload: UpsertUserVisibilityInput): Promise<UserVisibilityRow> {
   const email = String(payload.user_email ?? "").trim().toLowerCase();
   if (!email) throw new Error("user_email 為必填");
 
+  const upsertRow: Record<string, unknown> = {
+    user_email: email,
+    tables: payload.tables ?? [],
+    columns: payload.columns ?? {},
+    updated_at: new Date().toISOString(),
+  };
+  if (payload.overview_kpis !== undefined) {
+    upsertRow.overview_kpis = payload.overview_kpis;
+  }
+
   const { data, error } = await getSupabase()
     .from("user_visibility")
-    .upsert(
-      {
-        user_email: email,
-        tables: payload.tables ?? [],
-        columns: payload.columns ?? {},
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_email" }
-    )
+    .upsert(upsertRow, { onConflict: "user_email" })
     .select("*")
     .maybeSingle();
 

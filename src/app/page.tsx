@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import type { User } from "@/lib/types";
 async function safeResJson(r: Response): Promise<Record<string, unknown>> {
   const text = await r.text();
   if (!text.trim()) return {};
@@ -61,14 +60,14 @@ export default function Home() {
 
   if (checking) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0c0f14]">
-        <p className="text-slate-400">載入中...</p>
+      <div className="flex min-h-screen items-center justify-center bg-[#faf8f5]">
+        <p className="text-stone-500">載入中...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-[#0c0f14] px-4">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#fffbf5] via-[#faf8f5] to-[#f5f0e8] px-4">
       <main className="w-full max-w-md">
         <div className="flex flex-col items-center">
           <Image
@@ -76,25 +75,25 @@ export default function Home() {
             alt="SDH"
             width={120}
             height={120}
-            className="object-contain"
+            className="object-contain drop-shadow-sm"
             priority
           />
-          <h1 className="mt-4 text-center text-2xl font-bold tracking-tight text-white">
+          <h1 className="mt-4 text-center text-2xl font-bold tracking-tight text-stone-800">
             SDH ERP 系統
           </h1>
         </div>
-        <p className="mt-2 text-center text-sm text-slate-400">
+        <p className="mt-2 text-center text-sm text-stone-600">
           請輸入您的帳號與密碼，登入後將導向您的專屬 Dashboard
         </p>
         {error && (
-          <p className="mt-3 text-center text-sm text-amber-400">{error}</p>
+          <p className="mt-3 text-center text-sm font-medium text-amber-800">{error}</p>
         )}
         <form
           onSubmit={handleLogin}
-          className="mt-6 space-y-4 rounded-2xl border border-white/10 bg-slate-800/30 p-6 shadow-xl ring-1 ring-white/5"
+          className="mt-6 space-y-4 rounded-2xl border border-stone-200/90 bg-white p-6 shadow-lg shadow-amber-100/50 ring-1 ring-stone-100"
         >
           <div>
-            <label htmlFor="email" className="block text-sm font-semibold text-slate-300">
+            <label htmlFor="email" className="block text-sm font-semibold text-stone-700">
               Email 帳號
             </label>
             <input
@@ -103,13 +102,13 @@ export default function Home() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="例如：andylin@sdh-corp.com"
-              className="mt-1.5 w-full rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-slate-500 focus:border-amber-500/50 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+              className="mt-1.5 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200/80"
               autoComplete="email"
               required
             />
           </div>
           <div>
-            <label htmlFor="password" className="block text-sm font-semibold text-slate-300">
+            <label htmlFor="password" className="block text-sm font-semibold text-stone-700">
               密碼
             </label>
             <input
@@ -118,7 +117,7 @@ export default function Home() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="請輸入密碼"
-              className="mt-1.5 w-full rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-slate-500 focus:border-amber-500/50 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+              className="mt-1.5 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200/80"
               autoComplete="current-password"
               required
             />
@@ -126,7 +125,7 @@ export default function Home() {
           <button
             type="submit"
             disabled={loggingIn}
-            className="w-full rounded-xl bg-amber-500 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400 disabled:opacity-50"
+            className="w-full rounded-xl bg-amber-500 py-2.5 text-sm font-bold text-stone-900 shadow-md shadow-amber-200/50 transition hover:bg-amber-400 disabled:opacity-50"
           >
             {loggingIn ? "登入中..." : "登入"}
           </button>

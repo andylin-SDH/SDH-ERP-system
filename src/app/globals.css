@@ -1,14 +1,15 @@
 @import "tailwindcss";
 
-/* 與 studio.sdh-corp.com 盛德好錄音室一致之配色 */
+/* 溫暖明亮：米白底、暖石色文字、琥珀強調 */
 :root {
-  --background: #0c0f14;
-  --foreground: #f1f5f9;
-  --surface: #151922;
-  --accent: #f59e0b;
-  --accent-hover: #fbbf24;
-  --muted: #94a3b8;
-  --border: #1e293b;
+  --background: #faf8f5;
+  --foreground: #292524;
+  --surface: #ffffff;
+  --surface-muted: #f5f0e8;
+  --accent: #d97706;
+  --accent-hover: #ea580c;
+  --muted: #78716c;
+  --border: #e7e5e4;
 }
 
 @theme inline {
