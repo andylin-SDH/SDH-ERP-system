@@ -6,7 +6,7 @@
 import { getSupabase } from "@/lib/supabase/server";
 import { MASTER_PAYOUT_DEFAULTS } from "@/config/master-payout-defaults";
 import { PROJECT_TYPES } from "@/config/project-types";
-import { ROLES, ROLE_VISIBILITY } from "@/config/role-visibility";
+import { ROLES, ROLE_VISIBILITY, getSectionsForRole as getStaticSectionsForRole } from "@/config/role-visibility";
 import type { RoleVisibilityConfig } from "@/config/role-visibility";
 import {
   DEFAULT_PAYOUT_DEDUPE_RULES,
@@ -129,7 +129,7 @@ export async function getSectionsForRole(role: string): Promise<string[]> {
   const { role_visibility } = await getSystemConfig();
   const cfg = role_visibility[role];
   if (cfg?.sections?.length) return cfg.sections;
-  return ["tasks"];
+  return getStaticSectionsForRole(role);
 }
 
 export async function updateSystemConfig(key: string, value: unknown): Promise<void> {

@@ -5,9 +5,10 @@
  */
 
 /** 與 ① 可見區塊 相同的區塊 key 順序 */
-export const SECTION_KEYS = ["master", "partners", "tasks", "payout", "finance", "invoices"] as const;
+export const SECTION_KEYS = ["overview", "master", "partners", "tasks", "payout", "finance", "invoices"] as const;
 
 export const TABLE_LABELS: Record<string, string> = {
+  overview: "總覽",
   master: "大總表",
   partners: "合作夥伴 / KOL",
   tasks: "任務",
@@ -20,6 +21,8 @@ export const TABLE_LABELS: Record<string, string> = {
 
 /** 各 Table 的欄位 key → 顯示名稱 */
 export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>> = {
+  /** 總覽為彙總頁，無獨立資料表欄位 */
+  overview: [],
   master: [
     { key: "專案ID", label: "專案ID" },
     { key: "專案名稱", label: "專案名稱" },

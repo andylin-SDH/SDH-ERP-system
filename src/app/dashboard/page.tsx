@@ -83,6 +83,42 @@ function generateProjectId(): string {
   return `SDH-${Y}${M}${D}-${h}${m}${s}-${rand}`;
 }
 
+const OVERVIEW_SCOPE_STORAGE_KEY = "sdh-dashboard-overview-scope";
+
+/** 大總表上與「這個人與專案有關」可能對得上的欄位（姓名／Email 需與 Users 一致） */
+const MASTER_RELATED_FIELD_KEYS = ["專案BDPM", "專案引薦人", "專案管理員", "執行管理員", "KOL名稱"] as const;
+
+function fieldMatchesUser(val: string | null | undefined, userName: string, userEmail: string): boolean {
+  const v = String(val ?? "").trim();
+  if (!v) return false;
+  return v === userName || v === userEmail;
+}
+
+function isMasterRowRelatedToUser(row: MasterRow, userName: string, userEmail: string, projectIdsFromMyTasks: Set<string>): boolean {
+  if (!userName && !userEmail) return false;
+  for (const key of MASTER_RELATED_FIELD_KEYS) {
+    const cell = row[key as keyof MasterRow] as string | null | undefined;
+    if (fieldMatchesUser(cell, userName, userEmail)) return true;
+  }
+  const pid = String(row.專案ID ?? "").trim();
+  return Boolean(pid && projectIdsFromMyTasks.has(pid));
+}
+
+/** 進行中：排除明顯已結案／完成狀態（空狀態視為進行中） */
+function isProjectInProgress(專案狀態: string | null | undefined): boolean {
+  const s = String(專案狀態 ?? "").trim();
+  if (!s) return true;
+  const lower = s.toLowerCase();
+  if (lower.includes("結案") || lower.includes("完結") || lower === "完成" || lower.includes("已結束")) return false;
+  return true;
+}
+
+function taskAssigneeIsUser(t: TaskRow, userName: string, userEmail: string): boolean {
+  const a = String(t.任務負責人 ?? "").trim();
+  if (!a) return false;
+  return a === userName || a === userEmail;
+}
+
 export default function DashboardPage() {
   const [me, setMe] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -173,6 +209,8 @@ export default function DashboardPage() {
   /** Dashboard 分頁目前排序（拖曳用），null 代表沿用預設順序 */
   const [tabOrder, setTabOrder] = useState<string[] | null>(null);
   const [draggingTab, setDraggingTab] = useState<string | null>(null);
+  /** 董事長：總覽為「與我有關」或「全公司」（其餘角色僅與我有關） */
+  const [overviewScope, setOverviewScopeState] = useState<"mine" | "company">("mine");
   const [showCreateUser, setShowCreateUser] = useState(false);
   const [createUserForm, setCreateUserForm] = useState({ email: "", name: "", password: "", role: "經紀人", dept: "", scope: "" });
   const [creatingUser, setCreatingUser] = useState(false);
@@ -492,8 +530,11 @@ export default function DashboardPage() {
     if (myVisibility?.tables?.length) return myVisibility.tables;
     if (!me) return [];
     const fromDb = systemConfig?.role_visibility?.[me.role]?.sections;
-    if (fromDb && fromDb.length > 0) return fromDb;
-    return getSectionsForRole(me.role);
+    const defaultSecs = getSectionsForRole(me.role);
+    const base = fromDb && fromDb.length > 0 ? [...fromDb] : [...defaultSecs];
+    /** 舊 DB 若未勾選總覽，仍依程式預設補上，避免升級後看不到入口 */
+    if (defaultSecs.includes("overview") && !base.includes("overview")) return ["overview", ...base];
+    return base;
   }, [me, myVisibility, systemConfig]);
 
   /** Dashboard 分頁列表：一般使用者只有資料區塊；董事長/管理者多一個「可見性與權限」設定分頁；若有自訂排序則優先使用 */
@@ -523,6 +564,25 @@ export default function DashboardPage() {
       return prev && visibleSections.includes(prev) ? prev : visibleSections[0] ?? (canEditVisibility ? "visibility" : null);
     });
   }, [me, visibleSections, canEditVisibility]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(OVERVIEW_SCOPE_STORAGE_KEY);
+      if (raw === "company" || raw === "mine") setOverviewScopeState(raw);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const setOverviewScope = useCallback((s: "mine" | "company") => {
+    setOverviewScopeState(s);
+    try {
+      localStorage.setItem(OVERVIEW_SCOPE_STORAGE_KEY, s);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   /** 取得某 Table 的可見欄位 key 列表（③ 使用者可見範圍） */
   const getVisibleColumnKeys = useCallback(
@@ -580,6 +640,41 @@ export default function DashboardPage() {
     () => filterRowsByVisibility(tasks as unknown as Record<string, unknown>[], "tasks") as unknown as TaskRow[],
     [tasks, filterRowsByVisibility]
   );
+
+  const overviewDirectorCompanyView = Boolean(me?.role === "董事長" && overviewScope === "company");
+
+  const overviewMyTaskProjectIds = useMemo(() => {
+    if (!me) return new Set<string>();
+    const uName = (me.name ?? "").trim();
+    const uEmail = (me.email ?? "").trim();
+    const next = new Set<string>();
+    for (const t of filteredTasks) {
+      if (!taskAssigneeIsUser(t, uName, uEmail)) continue;
+      const pid = String(t.專案ID ?? "").trim();
+      if (pid) next.add(pid);
+    }
+    return next;
+  }, [filteredTasks, me]);
+
+  const overviewProjectRows = useMemo(() => {
+    if (!me) return [];
+    const uName = (me.name ?? "").trim();
+    const uEmail = (me.email ?? "").trim();
+    const inProgress = filteredMasterList.filter((row) => isProjectInProgress(row.專案狀態));
+    if (overviewDirectorCompanyView) return inProgress.slice(0, 100);
+    return inProgress
+      .filter((row) => isMasterRowRelatedToUser(row, uName, uEmail, overviewMyTaskProjectIds))
+      .slice(0, 100);
+  }, [filteredMasterList, me, overviewDirectorCompanyView, overviewMyTaskProjectIds]);
+
+  const overviewTaskRows = useMemo(() => {
+    if (!me) return [];
+    const uName = (me.name ?? "").trim();
+    const uEmail = (me.email ?? "").trim();
+    const open = filteredTasks.filter((t) => !t.任務完成);
+    if (overviewDirectorCompanyView) return open.slice(0, 150);
+    return open.filter((t) => taskAssigneeIsUser(t, uName, uEmail)).slice(0, 150);
+  }, [filteredTasks, me, overviewDirectorCompanyView]);
 
   const masterVisibleCols = useMemo(() => getVisibleColumnKeys("master"), [getVisibleColumnKeys]);
   const partnersVisibleCols = useMemo(() => getVisibleColumnKeys("partners"), [getVisibleColumnKeys]);
@@ -1095,7 +1190,7 @@ export default function DashboardPage() {
                   {showHowItWorks && (
                     <div className="mt-4 space-y-3 border-t border-white/10 pt-4 text-xs text-slate-400">
                       <p><strong className="text-slate-300">角色列表</strong> → 存於 <code className="rounded bg-white/10 px-1">system_config</code> 的 <code className="rounded bg-white/10 px-1">roles</code>（陣列）。新增使用者時的角色下拉與這裡一致。</p>
-                      <p><strong className="text-slate-300">① 角色可見區塊</strong> → 存於 <code className="rounded bg-white/10 px-1">system_config</code> 的 <code className="rounded bg-white/10 px-1">role_visibility</code>。每個角色可勾選能進入的區塊（master、partners、tasks、finance、invoices）。</p>
+                      <p><strong className="text-slate-300">① 角色可見區塊</strong> → 存於 <code className="rounded bg-white/10 px-1">system_config</code> 的 <code className="rounded bg-white/10 px-1">role_visibility</code>。每個角色可勾選能進入的區塊（overview、master、partners、tasks、payout、finance、invoices）。</p>
                       <p><strong className="text-slate-300">② 資料可見規則</strong> → 存於 <code className="rounded bg-white/10 px-1">visibility_rules</code> 表。勾選的欄位若符合登入者姓名/Email，該列才會顯示（列級過濾）。</p>
                       <p><strong className="text-slate-300">③ 使用者可見範圍</strong> → 存於 <code className="rounded bg-white/10 px-1">user_visibility</code> 表（依 user_email）。若某使用者有設定，會覆蓋 ①，且可細到「每個 Table 顯示哪些欄位」。</p>
                       <p className="text-amber-400/90">顯示優先順序：③ 有設定 → 用 ③；否則 ① 有該角色設定 → 用 ①；否則用程式預設。</p>
@@ -1168,7 +1263,7 @@ export default function DashboardPage() {
                             const rv = systemConfig?.role_visibility ?? {};
                             const nextRv: Record<string, { sections: string[] }> = {};
                             for (const role of rolesToSave) {
-                              nextRv[role] = rv[role] ?? ROLE_VISIBILITY[role] ?? { sections: ["tasks"] };
+                              nextRv[role] = rv[role] ?? ROLE_VISIBILITY[role] ?? { sections: ["overview", "tasks"] };
                             }
                             await fetch("/api/system-config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "role_visibility", value: nextRv }) });
                             await refreshDashboardData(["systemConfig"]);
@@ -1197,7 +1292,7 @@ export default function DashboardPage() {
                             const current = systemConfig?.role_visibility ?? {};
                             const rv: Record<string, { sections: string[] }> = {};
                             for (const role of displayRoles) {
-                              rv[role] = current[role] ?? ROLE_VISIBILITY[role] ?? { sections: ["tasks"] };
+                              rv[role] = current[role] ?? ROLE_VISIBILITY[role] ?? { sections: ["overview", "tasks"] };
                             }
                             const res = await fetch("/api/system-config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "role_visibility", value: rv }) });
                             const data = (await safeResJson(res)) as { ok?: boolean; config?: { role_visibility: Record<string, { sections: string[] }> } };
@@ -1213,10 +1308,10 @@ export default function DashboardPage() {
                         {savingConfig === "role_visibility" ? "儲存中" : "儲存"}
                       </button>
                     </div>
-                    <p className="mb-3 text-xs text-slate-500">各角色可進入的區塊（master、partners、tasks 等）</p>
+                    <p className="mb-3 text-xs text-slate-500">各角色可進入的區塊（overview、master、partners、tasks、payout、finance、invoices 等）</p>
                     <div className="space-y-2">
                       {displayRoles.map((role) => {
-                        const cfg = systemConfig?.role_visibility?.[role] ?? ROLE_VISIBILITY[role] ?? { sections: ["tasks"] };
+                        const cfg = systemConfig?.role_visibility?.[role] ?? ROLE_VISIBILITY[role] ?? { sections: ["overview", "tasks"] };
                         return [role, cfg] as const;
                       }).map(([role, cfg]) => (
                         <div key={role} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -1235,7 +1330,7 @@ export default function DashboardPage() {
                                       return { ...base, role_visibility: rv };
                                     });
                                   }} className="h-3 w-3 rounded border-white/30 bg-white/5 text-amber-500" />
-                                  <span className="text-xs text-slate-300">{s}</span>
+                                  <span className="text-xs text-slate-300">{TABLE_LABELS[s] ?? s}</span>
                                 </label>
                               );
                             })}
@@ -1375,6 +1470,118 @@ export default function DashboardPage() {
                 </div>
               </section>
             )}
+
+        {/* 總覽：與我有關的進行中專案 + 指派給我的任務；董事長可切全公司 */}
+        {activeSection === "overview" && (
+          <section className="rounded-2xl border border-white/10 bg-slate-800/20 p-4 shadow-xl ring-1 ring-white/5 sm:p-6">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-xl font-bold tracking-tight text-white">總覽</h2>
+                <p className="mt-1 text-sm text-slate-400">
+                  {overviewDirectorCompanyView
+                    ? "顯示可見範圍內的進行中專案與未完成任務（全公司視角，仍遵守②列級規則）。"
+                    : "進行中且與您相關的專案，以及負責人為您的未完成任務。"}
+                </p>
+              </div>
+              {me?.role === "董事長" && (
+                <div className="flex shrink-0 rounded-xl border border-white/15 bg-slate-900/70 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setOverviewScope("mine")}
+                    className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                      overviewScope === "mine" ? "bg-amber-500 text-slate-900 shadow shadow-amber-500/30" : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    與我有關
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOverviewScope("company")}
+                    className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                      overviewScope === "company" ? "bg-amber-500 text-slate-900 shadow shadow-amber-500/30" : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    全公司
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div className="min-w-0 rounded-xl border border-white/10 bg-slate-900/35 p-4">
+                <h3 className="mb-1 text-sm font-bold text-amber-400">
+                  {overviewDirectorCompanyView ? "進行中專案" : "與我相關的進行中專案"}
+                </h3>
+                {!overviewDirectorCompanyView && (
+                  <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+                    專案需為進行中，且您在 BDPM／引薦人／管理員／執行管理員／KOL 名稱欄位之一與登入姓名或 Email 相符，或您有被指派的任務隸屬該專案。
+                  </p>
+                )}
+                {overviewProjectRows.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-slate-500">目前沒有符合條件的專案</p>
+                ) : (
+                  <div className="max-h-[min(24rem,50vh)] overflow-auto rounded-lg border border-white/10">
+                    <table className="min-w-full divide-y divide-white/10 text-left text-sm">
+                      <thead className="sticky top-0 z-10 bg-slate-900/95">
+                        <tr>
+                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-amber-400">專案名稱</th>
+                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-300">狀態</th>
+                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-300">專案ID</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/10">
+                        {overviewProjectRows.map((row) => (
+                          <tr key={row.id || row.專案ID} className="bg-slate-800/10 hover:bg-white/5">
+                            <td className="max-w-[10rem] truncate px-3 py-2 font-medium text-white" title={row.專案名稱 ?? ""}>
+                              {row.專案名稱 ?? "—"}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-slate-300">{row.專案狀態 ?? "—"}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-slate-400">{row.專案ID}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="min-w-0 rounded-xl border border-white/10 bg-slate-900/35 p-4">
+                <h3 className="mb-1 text-sm font-bold text-amber-400">
+                  {overviewDirectorCompanyView ? "未完成任務" : "指派給我的任務"}
+                </h3>
+                <p className="mb-3 text-[11px] text-slate-500">以「任務負責人」等於您的姓名或 Email 為準。</p>
+                {overviewTaskRows.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-slate-500">目前沒有符合條件的任務</p>
+                ) : (
+                  <div className="max-h-[min(24rem,50vh)] overflow-auto rounded-lg border border-white/10">
+                    <table className="min-w-full divide-y divide-white/10 text-left text-sm">
+                      <thead className="sticky top-0 z-10 bg-slate-900/95">
+                        <tr>
+                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-amber-400">任務</th>
+                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-300">專案</th>
+                          <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-300">狀態</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/10">
+                        {overviewTaskRows.map((t, i) => (
+                          <tr key={t.任務ID ?? `${t.專案ID}-${i}`} className="bg-slate-800/10 hover:bg-white/5">
+                            <td className="max-w-[9rem] truncate px-3 py-2 font-medium text-white" title={t.任務 ?? ""}>
+                              {t.任務 ?? "—"}
+                            </td>
+                            <td className="max-w-[7rem] truncate px-3 py-2 text-slate-400" title={t.專案名稱 ?? t.專案ID ?? ""}>
+                              {t.專案名稱 ?? t.專案ID ?? "—"}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-slate-300">{t.狀態 ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* 大總表 */}
         {activeSection === "master" && (

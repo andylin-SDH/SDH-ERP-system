@@ -25,32 +25,32 @@ export interface RoleVisibilityConfig {
 export const ROLE_VISIBILITY: Record<string, RoleVisibilityConfig> = {
   董事長: {
     fullAccess: true,
-    sections: ["master", "partners", "tasks", "payout", "finance", "invoices"],
+    sections: ["overview", "master", "partners", "tasks", "payout", "finance", "invoices"],
     filterNote: "全公司，不過濾",
   },
   管理者: {
     fullAccess: true,
-    sections: ["master", "partners", "tasks", "payout", "finance", "invoices"],
+    sections: ["overview", "master", "partners", "tasks", "payout", "finance", "invoices"],
     filterNote: "全公司，不過濾",
   },
   經紀人: {
     fullAccess: false,
-    sections: ["partners", "tasks"],
+    sections: ["overview", "partners", "tasks"],
     filterNote: "依 scope／email／姓名過濾；scope=主管/*/all 見全部",
   },
   製作人: {
     fullAccess: false,
-    sections: ["master", "tasks"],
+    sections: ["overview", "master", "tasks"],
     filterNote: "專案與任務，可依 project_bd 或 task_owner 擴充過濾",
   },
   會計: {
     fullAccess: true,
-    sections: ["payout", "finance", "invoices"],
+    sections: ["overview", "payout", "finance", "invoices"],
     filterNote: "財務相關表，目前全開",
   },
   行政: {
     fullAccess: false,
-    sections: ["partners", "tasks"],
+    sections: ["overview", "partners", "tasks"],
     filterNote: "合作夥伴與任務",
   },
 };
@@ -65,8 +65,8 @@ export function isScopeFullAccess(scope: string | undefined): boolean {
 /** 預設：未列出的角色只給基本區塊 */
 const DEFAULT_VISIBILITY: RoleVisibilityConfig = {
   fullAccess: false,
-  sections: ["tasks"],
-  filterNote: "預設僅任務",
+  sections: ["overview", "tasks"],
+  filterNote: "預設總覽與任務",
 };
 
 /**
