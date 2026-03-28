@@ -37,6 +37,7 @@ export async function PUT(request: NextRequest) {
         "master_payout_defaults",
         "project_types",
         "project_status_options",
+        "project_expense_type_options",
         "role_visibility",
         "roles",
         "role_permissions",

@@ -13,6 +13,7 @@ import { applyDedupeRules } from "@/lib/payout-dedupe";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
 import { PROJECT_TYPES } from "@/config/project-types";
 import { DEFAULT_PROJECT_STATUS_OPTIONS } from "@/config/project-status-defaults";
+import { DEFAULT_PROJECT_EXPENSE_TYPE_OPTIONS } from "@/config/project-expense-type-defaults";
 import { DEFAULT_TASK_TYPE_OPTIONS } from "@/config/task-type-defaults";
 import { MASTER_PAYOUT_DEFAULTS, isPayoutModeB } from "@/config/master-payout-defaults";
 import { DEFAULT_PAYOUT_DEDUPE_RULES, type PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
@@ -403,6 +404,7 @@ export default function DashboardPage() {
     master_payout_defaults: Record<string, string>;
     project_types: string[];
     project_status_options?: string[];
+    project_expense_type_options?: string[];
     task_type_options?: string[];
     role_visibility: Record<string, { sections: string[] }>;
     roles?: string[];
@@ -452,6 +454,10 @@ export default function DashboardPage() {
   );
   const taskTypeOptions = useMemo(
     () => systemConfig?.task_type_options ?? [...DEFAULT_TASK_TYPE_OPTIONS],
+    [systemConfig]
+  );
+  const projectExpenseTypeOptions = useMemo(
+    () => systemConfig?.project_expense_type_options ?? [...DEFAULT_PROJECT_EXPENSE_TYPE_OPTIONS],
     [systemConfig]
   );
   /** 合作夥伴（已核准）的「合作夥伴名稱」＝大總表 KOL 名稱選項 */
@@ -1182,6 +1188,7 @@ export default function DashboardPage() {
             master_payout_defaults: Record<string, string>;
             project_types: string[];
             project_status_options?: string[];
+            project_expense_type_options?: string[];
             task_type_options?: string[];
             role_visibility: Record<string, { sections: string[] }>;
             roles?: string[];
@@ -2569,6 +2576,90 @@ export default function DashboardPage() {
                             role_visibility: {},
                           }),
                           project_status_options: [...projectStatusOptions, v],
+                        }));
+                        (e.target as HTMLInputElement).value = "";
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* 專案費用類型選項（大總表「專案費用類型」下拉） */}
+              <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="font-semibold text-amber-800">專案費用類型選項</h3>
+                  <button
+                    type="button"
+                    disabled={savingConfig === "project_expense_type_options"}
+                    onClick={async () => {
+                      setSavingConfig("project_expense_type_options");
+                      try {
+                        const res = await fetch("/api/system-config", {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ key: "project_expense_type_options", value: projectExpenseTypeOptions }),
+                        });
+                        const data = (await safeResJson(res)) as {
+                          ok?: boolean;
+                          config?: { project_expense_type_options?: string[] };
+                        };
+                        if (res.ok && data.ok && data.config) {
+                          setSystemConfig((c) =>
+                            c ? { ...c, project_expense_type_options: data.config!.project_expense_type_options } : null
+                          );
+                          await refreshDashboardData(["systemConfig", "master"]);
+                        }
+                      } catch {
+                        /* ignore */
+                      }
+                      setSavingConfig(null);
+                    }}
+                    className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
+                  >
+                    {savingConfig === "project_expense_type_options" ? "儲存中" : "儲存"}
+                  </button>
+                </div>
+                <p className="mb-3 text-xs text-stone-500">
+                  新增／編輯大總表時「專案費用類型」的下拉選項。存於{" "}
+                  <code className="rounded bg-stone-200/80 px-1 py-0.5 text-[10px]">system_config.project_expense_type_options</code>
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {projectExpenseTypeOptions.map((s, i) => (
+                    <span key={`${s}-${i}`} className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-1 text-xs text-stone-600">
+                      {s}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSystemConfig((c) => ({
+                            ...(c ?? {
+                              master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS },
+                              project_types: [...PROJECT_TYPES],
+                              role_visibility: {},
+                            }),
+                            project_expense_type_options: projectExpenseTypeOptions.filter((_, j) => j !== i),
+                          }))
+                        }
+                        className="text-stone-500 hover:text-amber-800"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    placeholder="+ 新增類型"
+                    className="w-28 rounded border border-dashed border-stone-300 bg-transparent px-2 py-1 text-xs text-stone-500 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none"
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      const v = (e.target as HTMLInputElement).value.trim();
+                      if (v && !projectExpenseTypeOptions.includes(v)) {
+                        setSystemConfig((c) => ({
+                          ...(c ?? {
+                            master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS },
+                            project_types: [...PROJECT_TYPES],
+                            role_visibility: {},
+                          }),
+                          project_expense_type_options: [...projectExpenseTypeOptions, v],
                         }));
                         (e.target as HTMLInputElement).value = "";
                       }
@@ -4965,7 +5056,15 @@ export default function DashboardPage() {
                         }))
                       }
                     />
-                    <InputField label="專案費用類型" value={createForm.專案費用類型} onChange={(v) => setCreateForm((f) => ({ ...f, 專案費用類型: v }))} className="col-span-2" />
+                    <SelectField
+                      label="專案費用類型"
+                      value={createForm.專案費用類型}
+                      onChange={(v) => setCreateForm((f) => ({ ...f, 專案費用類型: v }))}
+                      options={[...new Set([...projectExpenseTypeOptions, createForm.專案費用類型].filter(Boolean))].sort((a, b) =>
+                        a.localeCompare(b, "zh-TW")
+                      )}
+                      className="col-span-2"
+                    />
                   </div>
                 </section>
 
@@ -5576,10 +5675,13 @@ export default function DashboardPage() {
                   )}
 
                   {isEditingMaster ? (
-                    <InputField
+                    <SelectField
                       label="專案費用類型"
                       value={editMasterForm.專案費用類型}
                       onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案費用類型: v }))}
+                      options={[...new Set([...projectExpenseTypeOptions, editMasterForm.專案費用類型].filter(Boolean))].sort((a, b) =>
+                        a.localeCompare(b, "zh-TW")
+                      )}
                       className="col-span-2"
                     />
                   ) : (
