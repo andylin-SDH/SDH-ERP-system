@@ -71,11 +71,12 @@ export default function Home() {
       <main className="w-full max-w-md">
         <div className="flex flex-col items-center">
           <Image
-            src="/logo.jpg"
+            src="/logo.png"
             alt="SDH"
-            width={120}
-            height={120}
-            className="object-contain drop-shadow-sm"
+            width={1257}
+            height={174}
+            sizes="(max-width: 448px) 100vw, 448px"
+            className="h-auto w-full max-w-lg object-contain drop-shadow-sm"
             priority
           />
           <h1 className="mt-4 text-center text-2xl font-bold tracking-tight text-stone-800">
