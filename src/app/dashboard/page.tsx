@@ -462,6 +462,11 @@ export default function DashboardPage() {
   const [payoutList, setPayoutList] = useState<PayoutRow[]>([]);
   /** Dashboard 分頁搜尋關鍵字（各區塊獨立） */
   const [masterSearch, setMasterSearch] = useState("");
+  /** 大總表：依專案類型子分頁（「全部」= 不篩類型） */
+  const [masterSubTab, setMasterSubTab] = useState("全部");
+  /** 行動版：側欄抽屜；桌面：側欄收合為窄欄 */
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [partnersSearch, setPartnersSearch] = useState("");
   const [tasksSearch, setTasksSearch] = useState("");
   const [payoutSearch, setPayoutSearch] = useState("");
@@ -490,6 +495,8 @@ export default function DashboardPage() {
     () => systemConfig?.project_types ?? [...PROJECT_TYPES],
     [systemConfig]
   );
+  /** 大總表子分頁選項：全部 + 系統設定之專案類型 */
+  const masterSubTabOptions = useMemo(() => ["全部", ...projectTypesOptions] as const, [projectTypesOptions]);
   const projectStatusOptions = useMemo(
     () => systemConfig?.project_status_options ?? [...DEFAULT_PROJECT_STATUS_OPTIONS],
     [systemConfig]
@@ -794,6 +801,13 @@ export default function DashboardPage() {
     () => filterRowsByVisibility(masterList as unknown as Record<string, unknown>[], "master") as unknown as MasterRow[],
     [masterList, filterRowsByVisibility]
   );
+
+  /** 大總表：依子分頁「專案類型」篩選後的列表（再套用關鍵字搜尋） */
+  const masterTabFilteredList = useMemo(() => {
+    if (masterSubTab === "全部") return filteredMasterList;
+    return filteredMasterList.filter((row) => String(row.專案類型 ?? "").trim() === masterSubTab);
+  }, [filteredMasterList, masterSubTab]);
+
   /** 合作夥伴 / KOL：與其他表相同，依 ② match_fields 篩列（未勾選 = 不篩；勾選經紀人 = 只顯示該欄位等於登入者姓名或帳號的列） */
   const filteredPartners = useMemo(
     () => filterRowsByVisibility(partners as unknown as Record<string, unknown>[], "partners") as unknown as PartnerRow[],
@@ -920,27 +934,27 @@ export default function DashboardPage() {
     [partnersVisibleCols]
   );
 
-  /** 套用關鍵字搜尋後的各 Table 資料（大總表含模式 B 由合作夥伴帶出之欄位） */
+  /** 套用關鍵字搜尋後的各 Table 資料（大總表：先子分頁再搜尋；模式 B 欄由合作夥伴帶出） */
   const searchedMasterList = useMemo(() => {
     const q = deferredMasterSearch.trim().toLowerCase();
-    if (!q) return filteredMasterList;
-    return filteredMasterList.filter((row) =>
+    if (!q) return masterTabFilteredList;
+    return masterTabFilteredList.filter((row) =>
       masterVisibleCols.some((k) => masterTableCellText(row, k, partnerByKolName).toLowerCase().includes(q))
     );
-  }, [filteredMasterList, masterVisibleCols, deferredMasterSearch, partnerByKolName]);
+  }, [masterTabFilteredList, masterVisibleCols, deferredMasterSearch, partnerByKolName]);
 
   /**
-   * 依「② 權限篩選後的大總表列表」是否同時含模式 A 與模式 B 專案，決定表頭／列要出現哪些角色欄（與關鍵字搜尋無關）。
-   * 僅單一模式時隱藏另一組欄位；A+B 並存時仍顯示兩組（單一 HTML table 無法依列藏欄且對齊表頭）。
+   * 依「目前子分頁篩選後」是否同時含模式 A 與模式 B 專案，決定表頭角色欄。
+   * 單一專案類型分頁時通常只會出現一組角色欄；「全部」且兩種專案並存時仍顯示兩組。
    */
   const { masterColsForDisplay, masterFilteredListHasBothPayoutModes } = useMemo(() => {
     const cols = masterVisibleCols;
-    if (filteredMasterList.length === 0) {
+    if (masterTabFilteredList.length === 0) {
       return { masterColsForDisplay: cols, masterFilteredListHasBothPayoutModes: false };
     }
     let hasModeA = false;
     let hasModeB = false;
-    for (const row of filteredMasterList) {
+    for (const row of masterTabFilteredList) {
       if (isPayoutModeB(String(row.專案類型 ?? ""))) hasModeB = true;
       else hasModeA = true;
     }
@@ -953,7 +967,7 @@ export default function DashboardPage() {
       masterColsForDisplay: filtered,
       masterFilteredListHasBothPayoutModes: hasModeA && hasModeB,
     };
-  }, [masterVisibleCols, filteredMasterList]);
+  }, [masterVisibleCols, masterTabFilteredList]);
 
   const searchedPartners = useMemo(
     () =>
@@ -1360,6 +1374,46 @@ export default function DashboardPage() {
       });
   }, [refreshDashboardData]);
 
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem("sdh-dashboard-sidebar-collapsed");
+      if (v === "1") setSidebarCollapsed(true);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("sdh-dashboard-sidebar-collapsed", sidebarCollapsed ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("sdh-master-subtab", masterSubTab);
+    } catch {
+      /* ignore */
+    }
+  }, [masterSubTab]);
+
+  /** system_config 首次載入後還原大總表子分頁（僅一次） */
+  const masterSubTabRestored = useRef(false);
+  useEffect(() => {
+    if (masterSubTabRestored.current || !systemConfig) return;
+    masterSubTabRestored.current = true;
+    try {
+      const v = localStorage.getItem("sdh-master-subtab");
+      if (!v) return;
+      const opts = systemConfig.project_types ?? [...PROJECT_TYPES];
+      if (v === "全部" || opts.includes(v)) setMasterSubTab(v);
+    } catch {
+      /* ignore */
+    }
+  }, [systemConfig]);
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#faf8f5] p-8">
@@ -1388,94 +1442,171 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#faf8f5] p-8">
-      {/* Logo 獨立一欄，置頂 */}
-      <div className="mb-6 flex min-h-[2rem] items-center border-b border-stone-200/90 pb-4">
-        <Link href="/" className="block max-w-full">
-          <Image
-            src="/logo.png"
-            alt="SDH 盛德好"
-            width={1257}
-            height={174}
-            sizes="(max-width: 768px) 100vw, 260px"
-            className="h-7 w-auto max-w-[min(100%,260px)] object-contain object-left sm:h-8 md:h-[2.25rem]"
-          />
-        </Link>
-      </div>
-
-      <header className="mb-10 flex items-center justify-between">
-        <div>
-          <Link href="/" className="text-sm font-medium text-stone-500 transition hover:text-amber-800">
-            ← 首頁
-          </Link>
-          <h1 className="mt-2 text-2xl font-bold tracking-tight text-stone-900 sm:text-3xl">
-            {me?.name ?? "總覽"} Dashboard
-          </h1>
-          <p className="mt-1.5 text-sm font-medium text-stone-500">
-            {me?.name}（{me?.role}）· 全公司使用者、專案、任務、合作夥伴
-          </p>
-          {me && visibleSections.includes("overview") && activeSection !== "overview" && (
-            <button
-              type="button"
-              onClick={() => setActiveSection("overview")}
-              className="mt-2 text-left text-sm font-semibold text-amber-800 transition hover:text-amber-700 hover:underline"
-            >
-              前往總覽
-            </button>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-semibold text-stone-600 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
-        >
-          登出
-        </button>
-      </header>
-
-      {/* 資料分頁：左側直向導覽 + 右側區塊內容（管理者多「可見性與權限」） */}
+    <div className="flex min-h-screen flex-col bg-[#faf8f5] md:flex-row">
+      {/* 全高側欄：行動版抽屜、桌面可收合 */}
       {me && tabSections.length > 0 && (
-        <div className="flex w-full flex-col gap-4 md:flex-row md:items-start md:gap-8">
-          <aside className="w-full shrink-0 rounded-2xl border border-stone-200/90 bg-white/90 p-3 shadow-lg ring-1 ring-amber-100/60 md:sticky md:top-6 md:w-56 md:self-start">
-            <p className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-wider text-stone-500">資料區塊</p>
-            <nav className="flex max-h-[min(40vh,22rem)] flex-col gap-1 overflow-y-auto pr-0.5 md:max-h-[calc(100vh-10rem)]" aria-label="Dashboard 分頁">
-              {tabSections.map((sec) => (
-                <button
-                  key={sec}
-                  type="button"
-                  draggable
-                  onDragStart={() => setDraggingTab(sec)}
-                  onDragEnd={() => setDraggingTab(null)}
-                  onDragOver={(e) => {
-                    if (!draggingTab || draggingTab === sec) return;
-                    e.preventDefault();
-                    setTabOrder((prev) => {
-                      const current = prev && prev.length ? prev : tabSections;
-                      const fromIndex = current.indexOf(draggingTab);
-                      const toIndex = current.indexOf(sec);
-                      if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return current;
-                      const next = [...current];
-                      next.splice(fromIndex, 1);
-                      next.splice(toIndex, 0, draggingTab);
-                      return next;
-                    });
-                  }}
-                  onClick={() => setActiveSection(sec)}
-                  className={`w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
-                    activeSection === sec
-                      ? "border border-amber-400/70 bg-amber-50 text-amber-700 shadow-sm shadow-amber-100/30"
-                      : "border border-transparent text-stone-600 hover:bg-amber-50/80 hover:text-stone-900"
-                  }`}
-                >
-                  {TABLE_LABELS[sec] ?? sec}
-                </button>
-              ))}
+        <>
+          <div
+            className={`fixed inset-0 z-40 bg-stone-900/45 transition-opacity md:hidden ${mobileNavOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+            aria-hidden
+            onClick={() => setMobileNavOpen(false)}
+          />
+          <aside
+            className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r border-stone-700 bg-stone-900 text-stone-100 shadow-2xl transition-transform duration-200 ease-out md:static md:z-0 md:min-h-screen md:translate-x-0 md:shadow-none ${
+              mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+            } ${sidebarCollapsed ? "md:w-[4.25rem]" : "w-[min(100vw,17rem)] md:w-56"}`}
+          >
+            <div className="flex h-14 shrink-0 items-center gap-2 border-b border-stone-700 px-3">
+              <Link
+                href="/"
+                className={`min-w-0 flex-1 ${sidebarCollapsed ? "md:flex md:justify-center" : ""}`}
+                onClick={() => setMobileNavOpen(false)}
+              >
+                <Image
+                  src="/logo.png"
+                  alt="SDH 盛德好"
+                  width={1257}
+                  height={174}
+                  sizes="(max-width: 768px) 160px, 200px"
+                  className={`h-7 w-auto max-w-[160px] object-contain object-left md:max-w-[200px] ${sidebarCollapsed ? "md:max-h-7 md:max-w-[32px]" : ""}`}
+                />
+              </Link>
+              <button
+                type="button"
+                className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg text-stone-400 transition hover:bg-stone-800 hover:text-amber-300 md:inline-flex"
+                onClick={() => setSidebarCollapsed((c) => !c)}
+                aria-label={sidebarCollapsed ? "展開側欄" : "收合側欄"}
+              >
+                <span aria-hidden className="text-lg">{sidebarCollapsed ? "»" : "«"}</span>
+              </button>
+              <button
+                type="button"
+                className="rounded-lg p-2 text-stone-400 transition hover:bg-stone-800 md:hidden"
+                onClick={() => setMobileNavOpen(false)}
+                aria-label="關閉選單"
+              >
+                ✕
+              </button>
+            </div>
+            <p className={`px-3 pt-3 text-[10px] font-semibold uppercase tracking-wider text-stone-500 ${sidebarCollapsed ? "md:hidden" : ""}`}>
+              資料區塊
+            </p>
+            <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 py-3" aria-label="Dashboard 分頁">
+              {tabSections.map((sec) => {
+                const label = TABLE_LABELS[sec] ?? sec;
+                const shortLabel = Array.from(label)[0] ?? "·";
+                return (
+                  <button
+                    key={sec}
+                    type="button"
+                    draggable
+                    onDragStart={() => setDraggingTab(sec)}
+                    onDragEnd={() => setDraggingTab(null)}
+                    onDragOver={(e) => {
+                      if (!draggingTab || draggingTab === sec) return;
+                      e.preventDefault();
+                      setTabOrder((prev) => {
+                        const current = prev && prev.length ? prev : tabSections;
+                        const fromIndex = current.indexOf(draggingTab);
+                        const toIndex = current.indexOf(sec);
+                        if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return current;
+                        const next = [...current];
+                        next.splice(fromIndex, 1);
+                        next.splice(toIndex, 0, draggingTab);
+                        return next;
+                      });
+                    }}
+                    title={label}
+                    onClick={() => {
+                      setActiveSection(sec);
+                      setMobileNavOpen(false);
+                    }}
+                    className={`flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
+                      activeSection === sec
+                        ? "border border-amber-400/80 bg-stone-800 text-amber-300 shadow-sm shadow-black/20"
+                        : "border border-transparent text-stone-300 hover:bg-stone-800/90 hover:text-white"
+                    } ${sidebarCollapsed ? "md:justify-center md:px-2" : ""}`}
+                  >
+                    <span className={`min-w-0 flex-1 truncate ${sidebarCollapsed ? "md:hidden" : ""}`}>{label}</span>
+                    <span
+                      className={`hidden shrink-0 text-amber-400 md:inline-flex md:h-8 md:w-8 md:items-center md:justify-center md:rounded-lg md:border md:border-stone-600 md:text-xs md:font-bold ${sidebarCollapsed ? "md:inline-flex" : "md:hidden"}`}
+                      aria-hidden
+                    >
+                      {shortLabel}
+                    </span>
+                  </button>
+                );
+              })}
             </nav>
-            <p className="mt-3 border-t border-stone-200/90 pt-3 text-[10px] leading-relaxed text-stone-500">
-              拖曳項目可調整順序。目前：<span className="font-semibold text-amber-800">{TABLE_LABELS[activeSection ?? ""] ?? activeSection ?? "—"}</span>
+            <p className={`mt-auto shrink-0 border-t border-stone-700 px-3 py-3 text-[10px] leading-relaxed text-stone-500 ${sidebarCollapsed ? "md:hidden" : ""}`}>
+              拖曳項目可調整順序。目前：
+              <span className="font-semibold text-amber-400">{TABLE_LABELS[activeSection ?? ""] ?? activeSection ?? "—"}</span>
             </p>
           </aside>
+        </>
+      )}
 
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col p-4 md:p-8">
+        {me && tabSections.length > 0 && (
+          <div className="mb-5 flex items-center gap-3 border-b border-stone-200/90 pb-4 md:hidden">
+            <button
+              type="button"
+              className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-800 shadow-sm"
+              onClick={() => setMobileNavOpen(true)}
+              aria-label="開啟選單"
+            >
+              ☰
+            </button>
+            <span className="text-sm font-semibold text-stone-800">選單</span>
+          </div>
+        )}
+
+        {(!me || tabSections.length === 0) && (
+          <div className="mb-6 flex min-h-[2rem] items-center border-b border-stone-200/90 pb-4">
+            <Link href="/" className="block max-w-full">
+              <Image
+                src="/logo.png"
+                alt="SDH 盛德好"
+                width={1257}
+                height={174}
+                sizes="(max-width: 768px) 100vw, 260px"
+                className="h-7 w-auto max-w-[min(100%,260px)] object-contain object-left sm:h-8 md:h-[2.25rem]"
+              />
+            </Link>
+          </div>
+        )}
+
+        <header className="mb-8 flex flex-wrap items-center justify-between gap-4 md:mb-10">
+          <div>
+            <Link href="/" className="text-sm font-medium text-stone-500 transition hover:text-amber-800">
+              ← 首頁
+            </Link>
+            <h1 className="mt-2 text-2xl font-bold tracking-tight text-stone-900 sm:text-3xl">
+              {me?.name ?? "總覽"} Dashboard
+            </h1>
+            <p className="mt-1.5 text-sm font-medium text-stone-500">
+              {me?.name}（{me?.role}）· 全公司使用者、專案、任務、合作夥伴
+            </p>
+            {me && visibleSections.includes("overview") && activeSection !== "overview" && (
+              <button
+                type="button"
+                onClick={() => setActiveSection("overview")}
+                className="mt-2 text-left text-sm font-semibold text-amber-800 transition hover:text-amber-700 hover:underline"
+              >
+                前往總覽
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-semibold text-stone-600 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
+          >
+            登出
+          </button>
+        </header>
+
+        {me && tabSections.length > 0 && (
           <div className="min-w-0 flex-1 space-y-10">
             {/* 管理者專用：可見性與權限管理分頁內容 */}
             {canEditVisibility && activeSection === "visibility" && (
@@ -1963,7 +2094,7 @@ export default function DashboardPage() {
                     setCreateForm({
                       專案ID: generateProjectId(),
                       專案名稱: "",
-                      專案類型: "",
+                      專案類型: masterSubTab !== "全部" ? masterSubTab : "",
                       專案狀態: "",
                       狀態確認日期: "",
                       開案日期: today,
@@ -1995,9 +2126,27 @@ export default function DashboardPage() {
                 </button>
               </div>
               </div>
-              {masterFilteredListHasBothPayoutModes && filteredMasterList.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2 border-b border-stone-200/80 pb-3" role="tablist" aria-label="依專案類型篩選">
+                {masterSubTabOptions.map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    role="tab"
+                    aria-selected={masterSubTab === tab}
+                    onClick={() => setMasterSubTab(tab)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                      masterSubTab === tab
+                        ? "bg-amber-500 text-slate-900 shadow-sm ring-1 ring-amber-400/80"
+                        : "border border-transparent bg-stone-100/90 text-stone-600 hover:border-stone-200 hover:bg-amber-50/90"
+                    }`}
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+              {masterFilteredListHasBothPayoutModes && masterSubTab === "全部" && filteredMasterList.length > 0 && (
                 <p className="mt-2 max-w-3xl text-xs text-stone-500">
-                  目前可見大總表（依權限篩選後）同時含「製作/活動」與「廣告業配」專案，故顯示兩組分潤角色欄；若僅單一類型則只顯示對應欄位（與搜尋關鍵字無關）。
+                  「全部」分頁若同時含製作/活動與廣告業配專案，會顯示兩組分潤角色欄；切到單一專案類型分頁即可只顯示對應欄位。
                 </p>
               )}
             </div>
@@ -2031,6 +2180,12 @@ export default function DashboardPage() {
                     <tr>
                       <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                         尚無大總表資料，請點「新增專案」建立第一筆
+                      </td>
+                    </tr>
+                  ) : masterTabFilteredList.length === 0 ? (
+                    <tr>
+                      <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                        此專案類型尚無資料，請切換上方分頁或新增專案
                       </td>
                     </tr>
                   ) : searchedMasterList.length === 0 ? (
@@ -2909,7 +3064,7 @@ export default function DashboardPage() {
 
       {/* 新增使用者 Modal */}
       {showCreateUser && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-stone-900/30 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/30 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
             <header className="flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
               <h2 className="text-xl font-bold tracking-tight text-stone-900">新增使用者</h2>
@@ -3002,7 +3157,7 @@ export default function DashboardPage() {
 
       {/* 新增合作夥伴 / KOL Modal */}
       {showCreatePartner && (
-        <div className="fixed inset-0 z-40 flex items-center justify中心 bg-stone-900/30 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/30 backdrop-blur-sm p-4">
           <div className="w-full max-w-3xl rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
             <form
               className="flex max-h-[90vh] flex-col"
@@ -3334,7 +3489,7 @@ export default function DashboardPage() {
 
       {/* 編輯 / 檢視合作夥伴 Modal */}
       {showEditPartner && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-stone-900/30 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/30 backdrop-blur-sm p-4">
           <div className="w-full max-w-3xl rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
             <div className="flex max-h-[90vh] flex-col">
               <header className="flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
@@ -4992,12 +5147,12 @@ export default function DashboardPage() {
         </section>
         )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* 大總表 新增專案 Modal */}
       {showCreateMaster && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-stone-900/30 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/30 backdrop-blur-sm">
           <div className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
             <form
               className="flex max-h-[90vh] flex-col"
@@ -5234,7 +5389,7 @@ export default function DashboardPage() {
 
       {/* 使用者可見範圍設定 Modal */}
       {selectedUserForVisibility && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-stone-900/30 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/30 backdrop-blur-sm p-4">
           <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
             <header className="shrink-0 flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
               <h2 className="text-xl font-bold tracking-tight text-stone-900">
@@ -5459,7 +5614,7 @@ export default function DashboardPage() {
       {/* 大總表 詳情抽屜 */}
       {selectedMaster && (
         <>
-        <div className="fixed inset-0 z-40 flex items-start justify-end bg-stone-900/30 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[60] flex items-start justify-end bg-stone-900/30 backdrop-blur-sm">
           <div className="flex h-full w-full max-w-xl flex-col border-l border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
             <header className="flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
               <div>
@@ -5896,7 +6051,7 @@ export default function DashboardPage() {
 
       {/* 任務 編輯抽屜 */}
       {selectedTask && (
-        <div className="fixed inset-0 z-40 flex items-start justify-end bg-stone-900/30 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[60] flex items-start justify-end bg-stone-900/30 backdrop-blur-sm">
           <div className="flex h-full w-full max-w-md flex-col border-l border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
             <header className="flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
               <h2 className="text-xl font-bold tracking-tight text-stone-900">編輯任務</h2>
