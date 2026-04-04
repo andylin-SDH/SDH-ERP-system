@@ -115,6 +115,25 @@ function emptyInvoiceDraftRow(): Record<string, string> {
   return Object.fromEntries(INVOICE_DRAFT_KEYS.map((k) => [k, ""])) as Record<string, string>;
 }
 
+const LS_INVOICE_PREFIX = "sdh-invoice-seq-prefix";
+const LS_INVOICE_PAD = "sdh-invoice-seq-pad";
+const LS_INVOICE_NEXT = "sdh-invoice-seq-next";
+
+/** 連號：前綴 + 數字（可補零）；起始與遞增皆為非負整數 */
+function buildSequentialInvoiceNumbers(prefix: string, startInt: number, count: number, padDigits: number): string[] {
+  if (!Number.isFinite(startInt) || count < 1) return [];
+  const out: string[] = [];
+  const p = prefix.trim();
+  const pad = padDigits > 0 ? Math.min(32, Math.floor(padDigits)) : 0;
+  for (let i = 0; i < count; i++) {
+    const n = Math.floor(startInt) + i;
+    if (n < 0) continue;
+    const numStr = pad > 0 ? String(n).padStart(pad, "0") : String(n);
+    out.push(`${p}${numStr}`);
+  }
+  return out;
+}
+
 function parseNumericField(v: string | null | undefined): number {
   if (v == null || String(v).trim() === "") return 0;
   const n = Number(String(v).replace(/,/g, "").trim());
@@ -514,6 +533,11 @@ export default function DashboardPage() {
   const [invoiceDraftRows, setInvoiceDraftRows] = useState<Array<Record<string, string>>>([]);
   const [savingInvoices, setSavingInvoices] = useState(false);
   const [invoiceCreateError, setInvoiceCreateError] = useState<string | null>(null);
+  /** 連號精靈：前綴、起始數字、筆數、數字補零位數（空＝不補） */
+  const [invoiceSeqPrefix, setInvoiceSeqPrefix] = useState("");
+  const [invoiceSeqStart, setInvoiceSeqStart] = useState("1");
+  const [invoiceSeqCount, setInvoiceSeqCount] = useState("3");
+  const [invoiceSeqPad, setInvoiceSeqPad] = useState("");
   /** 大資料量時分段渲染，降低首屏與互動卡頓 */
   const [masterRenderCount, setMasterRenderCount] = useState(RENDER_CHUNK_SIZE);
   const [partnersRenderCount, setPartnersRenderCount] = useState(RENDER_CHUNK_SIZE);
@@ -5261,6 +5285,18 @@ export default function DashboardPage() {
                     onClick={() => {
                       setInvoiceCreateError(null);
                       setInvoiceDraftRows([emptyInvoiceDraftRow(), emptyInvoiceDraftRow(), emptyInvoiceDraftRow()]);
+                      try {
+                        const p = localStorage.getItem(LS_INVOICE_PREFIX);
+                        const pad = localStorage.getItem(LS_INVOICE_PAD);
+                        const next = localStorage.getItem(LS_INVOICE_NEXT);
+                        if (p !== null) setInvoiceSeqPrefix(p);
+                        if (pad !== null) setInvoiceSeqPad(pad);
+                        if (next !== null && String(next).trim() !== "") setInvoiceSeqStart(String(next));
+                        else setInvoiceSeqStart("1");
+                      } catch {
+                        setInvoiceSeqStart("1");
+                      }
+                      setInvoiceSeqCount("3");
                       setShowInvoiceCreateModal(true);
                     }}
                     className="rounded-xl border border-amber-400/80 bg-amber-500 px-4 py-2 text-xs font-bold text-slate-900 shadow-sm shadow-amber-200/40 transition hover:bg-amber-400"
@@ -5360,6 +5396,129 @@ export default function DashboardPage() {
               {invoiceCreateError && (
                 <p className="mb-3 rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-800">{invoiceCreateError}</p>
               )}
+              <div className="mb-4 rounded-xl border border-amber-200/90 bg-gradient-to-br from-amber-50/90 to-stone-50/80 p-3 sm:p-4">
+                <p className="mb-2 text-xs font-bold text-amber-900">連號快速填寫</p>
+                <p className="mb-3 text-[11px] leading-relaxed text-stone-600">
+                  設定前綴與數字規則後，可一次加入多列或只填入「發票號碼仍空白」的列。設定會記在這台瀏覽器，下次開啟會帶入建議起號。
+                </p>
+                <div className="flex flex-wrap items-end gap-2 sm:gap-3">
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-semibold text-stone-500">前綴（可空）</label>
+                    <input
+                      type="text"
+                      value={invoiceSeqPrefix}
+                      onChange={(e) => setInvoiceSeqPrefix(e.target.value)}
+                      placeholder="如 AB"
+                      className="w-[6.5rem] rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-xs text-stone-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-semibold text-stone-500">起始數字</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={invoiceSeqStart}
+                      onChange={(e) => setInvoiceSeqStart(e.target.value)}
+                      className="w-24 rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-xs text-stone-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-semibold text-stone-500">筆數</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={200}
+                      value={invoiceSeqCount}
+                      onChange={(e) => setInvoiceSeqCount(e.target.value)}
+                      className="w-16 rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-xs text-stone-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-semibold text-stone-500">數字補零位數</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={32}
+                      placeholder="空＝不補"
+                      value={invoiceSeqPad}
+                      onChange={(e) => setInvoiceSeqPad(e.target.value)}
+                      className="w-20 rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-xs text-stone-900"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const padRaw = invoiceSeqPad.trim();
+                      const padDigits = padRaw === "" ? 0 : Math.min(32, Math.max(0, parseInt(padRaw, 10) || 0));
+                      const start = parseInt(String(invoiceSeqStart).trim(), 10);
+                      const count = Math.min(200, Math.max(1, parseInt(String(invoiceSeqCount).trim(), 10) || 1));
+                      if (!Number.isFinite(start) || start < 0) {
+                        setInvoiceCreateError("請填有效起始數字（≥0）");
+                        return;
+                      }
+                      const nums = buildSequentialInvoiceNumbers(invoiceSeqPrefix, start, count, padDigits);
+                      const newRows = nums.map((發票號碼) => ({ ...emptyInvoiceDraftRow(), 發票號碼 }));
+                      setInvoiceDraftRows((prev) => [...prev, ...newRows]);
+                      const nextStart = start + count;
+                      setInvoiceSeqStart(String(nextStart));
+                      setInvoiceCreateError(null);
+                      try {
+                        localStorage.setItem(LS_INVOICE_NEXT, String(nextStart));
+                        localStorage.setItem(LS_INVOICE_PREFIX, invoiceSeqPrefix);
+                        localStorage.setItem(LS_INVOICE_PAD, invoiceSeqPad);
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                    className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-bold text-slate-900 shadow-sm hover:bg-amber-400"
+                  >
+                    加入連號列
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const padRaw = invoiceSeqPad.trim();
+                      const padDigits = padRaw === "" ? 0 : Math.min(32, Math.max(0, parseInt(padRaw, 10) || 0));
+                      let n = parseInt(String(invoiceSeqStart).trim(), 10);
+                      if (!Number.isFinite(n) || n < 0) {
+                        setInvoiceCreateError("請填有效起始數字（≥0）");
+                        return;
+                      }
+                      const prefix = invoiceSeqPrefix.trim();
+                      let filled = 0;
+                      setInvoiceDraftRows((prev) => {
+                        const mapped = prev.map((row) => {
+                          if (String(row.發票號碼 ?? "").trim() !== "") return row;
+                          const numStr = padDigits > 0 ? String(n).padStart(padDigits, "0") : String(n);
+                          n += 1;
+                          filled += 1;
+                          return { ...row, 發票號碼: `${prefix}${numStr}` };
+                        });
+                        return mapped;
+                      });
+                      if (filled === 0) {
+                        setInvoiceCreateError("沒有「發票號碼為空白」的列可填入，請先新增空白列或使用上方加入連號列。");
+                        return;
+                      }
+                      setInvoiceSeqStart(String(n));
+                      setInvoiceCreateError(null);
+                      try {
+                        localStorage.setItem(LS_INVOICE_NEXT, String(n));
+                        localStorage.setItem(LS_INVOICE_PREFIX, invoiceSeqPrefix);
+                        localStorage.setItem(LS_INVOICE_PAD, invoiceSeqPad);
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                    className="rounded-lg border border-amber-600/40 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-50"
+                  >
+                    只填空白列
+                  </button>
+                </div>
+                <p className="mt-2 text-[10px] text-stone-500">
+                  例：前綴空白、起始 1、筆數 3、補零 8 → 00000001、00000002、00000003。例：前綴 SDH-、起始 100、不補零 → SDH-100、SDH-101…
+                </p>
+              </div>
               <div className="overflow-x-auto rounded-lg border border-stone-200/90">
                 <table className="min-w-[920px] w-full border-collapse text-xs">
                   <thead>
@@ -5457,6 +5616,13 @@ export default function DashboardPage() {
                       setInvoices((prev) => [...data.invoices!, ...prev]);
                     } else {
                       await refreshDashboardData(["invoices", "finance"]);
+                    }
+                    try {
+                      localStorage.setItem(LS_INVOICE_PREFIX, invoiceSeqPrefix);
+                      localStorage.setItem(LS_INVOICE_PAD, invoiceSeqPad);
+                      localStorage.setItem(LS_INVOICE_NEXT, invoiceSeqStart);
+                    } catch {
+                      /* ignore */
                     }
                     setShowInvoiceCreateModal(false);
                   } catch (err: unknown) {
