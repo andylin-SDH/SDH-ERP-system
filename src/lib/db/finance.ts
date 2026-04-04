@@ -7,23 +7,9 @@ import type { FinanceRow, InvoiceRow } from "@/modules/finance/types";
 import type { MasterRow } from "@/lib/db/master";
 import { getMasterList } from "@/lib/db/master";
 
-function parseAmount(value: string | null | undefined): number {
-  const n = Number(String(value ?? "").trim());
-  return Number.isFinite(n) ? n : 0;
-}
-
-function hasFinanceAmount(master: MasterRow): boolean {
-  return (
-    parseAmount(master.專案總金額未稅) !== 0 ||
-    parseAmount(master.專案營收) !== 0 ||
-    parseAmount(master.專案成本) !== 0 ||
-    parseAmount(master.KOL費用未稅) !== 0
-  );
-}
-
 export async function syncFinanceForProject(master: MasterRow): Promise<void> {
   const 專案ID = String(master.專案ID ?? "").trim();
-  if (!專案ID || !hasFinanceAmount(master)) return;
+  if (!專案ID) return;
 
   const supabase = getSupabase();
   const payload = {
@@ -87,7 +73,8 @@ export async function getInvoices(): Promise<InvoiceRow[]> {
     throw error;
   }
   return (data ?? []).map((r: Record<string, unknown>) => ({
-    專案ID: r.專案ID as string | undefined,
+    專案ID:
+      r.專案ID != null && String(r.專案ID).trim() !== "" ? String(r.專案ID) : undefined,
     發票號碼: r.發票號碼 as string | undefined,
     發票日期: r.發票日期 as string | undefined,
     發票金額未稅: r.發票金額未稅 as string | undefined,

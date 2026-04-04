@@ -5,8 +5,8 @@
 
 import { OVERVIEW_KPI_KEYS, OVERVIEW_KPI_LABELS } from "@/config/overview-kpi";
 
-/** 與 ① 可見區塊 相同的區塊 key 順序（① 介面不顯示 overview，仍保留於此供 ③／側欄） */
-export const SECTION_KEYS = ["overview", "master", "partners", "tasks", "payout", "finance", "invoices"] as const;
+/** 側欄／① 可見區塊順序（發票已併入財務分頁，不再獨立一區） */
+export const SECTION_KEYS = ["overview", "master", "partners", "tasks", "payout", "finance"] as const;
 
 /** ①「角色可見區塊」勾選用：不含總覽（總覽改由 ③ 依帳號設定子欄位／是否納入 tables） */
 export const ROLE_SECTION_KEYS_FOR_UI = SECTION_KEYS.filter((k) => k !== "overview");
@@ -18,7 +18,8 @@ export const TABLE_LABELS: Record<string, string> = {
   tasks: "任務",
   payout: "分潤表",
   finance: "財務",
-  invoices: "發票",
+  /** ③ 可見欄位用 key；側欄不單獨顯示 */
+  invoices: "發票清冊（欄位）",
   // 僅用於管理者 Dashboard 的設定分頁，不對應實際資料 Table
   visibility: "可見性與權限",
 };
@@ -106,7 +107,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "員工分潤狀態", label: "員工分潤狀態" },
   ],
   invoices: [
-    { key: "專案ID", label: "專案ID" },
+    { key: "專案ID", label: "專案ID（可空白）" },
     { key: "發票號碼", label: "發票號碼" },
     { key: "發票日期", label: "發票日期" },
     { key: "發票金額未稅", label: "發票金額未稅" },
@@ -120,5 +121,8 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
   ],
 };
 
-/** 與 ① 可見區塊 同步：用 SECTION_KEYS 作為 Table 列表（③ 可見欄位 與 ① 一致） */
-export const TABLE_KEYS = [...SECTION_KEYS];
+/**
+ * ③ 可見欄位細選用的 table key（含「發票」欄位組，語意上屬財務模組）
+ * ① 側欄僅使用 SECTION_KEYS，不含 invoices
+ */
+export const TABLE_KEYS = [...SECTION_KEYS, "invoices"] as const;

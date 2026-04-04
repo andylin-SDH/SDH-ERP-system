@@ -489,6 +489,8 @@ export default function DashboardPage() {
   const [payoutSearch, setPayoutSearch] = useState("");
   const [financeSearch, setFinanceSearch] = useState("");
   const [invoicesSearch, setInvoicesSearch] = useState("");
+  /** 財務分頁內：依專案列 vs 發票清冊（發票已併入財務） */
+  const [financeSubTab, setFinanceSubTab] = useState<"byProject" | "invoices">("byProject");
   /** 大資料量時分段渲染，降低首屏與互動卡頓 */
   const [masterRenderCount, setMasterRenderCount] = useState(RENDER_CHUNK_SIZE);
   const [partnersRenderCount, setPartnersRenderCount] = useState(RENDER_CHUNK_SIZE);
@@ -685,7 +687,9 @@ export default function DashboardPage() {
       /** ① 不再勾選總覽區塊，儲存時仍會帶入 overview；舊 DB 若無則補上 */
       if (!base.includes("overview")) base = ["overview", ...base];
     }
-    return base;
+    /** 舊設定「發票」獨立區塊 → 整併為「財務」 */
+    const merged = base.map((s) => (s === "invoices" ? "finance" : s));
+    return [...new Set(merged)];
   }, [me, myVisibility, systemConfig]);
 
   /** Dashboard 分頁列表：一般使用者只有資料區塊；董事長/管理者多一個「可見性與權限」設定分頁；若有自訂排序則優先使用 */
@@ -698,7 +702,8 @@ export default function DashboardPage() {
     const setBase = new Set(base);
     const ordered = tabOrder.filter((k) => setBase.has(k));
     const rest = base.filter((k) => !ordered.includes(k));
-    const merged = [...ordered, ...rest];
+    let merged = [...ordered, ...rest];
+    merged = merged.filter((k) => k !== "invoices");
     /** 總覽固定緊接在「可見性與權限」之後（管理者），或置於資料分頁最前，方便回到總覽 */
     if (merged.includes("overview")) {
       const without = merged.filter((k) => k !== "overview");
@@ -722,6 +727,7 @@ export default function DashboardPage() {
     setActiveSection((prev) => {
       // 管理者專屬的「可見性與權限」分頁不在 visibleSections 中，需額外允許
       if (canEditVisibility && prev === "visibility") return "visibility";
+      if (prev === "invoices") return "finance";
       return prev && visibleSections.includes(prev) ? prev : visibleSections[0] ?? (canEditVisibility ? "visibility" : null);
     });
   }, [me, visibleSections, canEditVisibility]);
@@ -1150,7 +1156,7 @@ export default function DashboardPage() {
   }, [activeSection, searchedTasks.length]);
 
   useEffect(() => {
-    if (activeSection !== "finance") return;
+    if (activeSection !== "finance" || financeSubTab !== "byProject") return;
     setFinanceRenderCount(RENDER_CHUNK_SIZE);
     if (searchedFinance.length <= RENDER_CHUNK_SIZE) return;
     let timer: number | undefined;
@@ -1163,10 +1169,10 @@ export default function DashboardPage() {
     };
     timer = window.setTimeout(tick, 0);
     return () => { if (timer) window.clearTimeout(timer); };
-  }, [activeSection, searchedFinance.length]);
+  }, [activeSection, financeSubTab, searchedFinance.length]);
 
   useEffect(() => {
-    if (activeSection !== "invoices") return;
+    if (activeSection !== "finance" || financeSubTab !== "invoices") return;
     setInvoicesRenderCount(RENDER_CHUNK_SIZE);
     if (searchedInvoices.length <= RENDER_CHUNK_SIZE) return;
     let timer: number | undefined;
@@ -1179,7 +1185,7 @@ export default function DashboardPage() {
     };
     timer = window.setTimeout(tick, 0);
     return () => { if (timer) window.clearTimeout(timer); };
-  }, [activeSection, searchedInvoices.length]);
+  }, [activeSection, financeSubTab, searchedInvoices.length]);
 
   useEffect(() => {
     // 切換選取專案時，重置編輯狀態並同步表單
@@ -1319,7 +1325,9 @@ export default function DashboardPage() {
         need.has("myVisibility") ? fetch("/api/user-visibility/me", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
         need.has("visibilityRules") ? fetch("/api/visibility-rules", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
         need.has("systemConfig") ? fetch("/api/system-config", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
-        need.has("invoices") ? fetch("/api/invoices", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
+        need.has("invoices") || need.has("finance")
+          ? fetch("/api/invoices", { cache: "no-store" }).then(safeResJson)
+          : Promise.resolve(null),
         need.has("finance") ? fetch("/api/finance", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
         need.has("payout") ? fetch("/api/payout", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
       ] as const;
@@ -1456,6 +1464,23 @@ export default function DashboardPage() {
       /* ignore */
     }
   }, [masterSubTab]);
+
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem("sdh-finance-subtab");
+      if (v === "invoices" || v === "byProject") setFinanceSubTab(v);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("sdh-finance-subtab", financeSubTab);
+    } catch {
+      /* ignore */
+    }
+  }, [financeSubTab]);
 
   /** system_config 首次載入後還原大總表子分頁（僅一次） */
   const masterSubTabRestored = useRef(false);
@@ -5114,114 +5139,146 @@ export default function DashboardPage() {
         </section>
         )}
 
-        {/* 財務（DB：財務） */}
+        {/* 財務：依專案 + 發票清冊（發票 DB 可無專案ID） */}
         {activeSection === "finance" && (
         <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-xl font-bold tracking-tight text-stone-900">財務</h2>
-            <input
-              type="text"
-              value={financeSearch}
-              onChange={(e) => setFinanceSearch(e.target.value)}
-              placeholder="搜尋專案ID、利潤、狀態…"
-              className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
-            />
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-xl font-bold tracking-tight text-stone-900">財務</h2>
+              <p className="mt-1 text-xs text-stone-500">依專案對應大總表財務列；發票清冊為全部開立憑證（可不綁專案）。</p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-stone-200 bg-amber-50/90 p-1">
+              <button
+                type="button"
+                onClick={() => setFinanceSubTab("byProject")}
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  financeSubTab === "byProject" ? "bg-amber-500 text-slate-900 shadow shadow-amber-200/40" : "text-stone-500 hover:text-stone-900"
+                }`}
+              >
+                依專案
+              </button>
+              <button
+                type="button"
+                onClick={() => setFinanceSubTab("invoices")}
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  financeSubTab === "invoices" ? "bg-amber-500 text-slate-900 shadow shadow-amber-200/40" : "text-stone-500 hover:text-stone-900"
+                }`}
+              >
+                發票清冊
+              </button>
+            </div>
           </div>
-          <div className="overflow-x-auto rounded-xl border border-stone-200/90">
-            {finance.length === 0 ? (
-              <p className="px-4 py-8 text-center text-stone-500">尚無財務資料</p>
-            ) : (
-              <table className="min-w-full divide-y divide-stone-200">
-                <thead className="bg-stone-100">
-                  <tr>
-                    {financeVisibleCols.map((k) => (
-                      <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600"}>
-                        {tableColumnLabels.finance?.[k] ?? k}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-200 bg-amber-50/40">
-                  {searchedFinance.length === 0 ? (
-                    <tr>
-                      <td colSpan={financeVisibleCols.length || 9} className="px-4 py-8 text-center text-base font-medium text-stone-500">
-                        沒有符合搜尋結果
-                      </td>
-                    </tr>
-                  ) : (
-                    visibleFinanceRows.map((row, i) => (
-                      <tr key={i} className="hover:bg-amber-50/80">
-                        {financeVisibleCols.map((k) => {
-                          const v = (row as unknown as Record<string, unknown>)[k];
-                          return <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm text-stone-600">{String(v ?? "—")}</td>;
-                        })}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            )}
-          </div>
-          {searchedFinance.length > visibleFinanceRows.length && (
-            <p className="mt-2 text-right text-xs text-stone-500">載入中 {visibleFinanceRows.length} / {searchedFinance.length}</p>
-          )}
-        </section>
-        )}
 
-        {/* 發票（DB：發票） */}
-        {activeSection === "invoices" && (
-        <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-xl font-bold tracking-tight text-stone-900">發票</h2>
-            <input
-              type="text"
-              value={invoicesSearch}
-              onChange={(e) => setInvoicesSearch(e.target.value)}
-              placeholder="搜尋專案ID、發票號碼、廠商…"
-              className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
-            />
-          </div>
-          <div className="overflow-x-auto rounded-xl border border-stone-200/90">
-            {invoices.length === 0 ? (
-              <p className="px-4 py-8 text-center text-stone-500">尚無發票資料</p>
-            ) : (
-              <table className="min-w-full divide-y divide-stone-200">
-                <thead className="bg-stone-100">
-                  <tr>
-                    {invoicesVisibleCols.map((k) => (
-                      <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600"}>
-                        {tableColumnLabels.invoices?.[k] ?? k}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-200 bg-amber-50/40">
-                  {searchedInvoices.length === 0 ? (
-                    <tr>
-                      <td colSpan={invoicesVisibleCols.length || 10} className="px-4 py-8 text-center text-base font-medium text-stone-500">
-                        沒有符合搜尋結果
-                      </td>
-                    </tr>
-                  ) : (
-                    visibleInvoicesRows.map((inv, i) => (
-                      <tr key={i} className="hover:bg-amber-50/80">
-                        {invoicesVisibleCols.map((k) => {
-                          const v = (inv as unknown as Record<string, unknown>)[k];
-                          return (
-                            <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm ${k === "專案ID" ? "font-medium text-stone-900" : "text-stone-600"}`}>
-                              {String(v ?? "—")}
-                            </td>
-                          );
-                        })}
+          {financeSubTab === "byProject" && (
+            <>
+              <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
+                <input
+                  type="text"
+                  value={financeSearch}
+                  onChange={(e) => setFinanceSearch(e.target.value)}
+                  placeholder="搜尋專案ID、利潤、狀態…"
+                  className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
+                />
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-stone-200/90">
+                {finance.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-stone-500">尚無財務資料（專案建立後會自動對應一列）</p>
+                ) : (
+                  <table className="min-w-full divide-y divide-stone-200">
+                    <thead className="bg-stone-100">
+                      <tr>
+                        {financeVisibleCols.map((k) => (
+                          <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600"}>
+                            {tableColumnLabels.finance?.[k] ?? k}
+                          </th>
+                        ))}
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            )}
-          </div>
-          {searchedInvoices.length > visibleInvoicesRows.length && (
-            <p className="mt-2 text-right text-xs text-stone-500">載入中 {visibleInvoicesRows.length} / {searchedInvoices.length}</p>
+                    </thead>
+                    <tbody className="divide-y divide-stone-200 bg-amber-50/40">
+                      {searchedFinance.length === 0 ? (
+                        <tr>
+                          <td colSpan={financeVisibleCols.length || 9} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                            沒有符合搜尋結果
+                          </td>
+                        </tr>
+                      ) : (
+                        visibleFinanceRows.map((row, i) => (
+                          <tr key={i} className="hover:bg-amber-50/80">
+                            {financeVisibleCols.map((k) => {
+                              const v = (row as unknown as Record<string, unknown>)[k];
+                              return <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm text-stone-600">{String(v ?? "—")}</td>;
+                            })}
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+              {searchedFinance.length > visibleFinanceRows.length && (
+                <p className="mt-2 text-right text-xs text-stone-500">載入中 {visibleFinanceRows.length} / {searchedFinance.length}</p>
+              )}
+            </>
+          )}
+
+          {financeSubTab === "invoices" && (
+            <>
+              <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
+                <input
+                  type="text"
+                  value={invoicesSearch}
+                  onChange={(e) => setInvoicesSearch(e.target.value)}
+                  placeholder="搜尋專案ID、發票號碼…"
+                  className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
+                />
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-stone-200/90">
+                {invoices.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-stone-500">尚無發票資料</p>
+                ) : (
+                  <table className="min-w-full divide-y divide-stone-200">
+                    <thead className="bg-stone-100">
+                      <tr>
+                        {invoicesVisibleCols.map((k) => (
+                          <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600"}>
+                            {tableColumnLabels.invoices?.[k] ?? k}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-200 bg-amber-50/40">
+                      {searchedInvoices.length === 0 ? (
+                        <tr>
+                          <td colSpan={invoicesVisibleCols.length || 10} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                            沒有符合搜尋結果
+                          </td>
+                        </tr>
+                      ) : (
+                        visibleInvoicesRows.map((inv, i) => (
+                          <tr key={i} className="hover:bg-amber-50/80">
+                            {invoicesVisibleCols.map((k) => {
+                              const v = (inv as unknown as Record<string, unknown>)[k];
+                              const str =
+                                k === "專案ID" && (v == null || String(v).trim() === "")
+                                  ? "—"
+                                  : String(v ?? "—");
+                              return (
+                                <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm ${k === "專案ID" ? "font-medium text-stone-900" : "text-stone-600"}`}>
+                                  {str}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+              {searchedInvoices.length > visibleInvoicesRows.length && (
+                <p className="mt-2 text-right text-xs text-stone-500">載入中 {visibleInvoicesRows.length} / {searchedInvoices.length}</p>
+              )}
+            </>
           )}
         </section>
         )}

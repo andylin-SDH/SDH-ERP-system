@@ -25,12 +25,12 @@ export interface RoleVisibilityConfig {
 export const ROLE_VISIBILITY: Record<string, RoleVisibilityConfig> = {
   董事長: {
     fullAccess: true,
-    sections: ["overview", "master", "partners", "tasks", "payout", "finance", "invoices"],
+    sections: ["overview", "master", "partners", "tasks", "payout", "finance"],
     filterNote: "全公司，不過濾",
   },
   管理者: {
     fullAccess: true,
-    sections: ["overview", "master", "partners", "tasks", "payout", "finance", "invoices"],
+    sections: ["overview", "master", "partners", "tasks", "payout", "finance"],
     filterNote: "全公司，不過濾",
   },
   經紀人: {
@@ -45,7 +45,7 @@ export const ROLE_VISIBILITY: Record<string, RoleVisibilityConfig> = {
   },
   會計: {
     fullAccess: true,
-    sections: ["overview", "payout", "finance", "invoices"],
+    sections: ["overview", "payout", "finance"],
     filterNote: "財務相關表，目前全開",
   },
   行政: {
