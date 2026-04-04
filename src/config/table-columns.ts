@@ -76,6 +76,8 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "任務", label: "任務" },
     { key: "任務類型", label: "任務類型" },
     { key: "任務負責人", label: "任務負責人" },
+    { key: "開始時間", label: "開始時間" },
+    { key: "完成時間", label: "完成時間" },
     { key: "任務完成", label: "任務完成" },
   ],
   payout: [

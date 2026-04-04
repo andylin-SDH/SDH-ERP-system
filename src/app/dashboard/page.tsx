@@ -79,6 +79,23 @@ function formatAmount(v: string | null | undefined): string {
   return n.toLocaleString("zh-TW");
 }
 
+/** 任務時間戳顯示（Asia/Taipei，後端存 ISO） */
+function formatTaskDisplayTime(iso: string | null | undefined): string {
+  if (iso == null || String(iso).trim() === "") return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString("zh-TW", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
 function parseNumericField(v: string | null | undefined): number {
   if (v == null || String(v).trim() === "") return 0;
   const n = Number(String(v).replace(/,/g, "").trim());
@@ -743,7 +760,16 @@ export default function DashboardPage() {
         tableKey === "tasks" && cols && !cols.includes("*")
           ? cols.map((c) => (c === "狀態" ? "任務類型" : c))
           : cols;
-      if (!normalized || normalized.includes("*")) return (TABLE_COLUMNS[tableKey] ?? []).map((c) => c.key);
+      const allKeys = (TABLE_COLUMNS[tableKey] ?? []).map((c) => c.key);
+      if (!normalized || normalized.includes("*")) return allKeys;
+      /** 任務表：系統時間欄位併入可見清單（舊 ③ 設定未勾選時仍顯示） */
+      if (tableKey === "tasks") {
+        const merged = [...normalized];
+        for (const sys of ["開始時間", "完成時間"] as const) {
+          if (allKeys.includes(sys) && !merged.includes(sys)) merged.push(sys);
+        }
+        return merged.filter((k) => allKeys.includes(k));
+      }
       return normalized;
     },
     [myVisibility]
@@ -1346,6 +1372,38 @@ export default function DashboardPage() {
     },
     []
   );
+
+  const refetchTasksOnly = useCallback(async () => {
+    try {
+      const res = await fetch("/api/tasks", { cache: "no-store" });
+      const data = (await safeResJson(res)) as { ok?: boolean; tasks?: TaskRow[] };
+      if (res.ok && data.ok && Array.isArray(data.tasks)) setTasks(data.tasks);
+    } catch {
+      /* 忽略 */
+    }
+  }, []);
+
+  /** 任務分頁／大總表：背景同步他人更新（避免僅能靠整頁重新整理） */
+  useEffect(() => {
+    if (!me) return;
+    if (activeSection !== "tasks" && activeSection !== "master") return;
+    void refetchTasksOnly();
+    const id = window.setInterval(() => {
+      void refetchTasksOnly();
+    }, 8000);
+    return () => window.clearInterval(id);
+  }, [me, activeSection, refetchTasksOnly]);
+
+  useEffect(() => {
+    if (!me) return;
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      if (activeSection !== "tasks" && activeSection !== "master") return;
+      void refetchTasksOnly();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [me, activeSection, refetchTasksOnly]);
 
   /** 新增／編輯合作夥伴 Modal 開啟時：自 DB 重新載入 Users 與表單選項（人員增刪後清單即更新） */
   useEffect(() => {
@@ -2265,13 +2323,15 @@ export default function DashboardPage() {
                                           <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">任務</th>
                                           <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">任務類型</th>
                                           <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">任務負責人</th>
+                                          <th className="px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">開始時間</th>
+                                          <th className="px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">完成時間</th>
                                           <th className="px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">完成</th>
                                         </tr>
                                       </thead>
                                       <tbody className="divide-y divide-stone-200 bg-white/90">
                                         {projectTasks.length === 0 ? (
                                           <tr>
-                                            <td colSpan={4} className="px-3 py-4 text-center text-sm text-stone-500">
+                                            <td colSpan={6} className="px-3 py-4 text-center text-sm text-stone-500">
                                               尚無任務，請點「新增任務」新增
                                             </td>
                                           </tr>
@@ -2318,6 +2378,12 @@ export default function DashboardPage() {
                                                     </button>
                                                   )}
                                                 </span>
+                                              </td>
+                                              <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs tabular-nums text-stone-600">
+                                                {formatTaskDisplayTime(t.開始時間)}
+                                              </td>
+                                              <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs tabular-nums text-stone-600">
+                                                {formatTaskDisplayTime(t.完成時間)}
                                               </td>
                                               <td className="px-3 py-2.5 text-center">
                                                 <button
@@ -4607,41 +4673,46 @@ export default function DashboardPage() {
                   onClick={() => setSelectedTask(t)}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex min-w-0 flex-1 items-start gap-2">
-                      <button
-                        type="button"
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          if (!t.任務ID) return;
-                          const next = !t.任務完成;
-                          try {
-                            const res = await fetch("/api/tasks", {
-                              method: "PATCH",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ 任務ID: t.任務ID, 任務完成: next }),
-                            });
-                            const data = (await safeResJson(res)) as { ok?: boolean; task?: TaskRow };
-                            if (res.ok && data.ok) setTasks((prev) => prev.map((x) => (x.任務ID === t.任務ID ? data.task! : x)));
-                          } catch {
-                            /* 忽略 */
-                          }
-                        }}
-                        disabled={!t.任務ID}
-                        className="mt-0.5 inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border-2 transition hover:border-amber-400/70 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
-                        style={{
-                          backgroundColor: t.任務完成 ? "rgba(245,158,11,0.25)" : "transparent",
-                          borderColor: t.任務完成 ? "rgba(245,158,11,0.5)" : "rgb(214 211 209)",
-                        }}
-                        title={t.任務完成 ? "點擊取消完成" : "點擊標記完成"}
-                      >
-                        {t.任務完成 ? <span className="text-sm text-amber-800">✓</span> : null}
-                      </button>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-stone-900">{t.任務 ?? "—"}</p>
-                        <p className="mt-0.5 text-xs text-stone-500">{t.專案名稱 ?? "—"}</p>
-                      </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-stone-900">{t.任務 ?? "—"}</p>
+                      <p className="mt-0.5 text-xs text-stone-500">{t.專案名稱 ?? "—"}</p>
                     </div>
                     <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${t.任務完成 ? "bg-amber-100 text-amber-800" : "bg-stone-200 text-stone-500"}`}>{t.任務完成 ? "已完成" : "進行中"}</span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-stone-500" onClick={(e) => e.stopPropagation()}>
+                    <span>開始：{formatTaskDisplayTime(t.開始時間)}</span>
+                    <span>完成：{formatTaskDisplayTime(t.完成時間)}</span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
+                    <span className="text-xs font-medium text-stone-600">任務完成</span>
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (!t.任務ID) return;
+                        const next = !t.任務完成;
+                        try {
+                          const res = await fetch("/api/tasks", {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ 任務ID: t.任務ID, 任務完成: next }),
+                          });
+                          const data = (await safeResJson(res)) as { ok?: boolean; task?: TaskRow };
+                          if (res.ok && data.ok) setTasks((prev) => prev.map((x) => (x.任務ID === t.任務ID ? data.task! : x)));
+                        } catch {
+                          /* 忽略 */
+                        }
+                      }}
+                      disabled={!t.任務ID}
+                      className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border-2 transition hover:border-amber-400/70 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      style={{
+                        backgroundColor: t.任務完成 ? "rgba(245,158,11,0.25)" : "transparent",
+                        borderColor: t.任務完成 ? "rgba(245,158,11,0.5)" : "rgb(214 211 209)",
+                      }}
+                      title={t.任務完成 ? "點擊取消完成" : "點擊標記完成"}
+                    >
+                      {t.任務完成 ? <span className="text-sm text-amber-800">✓</span> : null}
+                    </button>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
                     <span className="text-xs text-stone-500">任務類型</span>
@@ -4687,7 +4758,16 @@ export default function DashboardPage() {
               <thead className="bg-stone-100">
                 <tr>
                   {tasksVisibleCols.map((k) => (
-                    <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800" : k === "任務完成" ? "px-4 py-3.5 text-center text-xs font-bold uppercase tracking-wider text-stone-600" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600"}>
+                    <th
+                      key={k}
+                      className={
+                        k === "專案ID"
+                          ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800"
+                          : k === "任務完成" || k === "開始時間" || k === "完成時間"
+                            ? "px-4 py-3.5 text-center text-xs font-bold uppercase tracking-wider text-stone-600"
+                            : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600"
+                      }
+                    >
                       {tableColumnLabels.tasks?.[k] ?? k}
                     </th>
                   ))}
@@ -4723,39 +4803,17 @@ export default function DashboardPage() {
                           const taskTitle = t.任務 ?? "—";
                           return (
                             <td key={k} className="max-w-[280px] px-4 py-3.5">
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    if (!t.任務ID) return;
-                                    const next = !t.任務完成;
-                                    try {
-                                      const res = await fetch("/api/tasks", {
-                                        method: "PATCH",
-                                        headers: { "Content-Type": "application/json" },
-                                        body: JSON.stringify({ 任務ID: t.任務ID, 任務完成: next }),
-                                      });
-                                      const data = (await safeResJson(res)) as { ok?: boolean; task?: TaskRow };
-                                      if (res.ok && data.ok) setTasks((prev) => prev.map((x) => (x.任務ID === t.任務ID ? data.task! : x)));
-                                    } catch {
-                                      /* 忽略 */
-                                    }
-                                  }}
-                                  disabled={!t.任務ID}
-                                  className="inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md border-2 transition hover:border-amber-400/70 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
-                                  style={{
-                                    backgroundColor: t.任務完成 ? "rgba(245,158,11,0.25)" : "transparent",
-                                    borderColor: t.任務完成 ? "rgba(245,158,11,0.5)" : "rgb(214 211 209)",
-                                  }}
-                                  title={t.任務完成 ? "點擊取消完成" : "點擊標記完成"}
-                                >
-                                  {t.任務完成 ? <span className="text-amber-800">✓</span> : null}
-                                </button>
-                                <span className="min-w-0 flex-1 truncate text-sm font-medium text-stone-900" title={taskTitle !== "—" ? taskTitle : undefined}>
-                                  {taskTitle}
-                                </span>
-                              </div>
+                              <span className="block min-w-0 truncate text-sm font-medium text-stone-900" title={taskTitle !== "—" ? taskTitle : undefined}>
+                                {taskTitle}
+                              </span>
+                            </td>
+                          );
+                        }
+                        if (k === "開始時間" || k === "完成時間") {
+                          const raw = k === "開始時間" ? t.開始時間 : t.完成時間;
+                          return (
+                            <td key={k} className="whitespace-nowrap px-4 py-3.5 text-center text-xs tabular-nums text-stone-600">
+                              {formatTaskDisplayTime(raw)}
                             </td>
                           );
                         }
@@ -6101,6 +6159,12 @@ export default function DashboardPage() {
               <div className="mb-4 space-y-1">
                 <p className="text-xs font-medium text-stone-500">專案ID：{selectedTask.專案ID ?? "—"}</p>
                 <p className="text-sm font-semibold text-amber-800">{selectedTask.專案名稱 ?? "—"}</p>
+                <p className="text-xs text-stone-500">
+                  開始時間（系統）：<span className="font-medium text-stone-700">{formatTaskDisplayTime(selectedTask.開始時間)}</span>
+                </p>
+                <p className="text-xs text-stone-500">
+                  完成時間（系統）：<span className="font-medium text-stone-700">{formatTaskDisplayTime(selectedTask.完成時間)}</span>
+                </p>
               </div>
               <div className="space-y-4">
                 <div>
