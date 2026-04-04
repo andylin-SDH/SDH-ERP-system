@@ -4,6 +4,39 @@
 
 import { getSupabase } from "@/lib/supabase/server";
 import type { FinanceRow, InvoiceRow } from "@/modules/finance/types";
+
+/** 新增發票（單筆／批次共用欄位） */
+export type InvoiceInsertInput = {
+  專案ID?: string | null;
+  發票號碼?: string | null;
+  發票日期?: string | null;
+  發票金額未稅?: string | null;
+  發票金額含稅?: string | null;
+  發票稅金?: string | null;
+  廠商預計付款日?: string | null;
+  廠商實付金額?: string | null;
+  廠商付款狀態?: string | null;
+  廠商付款日期?: string | null;
+  備註?: string | null;
+};
+
+function mapInvoiceRecord(r: Record<string, unknown>): InvoiceRow {
+  return {
+    id: r.id != null ? String(r.id) : undefined,
+    專案ID:
+      r.專案ID != null && String(r.專案ID).trim() !== "" ? String(r.專案ID) : undefined,
+    發票號碼: r.發票號碼 != null ? String(r.發票號碼) : undefined,
+    發票日期: r.發票日期 != null ? String(r.發票日期) : undefined,
+    發票金額未稅: r.發票金額未稅 != null ? String(r.發票金額未稅) : undefined,
+    發票金額含稅: r.發票金額含稅 != null ? String(r.發票金額含稅) : undefined,
+    發票稅金: r.發票稅金 != null ? String(r.發票稅金) : undefined,
+    廠商預計付款日: r.廠商預計付款日 != null ? String(r.廠商預計付款日) : undefined,
+    廠商實付金額: r.廠商實付金額 != null ? String(r.廠商實付金額) : undefined,
+    廠商付款狀態: r.廠商付款狀態 != null ? String(r.廠商付款狀態) : undefined,
+    廠商付款日期: r.廠商付款日期 != null ? String(r.廠商付款日期) : undefined,
+    備註: r.備註 != null ? String(r.備註) : undefined,
+  };
+}
 import type { MasterRow } from "@/lib/db/master";
 import { getMasterList } from "@/lib/db/master";
 
@@ -72,20 +105,42 @@ export async function getInvoices(): Promise<InvoiceRow[]> {
     if (error.code === "42P01") return []; // 表不存在時回傳空陣列，避免 500
     throw error;
   }
-  return (data ?? []).map((r: Record<string, unknown>) => ({
-    專案ID:
-      r.專案ID != null && String(r.專案ID).trim() !== "" ? String(r.專案ID) : undefined,
-    發票號碼: r.發票號碼 as string | undefined,
-    發票日期: r.發票日期 as string | undefined,
-    發票金額未稅: r.發票金額未稅 as string | undefined,
-    發票金額含稅: r.發票金額含稅 as string | undefined,
-    發票稅金: r.發票稅金 as string | undefined,
-    廠商預計付款日: r.廠商預計付款日 as string | undefined,
-    廠商實付金額: r.廠商實付金額 as string | undefined,
-    廠商付款狀態: r.廠商付款狀態 as string | undefined,
-    廠商付款日期: r.廠商付款日期 as string | undefined,
-    備註: r.備註 as string | undefined,
-  }));
+  return (data ?? []).map((r: Record<string, unknown>) => mapInvoiceRecord(r));
+}
+
+function trimOrNull(v: string | null | undefined): string | null {
+  if (v == null) return null;
+  const t = String(v).trim();
+  return t === "" ? null : t;
+}
+
+/**
+ * 批次新增發票（至少一筆須填發票號碼；專案ID 可空）
+ */
+export async function createInvoicesBatch(rows: InvoiceInsertInput[]): Promise<InvoiceRow[]> {
+  const payload = rows
+    .map((row) => ({
+      專案ID: trimOrNull(row.專案ID ?? undefined),
+      發票號碼: trimOrNull(row.發票號碼 ?? undefined),
+      發票日期: trimOrNull(row.發票日期 ?? undefined),
+      發票金額未稅: trimOrNull(row.發票金額未稅 ?? undefined),
+      發票金額含稅: trimOrNull(row.發票金額含稅 ?? undefined),
+      發票稅金: trimOrNull(row.發票稅金 ?? undefined),
+      廠商預計付款日: trimOrNull(row.廠商預計付款日 ?? undefined),
+      廠商實付金額: trimOrNull(row.廠商實付金額 ?? undefined),
+      廠商付款狀態: trimOrNull(row.廠商付款狀態 ?? undefined),
+      廠商付款日期: trimOrNull(row.廠商付款日期 ?? undefined),
+      備註: trimOrNull(row.備註 ?? undefined),
+    }))
+    .filter((r) => r.發票號碼 != null);
+
+  if (payload.length === 0) {
+    throw new Error("請至少填寫一筆發票號碼");
+  }
+
+  const { data, error } = await getSupabase().from("發票").insert(payload).select("*");
+  if (error) throw error;
+  return (data ?? []).map((r: Record<string, unknown>) => mapInvoiceRecord(r));
 }
 
 export async function getFinance(): Promise<FinanceRow[]> {

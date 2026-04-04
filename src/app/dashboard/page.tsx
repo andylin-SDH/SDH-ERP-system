@@ -96,6 +96,25 @@ function formatTaskDisplayTime(iso: string | null | undefined): string {
   });
 }
 
+/** 新增／批次發票表單欄位順序（與 TABLE_COLUMNS.invoices 一致） */
+const INVOICE_DRAFT_KEYS = [
+  "專案ID",
+  "發票號碼",
+  "發票日期",
+  "發票金額未稅",
+  "發票金額含稅",
+  "發票稅金",
+  "廠商預計付款日",
+  "廠商實付金額",
+  "廠商付款狀態",
+  "廠商付款日期",
+  "備註",
+] as const;
+
+function emptyInvoiceDraftRow(): Record<string, string> {
+  return Object.fromEntries(INVOICE_DRAFT_KEYS.map((k) => [k, ""])) as Record<string, string>;
+}
+
 function parseNumericField(v: string | null | undefined): number {
   if (v == null || String(v).trim() === "") return 0;
   const n = Number(String(v).replace(/,/g, "").trim());
@@ -491,6 +510,10 @@ export default function DashboardPage() {
   const [invoicesSearch, setInvoicesSearch] = useState("");
   /** 財務分頁內：依專案列 vs 發票清冊（發票已併入財務） */
   const [financeSubTab, setFinanceSubTab] = useState<"byProject" | "invoices">("byProject");
+  const [showInvoiceCreateModal, setShowInvoiceCreateModal] = useState(false);
+  const [invoiceDraftRows, setInvoiceDraftRows] = useState<Array<Record<string, string>>>([]);
+  const [savingInvoices, setSavingInvoices] = useState(false);
+  const [invoiceCreateError, setInvoiceCreateError] = useState<string | null>(null);
   /** 大資料量時分段渲染，降低首屏與互動卡頓 */
   const [masterRenderCount, setMasterRenderCount] = useState(RENDER_CHUNK_SIZE);
   const [partnersRenderCount, setPartnersRenderCount] = useState(RENDER_CHUNK_SIZE);
@@ -533,6 +556,14 @@ export default function DashboardPage() {
     const names = partners.map((p) => String(p.合作夥伴名稱 ?? "").trim()).filter(Boolean);
     return [...new Set(names)].sort((a, b) => a.localeCompare(b, "zh-Hant"));
   }, [partners]);
+  /** 發票新增：專案ID 下拉／datalist 選項 */
+  const invoiceProjectIdOptions = useMemo(
+    () =>
+      [...new Set(masterList.map((m) => String(m.專案ID ?? "").trim()).filter(Boolean))].sort((a, b) =>
+        a.localeCompare(b, "zh-TW")
+      ),
+    [masterList]
+  );
   /** 刪除專案確認視窗：連動筆數（任務、分潤列） */
   const masterDeleteRelatedCounts = useMemo(() => {
     if (!selectedMaster) return { tasks: 0, payouts: 0 };
@@ -5223,7 +5254,20 @@ export default function DashboardPage() {
 
           {financeSubTab === "invoices" && (
             <>
-              <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInvoiceCreateError(null);
+                      setInvoiceDraftRows([emptyInvoiceDraftRow(), emptyInvoiceDraftRow(), emptyInvoiceDraftRow()]);
+                      setShowInvoiceCreateModal(true);
+                    }}
+                    className="rounded-xl border border-amber-400/80 bg-amber-500 px-4 py-2 text-xs font-bold text-slate-900 shadow-sm shadow-amber-200/40 transition hover:bg-amber-400"
+                  >
+                    新增發票（批次）
+                  </button>
+                </div>
                 <input
                   type="text"
                   value={invoicesSearch}
@@ -5255,7 +5299,10 @@ export default function DashboardPage() {
                         </tr>
                       ) : (
                         visibleInvoicesRows.map((inv, i) => (
-                          <tr key={i} className="hover:bg-amber-50/80">
+                          <tr
+                            key={typeof inv.id === "string" && inv.id ? inv.id : `inv-row-${i}`}
+                            className="hover:bg-amber-50/80"
+                          >
                             {invoicesVisibleCols.map((k) => {
                               const v = (inv as unknown as Record<string, unknown>)[k];
                               const str =
@@ -5286,6 +5333,145 @@ export default function DashboardPage() {
         )}
       </div>
       </div>
+
+      {/* 新增發票（可批次多列） */}
+      {showInvoiceCreateModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/30 p-4 backdrop-blur-sm">
+          <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
+            <header className="flex shrink-0 flex-wrap items-start justify-between gap-2 border-b border-stone-200/90 bg-stone-100/90 px-4 py-3 sm:px-6">
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold tracking-tight text-stone-900 sm:text-xl">新增發票</h2>
+                <p className="mt-0.5 text-xs text-stone-500">
+                  可一次建立多筆；每列須填發票號碼，空白列會自動略過。專案ID 可留空。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInvoiceCreateModal(false);
+                  setInvoiceCreateError(null);
+                }}
+                className="shrink-0 rounded-xl border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm font-semibold text-stone-600 hover:bg-stone-100"
+              >
+                關閉
+              </button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-auto px-3 py-3 sm:px-6">
+              {invoiceCreateError && (
+                <p className="mb-3 rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-800">{invoiceCreateError}</p>
+              )}
+              <div className="overflow-x-auto rounded-lg border border-stone-200/90">
+                <table className="min-w-[920px] w-full border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-stone-100 text-left">
+                      {INVOICE_DRAFT_KEYS.map((k) => (
+                        <th
+                          key={k}
+                          className="whitespace-nowrap border-b border-stone-200 px-2 py-2 font-semibold text-stone-600"
+                        >
+                          {tableColumnLabels.invoices?.[k] ?? k}
+                        </th>
+                      ))}
+                      <th className="w-14 border-b border-stone-200 px-1 py-2 text-center font-semibold text-stone-500">　</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoiceDraftRows.map((row, rowIdx) => (
+                      <tr key={rowIdx} className="bg-white">
+                        {INVOICE_DRAFT_KEYS.map((k) => (
+                          <td key={k} className="border-b border-stone-100 p-1 align-top">
+                            <input
+                              type="text"
+                              value={row[k] ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setInvoiceDraftRows((prev) => {
+                                  const next = [...prev];
+                                  next[rowIdx] = { ...next[rowIdx], [k]: v };
+                                  return next;
+                                });
+                              }}
+                              list={k === "專案ID" ? "invoice-draft-project-ids" : undefined}
+                              className="w-full min-w-[5rem] rounded border border-stone-200 bg-stone-50 px-1.5 py-1.5 text-stone-900 focus:border-amber-400/70 focus:outline-none"
+                            />
+                          </td>
+                        ))}
+                        <td className="border-b border-stone-100 p-1 text-center align-top">
+                          <button
+                            type="button"
+                            disabled={invoiceDraftRows.length <= 1}
+                            onClick={() => setInvoiceDraftRows((prev) => prev.filter((_, j) => j !== rowIdx))}
+                            className="text-[11px] font-medium text-stone-400 hover:text-red-600 disabled:opacity-30"
+                          >
+                            刪列
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <datalist id="invoice-draft-project-ids">
+                {invoiceProjectIdOptions.map((id) => (
+                  <option key={id} value={id} />
+                ))}
+              </datalist>
+              <button
+                type="button"
+                onClick={() => setInvoiceDraftRows((prev) => [...prev, emptyInvoiceDraftRow()])}
+                className="mt-3 rounded-lg border border-dashed border-stone-300 bg-stone-50/80 px-3 py-2 text-xs font-semibold text-stone-600 transition hover:border-amber-400 hover:bg-amber-50 hover:text-amber-900"
+              >
+                + 新增一列
+              </button>
+            </div>
+            <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-stone-200/90 bg-stone-50/90 px-4 py-3 sm:px-6">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInvoiceCreateModal(false);
+                  setInvoiceCreateError(null);
+                }}
+                className="rounded-xl border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-600 hover:bg-stone-100"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={savingInvoices}
+                onClick={async () => {
+                  setInvoiceCreateError(null);
+                  setSavingInvoices(true);
+                  try {
+                    const res = await fetch("/api/invoices", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ invoices: invoiceDraftRows }),
+                    });
+                    const data = (await safeResJson(res)) as { ok?: boolean; error?: string; invoices?: InvoiceRow[] };
+                    if (!res.ok || !data.ok) {
+                      setInvoiceCreateError(data.error ?? "新增失敗");
+                      setSavingInvoices(false);
+                      return;
+                    }
+                    if (data.invoices?.length) {
+                      setInvoices((prev) => [...data.invoices!, ...prev]);
+                    } else {
+                      await refreshDashboardData(["invoices", "finance"]);
+                    }
+                    setShowInvoiceCreateModal(false);
+                  } catch (err: unknown) {
+                    setInvoiceCreateError(err instanceof Error ? err.message : "新增失敗");
+                  }
+                  setSavingInvoices(false);
+                }}
+                className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 shadow shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-50"
+              >
+                {savingInvoices ? "儲存中…" : "儲存"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
 
       {/* 大總表 新增專案 Modal */}
       {showCreateMaster && (

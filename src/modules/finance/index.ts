@@ -3,4 +3,5 @@
  * 負責：Invoices、Finance
  */
 export type { InvoiceRow, FinanceRow } from "./types";
-export { getInvoices, getFinance } from "./api";
+export type { InvoiceInsertInput } from "./api";
+export { getInvoices, getFinance, createInvoicesBatch } from "./api";

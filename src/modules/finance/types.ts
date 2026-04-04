@@ -4,6 +4,8 @@
  */
 
 export interface InvoiceRow {
+  /** DB uuid，列表 key 用 */
+  id?: string;
   專案ID?: string;
   發票號碼?: string;
   發票日期?: string;
