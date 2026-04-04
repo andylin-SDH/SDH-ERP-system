@@ -2316,16 +2316,31 @@ export default function DashboardPage() {
                               <td colSpan={masterColsForDisplay.length || 15} className="border-t-0 bg-stone-50 px-4 py-4">
                                 <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
                                   <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-amber-800">此專案任務</h3>
-                                  <div className="mb-4 overflow-hidden rounded-lg border border-stone-200/90">
-                                    <table className="min-w-full divide-y divide-stone-200">
+                                  <div className="mb-4 max-w-full overflow-x-auto rounded-lg border border-stone-200/90">
+                                    {/*
+                                      inline-table：避免在整欄寬的 td 內被撐成 100% 寬（與上方專案列無對齊需求）
+                                    */}
+                                    <table className="inline-table max-w-full align-top border-collapse divide-y divide-stone-200">
                                       <thead className="bg-amber-100/80">
                                         <tr>
-                                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">任務</th>
-                                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">任務類型</th>
-                                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">任務負責人</th>
-                                          <th className="px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">開始時間</th>
-                                          <th className="px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">完成時間</th>
-                                          <th className="px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">完成</th>
+                                          <th className="w-[10rem] max-w-[11rem] px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">
+                                            任務
+                                          </th>
+                                          <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">
+                                            任務類型
+                                          </th>
+                                          <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">
+                                            任務負責人
+                                          </th>
+                                          <th className="whitespace-nowrap px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">
+                                            開始時間
+                                          </th>
+                                          <th className="whitespace-nowrap px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">
+                                            完成時間
+                                          </th>
+                                          <th className="w-12 min-w-[2.75rem] whitespace-nowrap px-2 py-2 text-center text-xs font-semibold uppercase text-stone-500">
+                                            完成
+                                          </th>
                                         </tr>
                                       </thead>
                                       <tbody className="divide-y divide-stone-200 bg-white/90">
@@ -2342,7 +2357,12 @@ export default function DashboardPage() {
                                               className="cursor-pointer hover:bg-amber-50/80"
                                               onClick={() => setSelectedTask(t)}
                                             >
-                                              <td className="px-3 py-2.5 text-sm text-stone-900">{t.任務 ?? "—"}</td>
+                                              <td
+                                                className="w-[10rem] max-w-[11rem] px-3 py-2.5 text-sm text-stone-900 align-top"
+                                                title={t.任務 ? String(t.任務) : undefined}
+                                              >
+                                                <span className="line-clamp-2 break-words">{t.任務 ?? "—"}</span>
+                                              </td>
                                               <td className="whitespace-nowrap px-3 py-2.5 text-sm text-stone-600">{t.任務類型 ?? "—"}</td>
                                               <td className="whitespace-nowrap px-3 py-2.5 text-sm text-stone-600">
                                                 <span className="inline-flex items-center gap-1">
@@ -2385,7 +2405,7 @@ export default function DashboardPage() {
                                               <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs tabular-nums text-stone-600">
                                                 {formatTaskDisplayTime(t.完成時間)}
                                               </td>
-                                              <td className="px-3 py-2.5 text-center">
+                                              <td className="w-12 min-w-[2.75rem] px-2 py-2.5 text-center align-middle">
                                                 <button
                                                   type="button"
                                                   onClick={async (ev) => {
@@ -2406,14 +2426,22 @@ export default function DashboardPage() {
                                                       /* 忽略 */
                                                     }
                                                   }}
-                                                  className="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded border-2 transition hover:border-amber-400/70 hover:bg-amber-50"
-                                                  style={{
-                                                    backgroundColor: t.任務完成 ? "rgba(245,158,11,0.2)" : "transparent",
-                                                    borderColor: t.任務完成 ? "rgba(245,158,11,0.5)" : "rgba(255,255,255,0.2)",
-                                                  }}
-                                                  title={t.任務完成 ? "點擊取消" : "點擊完成"}
+                                                  className={`mx-auto inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded border-2 transition hover:border-amber-400/70 hover:bg-amber-50 ${
+                                                    t.任務完成
+                                                      ? "border-amber-500/60 bg-amber-500/15"
+                                                      : "border-stone-300 bg-white shadow-sm"
+                                                  }`}
+                                                  title={t.任務完成 ? "點擊取消完成" : "點擊標記完成"}
+                                                  aria-checked={t.任務完成}
+                                                  role="checkbox"
                                                 >
-                                                  {t.任務完成 ? <span className="text-sm text-amber-800">✓</span> : null}
+                                                  {t.任務完成 ? (
+                                                    <span className="text-sm font-semibold text-amber-800" aria-hidden>
+                                                      ✓
+                                                    </span>
+                                                  ) : (
+                                                    <span className="sr-only">未完成</span>
+                                                  )}
                                                 </button>
                                               </td>
                                             </tr>
