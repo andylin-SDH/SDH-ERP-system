@@ -22,6 +22,8 @@ export interface InvoiceRow {
 
 export interface FinanceRow {
   專案ID?: string;
+  /** 由大總表依 專案ID 對應，非 DB 財務表獨立欄位 */
+  專案名稱?: string;
   專案總金額未稅?: string;
   專案成本?: string;
   專案實際成本?: string;

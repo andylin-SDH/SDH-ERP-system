@@ -96,6 +96,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
   ],
   finance: [
     { key: "專案ID", label: "專案ID" },
+    { key: "專案名稱", label: "專案名稱" },
     { key: "專案總金額未稅", label: "專案總金額未稅" },
     { key: "專案成本", label: "專案成本" },
     { key: "專案實際成本", label: "專案實際成本" },

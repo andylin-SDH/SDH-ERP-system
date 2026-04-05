@@ -831,6 +831,16 @@ export default function DashboardPage() {
         }
         return merged.filter((k) => allKeys.includes(k));
       }
+      /** 財務：新欄「專案名稱」緊接在 專案ID 後（舊 ③ 設定未勾選時仍顯示） */
+      if (tableKey === "finance") {
+        const merged = [...normalized];
+        if (allKeys.includes("專案名稱") && !merged.includes("專案名稱")) {
+          const idx = merged.indexOf("專案ID");
+          if (idx !== -1) merged.splice(idx + 1, 0, "專案名稱");
+          else merged.unshift("專案名稱");
+        }
+        return merged.filter((k) => allKeys.includes(k));
+      }
       return normalized;
     },
     [myVisibility]
@@ -5231,7 +5241,7 @@ export default function DashboardPage() {
                   type="text"
                   value={financeSearch}
                   onChange={(e) => setFinanceSearch(e.target.value)}
-                  placeholder="搜尋專案ID、利潤、狀態…"
+                  placeholder="搜尋專案ID、專案名稱、利潤、狀態…"
                   className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
                 />
               </div>
@@ -5243,7 +5253,14 @@ export default function DashboardPage() {
                     <thead className="bg-stone-100">
                       <tr>
                         {financeVisibleCols.map((k) => (
-                          <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600"}>
+                          <th
+                            key={k}
+                            className={
+                              k === "專案ID" || k === "專案名稱"
+                                ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800"
+                                : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600"
+                            }
+                          >
                             {tableColumnLabels.finance?.[k] ?? k}
                           </th>
                         ))}
@@ -5261,7 +5278,26 @@ export default function DashboardPage() {
                           <tr key={i} className="hover:bg-amber-50/80">
                             {financeVisibleCols.map((k) => {
                               const v = (row as unknown as Record<string, unknown>)[k];
-                              return <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm text-stone-600">{String(v ?? "—")}</td>;
+                              const str = String(v ?? "—");
+                              if (k === "專案ID") {
+                                return (
+                                  <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm font-medium text-stone-900">
+                                    {str}
+                                  </td>
+                                );
+                              }
+                              if (k === "專案名稱") {
+                                return (
+                                  <td
+                                    key={k}
+                                    className="max-w-[200px] truncate px-4 py-3.5 text-sm text-stone-700"
+                                    title={str !== "—" ? str : undefined}
+                                  >
+                                    {str}
+                                  </td>
+                                );
+                              }
+                              return <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm text-stone-600">{str}</td>;
                             })}
                           </tr>
                         ))
