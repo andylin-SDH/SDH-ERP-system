@@ -4957,16 +4957,20 @@ export default function DashboardPage() {
                             colSpan={(partnerListCols.length || 6) + 1}
                             className="px-6 py-4 text-sm"
                           >
-                            <div className="space-y-4">
-                              {PARTNER_EXPAND_SECTION_KEYS.map((section) => (
+                            <div className="rounded-xl border border-amber-200/70 bg-gradient-to-b from-amber-50/50 to-white px-5 py-4 shadow-sm ring-1 ring-amber-100/50">
+                              {PARTNER_EXPAND_SECTION_KEYS.map((section, sectionIdx) => (
                                 <div
                                   key={section.title}
-                                  className="rounded-xl border border-amber-200/50 bg-gradient-to-br from-amber-50/50 via-white to-stone-50/40 p-4 shadow-sm ring-1 ring-amber-100/60"
+                                  className={
+                                    sectionIdx > 0
+                                      ? "mt-5 border-t border-dotted border-amber-200/90 pt-5"
+                                      : undefined
+                                  }
                                 >
-                                  <h4 className="mb-3 border-b border-amber-200/70 pb-2 text-xs font-bold tracking-wide text-amber-900/90">
+                                  <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-900/80">
                                     {section.title}
-                                  </h4>
-                                  <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                  </p>
+                                  <dl className="grid gap-x-6 gap-y-3.5 sm:grid-cols-2 lg:grid-cols-3">
                                     {section.keys.map((key) => {
                                       const val = (pt as unknown as Record<string, unknown>)[key];
                                       const label = tableColumnLabels.partners?.[key] ?? key;
@@ -4998,7 +5002,7 @@ export default function DashboardPage() {
                                         <div key={key}>
                                           <dt className="text-[11px] font-semibold uppercase tracking-wide text-stone-500">{label}</dt>
                                           <dd
-                                            className={`mt-1 text-sm leading-snug text-stone-800 ${
+                                            className={`mt-0.5 text-sm leading-relaxed text-stone-800 ${
                                               key === "經銷約開始日" || key === "經銷約結束日" ? "tabular-nums" : ""
                                             }`}
                                           >
