@@ -4,4 +4,4 @@
  */
 export type { InvoiceRow, FinanceRow } from "./types";
 export type { InvoiceInsertInput } from "./api";
-export { getInvoices, getFinance, createInvoicesBatch } from "./api";
+export { getInvoices, getFinance, createInvoicesBatch, updateInvoiceById } from "./api";

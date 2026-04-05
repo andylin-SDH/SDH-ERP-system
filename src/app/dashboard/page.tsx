@@ -1,13 +1,13 @@
 "use client";
 
-import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { User } from "@/lib/types";
 import type { TaskRow } from "@/modules/tasks";
 import type { PartnerRow } from "@/modules/partners";
 import type { MasterRow } from "@/lib/db/master";
-import type { InvoiceRow } from "@/modules/finance";
+import type { InvoiceRow, InvoiceInsertInput } from "@/modules/finance";
 import type { PayoutRow } from "@/lib/db/payout";
 import { applyDedupeRules } from "@/lib/payout-dedupe";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
@@ -113,6 +113,22 @@ const INVOICE_DRAFT_KEYS = [
 
 function emptyInvoiceDraftRow(): Record<string, string> {
   return Object.fromEntries(INVOICE_DRAFT_KEYS.map((k) => [k, ""])) as Record<string, string>;
+}
+
+function invoiceRowToInsertInput(row: InvoiceRow): InvoiceInsertInput {
+  return {
+    專案ID: row.專案ID ?? "",
+    發票號碼: row.發票號碼 ?? "",
+    發票日期: row.發票日期 ?? "",
+    發票金額未稅: row.發票金額未稅 ?? "",
+    發票金額含稅: row.發票金額含稅 ?? "",
+    發票稅金: row.發票稅金 ?? "",
+    廠商預計付款日: row.廠商預計付款日 ?? "",
+    廠商實付金額: row.廠商實付金額 ?? "",
+    廠商付款狀態: row.廠商付款狀態 ?? "",
+    廠商付款日期: row.廠商付款日期 ?? "",
+    備註: row.備註 ?? "",
+  };
 }
 
 const LS_INVOICE_PREFIX = "sdh-invoice-seq-prefix";
@@ -513,6 +529,12 @@ export default function DashboardPage() {
   const [savingRoles, setSavingRoles] = useState(false);
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [invoiceEditSavingId, setInvoiceEditSavingId] = useState<string | null>(null);
+  const [invoiceEditError, setInvoiceEditError] = useState<string | null>(null);
+  const invoicesRef = useRef<InvoiceRow[]>([]);
+  const invoiceSaveInflightRef = useRef<Set<string>>(new Set());
+  const invoiceSavePendingRef = useRef<Set<string>>(new Set());
+  const invoiceSaveDebounceRef = useRef<Map<string, number>>(new Map());
   const [finance, setFinance] = useState<Record<string, string | undefined>[]>([]);
   const [payoutList, setPayoutList] = useState<PayoutRow[]>([]);
   /** Dashboard 分頁搜尋關鍵字（各區塊獨立） */
@@ -1445,6 +1467,86 @@ export default function DashboardPage() {
     },
     []
   );
+
+  useLayoutEffect(() => {
+    invoicesRef.current = invoices;
+  }, [invoices]);
+
+  /** 發票清冊：寫回 DB（整列一併更新） */
+  const persistInvoiceRowById = useCallback(
+    async (id: string) => {
+      if (!id) return;
+      if (invoiceSaveInflightRef.current.has(id)) {
+        invoiceSavePendingRef.current.add(id);
+        return;
+      }
+      const row = invoicesRef.current.find((r) => r.id === id);
+      if (!row?.id) return;
+      invoiceSaveInflightRef.current.add(id);
+      setInvoiceEditSavingId(id);
+      setInvoiceEditError(null);
+      try {
+        const res = await fetch("/api/invoices", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: row.id, ...invoiceRowToInsertInput(row) }),
+        });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string; invoice?: InvoiceRow };
+        if (!res.ok || data.ok === false) {
+          setInvoiceEditError(String(data.error ?? "儲存失敗"));
+          return;
+        }
+        if (data.invoice) {
+          setInvoices((prev) => prev.map((r) => (r.id === id ? { ...r, ...data.invoice } : r)));
+        }
+        await refreshDashboardData(["finance"]);
+      } catch (e) {
+        setInvoiceEditError(e instanceof Error ? e.message : "儲存失敗");
+      } finally {
+        invoiceSaveInflightRef.current.delete(id);
+        setInvoiceEditSavingId((cur) => (cur === id ? null : cur));
+        if (invoiceSavePendingRef.current.has(id)) {
+          invoiceSavePendingRef.current.delete(id);
+          queueMicrotask(() => {
+            void persistInvoiceRowById(id);
+          });
+        }
+      }
+    },
+    [refreshDashboardData]
+  );
+
+  const schedulePersistInvoiceRow = useCallback(
+    (id: string) => {
+      const existing = invoiceSaveDebounceRef.current.get(id);
+      if (existing) window.clearTimeout(existing);
+      const t = window.setTimeout(() => {
+        invoiceSaveDebounceRef.current.delete(id);
+        void persistInvoiceRowById(id);
+      }, 650);
+      invoiceSaveDebounceRef.current.set(id, t);
+    },
+    [persistInvoiceRowById]
+  );
+
+  const flushPersistInvoiceRow = useCallback(
+    (id: string) => {
+      const existing = invoiceSaveDebounceRef.current.get(id);
+      if (existing) {
+        window.clearTimeout(existing);
+        invoiceSaveDebounceRef.current.delete(id);
+      }
+      void persistInvoiceRowById(id);
+    },
+    [persistInvoiceRowById]
+  );
+
+  useEffect(() => {
+    return () => {
+      for (const t of invoiceSaveDebounceRef.current.values()) window.clearTimeout(t);
+      invoiceSaveDebounceRef.current.clear();
+    };
+  }, []);
 
   const refetchTasksOnly = useCallback(async () => {
     try {
@@ -5348,6 +5450,14 @@ export default function DashboardPage() {
                   className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
                 />
               </div>
+              {invoiceEditError && (
+                <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{invoiceEditError}</p>
+              )}
+              {invoices.length > 0 && (
+                <p className="mb-2 text-[11px] text-stone-500">
+                  各欄可直接編輯；約 0.65 秒無變更或離開欄位時會儲存。發票號碼不可空白。
+                </p>
+              )}
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
                 {invoices.length === 0 ? (
                   <p className="px-4 py-8 text-center text-stone-500">尚無發票資料</p>
@@ -5370,25 +5480,77 @@ export default function DashboardPage() {
                           </td>
                         </tr>
                       ) : (
-                        visibleInvoicesRows.map((inv, i) => (
-                          <tr
-                            key={typeof inv.id === "string" && inv.id ? inv.id : `inv-row-${i}`}
-                            className="hover:bg-amber-50/80"
-                          >
-                            {invoicesVisibleCols.map((k) => {
-                              const v = (inv as unknown as Record<string, unknown>)[k];
-                              const str =
-                                k === "專案ID" && (v == null || String(v).trim() === "")
-                                  ? "—"
-                                  : String(v ?? "—");
-                              return (
-                                <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm ${k === "專案ID" ? "font-medium text-stone-900" : "text-stone-600"}`}>
-                                  {str}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))
+                        visibleInvoicesRows.map((inv, i) => {
+                          const rowId = typeof inv.id === "string" && inv.id ? inv.id : null;
+                          const saving = rowId != null && invoiceEditSavingId === rowId;
+                          return (
+                            <tr
+                              key={rowId ?? `inv-row-${i}`}
+                              className="hover:bg-amber-50/80"
+                            >
+                              {invoicesVisibleCols.map((k) => {
+                                const v = (inv as unknown as Record<string, unknown>)[k];
+                                if (!rowId) {
+                                  const str =
+                                    k === "專案ID" && (v == null || String(v).trim() === "")
+                                      ? "—"
+                                      : String(v ?? "—");
+                                  return (
+                                    <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm ${k === "專案ID" ? "font-medium text-stone-900" : "text-stone-600"}`}>
+                                      {str}
+                                    </td>
+                                  );
+                                }
+                                const val = v == null ? "" : String(v);
+                                const inputCls =
+                                  "w-full min-w-[4rem] rounded border border-stone-200 bg-white px-2 py-1 text-xs text-stone-800 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none disabled:opacity-60";
+                                if (k === "備註") {
+                                  return (
+                                    <td key={k} className="max-w-[14rem] px-2 py-2 align-top">
+                                      <textarea
+                                        value={val}
+                                        disabled={saving}
+                                        rows={2}
+                                        onChange={(e) => {
+                                          setInvoiceEditError(null);
+                                          setInvoices((prev) =>
+                                            prev.map((r) => (r.id === rowId ? { ...r, 備註: e.target.value } : r))
+                                          );
+                                          schedulePersistInvoiceRow(rowId);
+                                        }}
+                                        onBlur={() => {
+                                          flushPersistInvoiceRow(rowId);
+                                        }}
+                                        className={`${inputCls} max-w-full resize-y`}
+                                      />
+                                    </td>
+                                  );
+                                }
+                                const wide = k === "發票號碼" || k === "專案ID";
+                                return (
+                                  <td key={k} className={`px-2 py-2 align-middle ${wide ? "min-w-[7rem] max-w-[11rem]" : "min-w-[4.5rem] max-w-[8rem]"}`}>
+                                    <input
+                                      type="text"
+                                      value={val}
+                                      disabled={saving}
+                                      onChange={(e) => {
+                                        setInvoiceEditError(null);
+                                        setInvoices((prev) =>
+                                          prev.map((r) => (r.id === rowId ? { ...r, [k]: e.target.value } : r))
+                                        );
+                                        schedulePersistInvoiceRow(rowId);
+                                      }}
+                                      onBlur={() => {
+                                        flushPersistInvoiceRow(rowId);
+                                      }}
+                                      className={`${inputCls} ${k === "專案ID" ? "font-medium" : ""}`}
+                                    />
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>

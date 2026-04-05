@@ -143,6 +143,36 @@ export async function createInvoicesBatch(rows: InvoiceInsertInput[]): Promise<I
   return (data ?? []).map((r: Record<string, unknown>) => mapInvoiceRecord(r));
 }
 
+/**
+ * 更新發票（依 id）。須提供完整可編輯欄位；發票號碼不可空白。
+ */
+export async function updateInvoiceById(id: string, row: InvoiceInsertInput): Promise<InvoiceRow> {
+  const pid = String(id ?? "").trim();
+  if (!pid) throw new Error("缺少發票 id");
+
+  const 發票號碼 = trimOrNull(row.發票號碼 ?? undefined);
+  if (發票號碼 == null) throw new Error("發票號碼不可空白");
+
+  const payload = {
+    專案ID: trimOrNull(row.專案ID ?? undefined),
+    發票號碼,
+    發票日期: trimOrNull(row.發票日期 ?? undefined),
+    發票金額未稅: trimOrNull(row.發票金額未稅 ?? undefined),
+    發票金額含稅: trimOrNull(row.發票金額含稅 ?? undefined),
+    發票稅金: trimOrNull(row.發票稅金 ?? undefined),
+    廠商預計付款日: trimOrNull(row.廠商預計付款日 ?? undefined),
+    廠商實付金額: trimOrNull(row.廠商實付金額 ?? undefined),
+    廠商付款狀態: trimOrNull(row.廠商付款狀態 ?? undefined),
+    廠商付款日期: trimOrNull(row.廠商付款日期 ?? undefined),
+    備註: trimOrNull(row.備註 ?? undefined),
+  };
+
+  const { data, error } = await getSupabase().from("發票").update(payload).eq("id", pid).select("*").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("找不到該發票或更新失敗");
+  return mapInvoiceRecord(data as Record<string, unknown>);
+}
+
 export async function getFinance(): Promise<FinanceRow[]> {
   const { data, error } = await getSupabase().from("財務").select("*").order("created_at", { ascending: false });
   if (error) {

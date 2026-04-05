@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getInvoices } from "@/modules/finance";
-import { createInvoicesBatch, type InvoiceInsertInput } from "@/lib/db/finance";
+import { createInvoicesBatch, updateInvoiceById, type InvoiceInsertInput } from "@/lib/db/finance";
 import { requireAuth } from "@/lib/auth/api";
 
 export async function GET(request: NextRequest) {
@@ -37,6 +37,31 @@ export async function POST(request: NextRequest) {
     console.error("POST /api/invoices error:", error);
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "新增發票失敗" },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * PATCH：更新單筆發票
+ * Body: { id: string } & InvoiceInsertInput（須含發票號碼等完整可編輯欄位）
+ */
+export async function PATCH(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if (auth instanceof NextResponse) return auth;
+  try {
+    const body = (await request.json()) as ({ id?: string } & InvoiceInsertInput) | null;
+    const id = body?.id != null ? String(body.id).trim() : "";
+    if (!id) {
+      return NextResponse.json({ ok: false, error: "缺少發票 id" }, { status: 400 });
+    }
+    const { id: _drop, ...rest } = body ?? {};
+    const updated = await updateInvoiceById(id, rest as InvoiceInsertInput);
+    return NextResponse.json({ ok: true, invoice: updated });
+  } catch (error) {
+    console.error("PATCH /api/invoices error:", error);
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "更新發票失敗" },
       { status: 500 }
     );
   }
