@@ -1263,6 +1263,16 @@ export default function DashboardPage() {
     return sum;
   }, [dedupedPayoutForDisplay]);
 
+  /** 分潤表頂部儀表：已分潤列的分潤金額加總（同上口徑） */
+  const payoutSettledAmountSum = useMemo(() => {
+    let sum = 0;
+    for (const r of dedupedPayoutForDisplay) {
+      if (payoutRowWorkflowStage(r) !== "settled") continue;
+      sum += parseNumericField(r.分潤金額);
+    }
+    return sum;
+  }, [dedupedPayoutForDisplay]);
+
   const searchedPayout = useMemo(
     () =>
       filterRowsBySearch(
@@ -5455,25 +5465,41 @@ export default function DashboardPage() {
           ) : (
             <>
               <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <div className="rounded-2xl border border-stone-200/80 bg-gradient-to-br from-white to-stone-50/90 px-3 py-3 shadow-sm shadow-stone-200/50 ring-1 ring-amber-100/40 sm:px-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">待結帳筆數</p>
-                  <p className="mt-1.5 text-xl font-bold tabular-nums text-stone-900 sm:text-2xl">{payoutWorkflowCounts.pending_vendor}</p>
-                  <p className="mt-0.5 text-[10px] text-stone-400">廠商未付款</p>
+                <div className="group relative overflow-hidden rounded-2xl border border-stone-200/70 bg-gradient-to-br from-white via-stone-50/80 to-stone-100/60 px-3 py-3.5 shadow-[0_12px_40px_-12px_rgba(120,113,108,0.35)] ring-1 ring-stone-200/50 transition duration-300 hover:-translate-y-1 hover:shadow-[0_20px_50px_-12px_rgba(120,113,108,0.45)] sm:px-4 sm:py-4">
+                  <div className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-stone-300/25 blur-2xl transition duration-500 group-hover:bg-stone-400/30" />
+                  <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-stone-400 via-stone-300 to-amber-200/80" />
+                  <div className="relative">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-500">待結帳筆數</p>
+                    <p className="mt-2 bg-gradient-to-br from-stone-800 to-stone-600 bg-clip-text text-2xl font-extrabold tabular-nums tracking-tight text-transparent sm:text-3xl">{payoutWorkflowCounts.pending_vendor}</p>
+                    <p className="mt-1 text-[10px] font-medium text-stone-400">廠商未付款</p>
+                  </div>
                 </div>
-                <div className="rounded-2xl border border-stone-200/80 bg-gradient-to-br from-white to-amber-50/50 px-3 py-3 shadow-sm shadow-amber-200/30 ring-1 ring-amber-200/50 sm:px-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-800/90">待分潤筆數</p>
-                  <p className="mt-1.5 text-xl font-bold tabular-nums text-amber-900 sm:text-2xl">{payoutWorkflowCounts.pending_payout}</p>
-                  <p className="mt-0.5 text-[10px] text-stone-500">廠商已付、待匯分潤</p>
+                <div className="group relative overflow-hidden rounded-2xl border border-amber-200/70 bg-gradient-to-br from-amber-50/95 via-white to-orange-50/50 px-3 py-3.5 shadow-[0_12px_40px_-12px_rgba(245,158,11,0.35)] ring-1 ring-amber-200/60 transition duration-300 hover:-translate-y-1 hover:shadow-[0_20px_50px_-10px_rgba(245,158,11,0.45)] sm:px-4 sm:py-4">
+                  <div className="pointer-events-none absolute -right-6 -top-8 h-32 w-32 rounded-full bg-amber-400/30 blur-3xl transition duration-500 group-hover:bg-amber-400/45" />
+                  <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-500 via-orange-400 to-amber-300" />
+                  <div className="relative">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-amber-900/80">待分潤筆數</p>
+                    <p className="mt-2 bg-gradient-to-br from-amber-900 to-orange-700 bg-clip-text text-2xl font-extrabold tabular-nums tracking-tight text-transparent sm:text-3xl">{payoutWorkflowCounts.pending_payout}</p>
+                    <p className="mt-1 text-[10px] font-medium text-amber-800/70">廠商已付、待匯分潤</p>
+                  </div>
                 </div>
-                <div className="rounded-2xl border border-stone-200/80 bg-gradient-to-br from-white to-emerald-50/40 px-3 py-3 shadow-sm shadow-stone-200/50 ring-1 ring-emerald-100/50 sm:px-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">已分潤筆數</p>
-                  <p className="mt-1.5 text-xl font-bold tabular-nums text-emerald-900 sm:text-2xl">{payoutWorkflowCounts.settled}</p>
-                  <p className="mt-0.5 text-[10px] text-stone-400">已填分潤匯款日</p>
+                <div className="group relative overflow-hidden rounded-2xl border border-emerald-200/70 bg-gradient-to-br from-emerald-50/90 via-white to-teal-50/40 px-3 py-3.5 shadow-[0_12px_40px_-12px_rgba(16,185,129,0.3)] ring-1 ring-emerald-200/55 transition duration-300 hover:-translate-y-1 hover:shadow-[0_20px_50px_-10px_rgba(16,185,129,0.4)] sm:px-4 sm:py-4">
+                  <div className="pointer-events-none absolute -right-6 -top-8 h-32 w-32 rounded-full bg-emerald-400/25 blur-3xl transition duration-500 group-hover:bg-emerald-400/40" />
+                  <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-300" />
+                  <div className="relative">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-900/80">已分潤金額合計</p>
+                    <p className="mt-2 bg-gradient-to-br from-emerald-900 to-teal-700 bg-clip-text text-xl font-extrabold tabular-nums tracking-tight text-transparent sm:text-2xl">{formatAmount(String(Math.round(payoutSettledAmountSum)))}</p>
+                    <p className="mt-1 text-[10px] font-medium text-emerald-800/65">僅「已分潤」列加總</p>
+                  </div>
                 </div>
-                <div className="rounded-2xl border border-amber-200/90 bg-gradient-to-br from-amber-50/90 to-amber-100/50 px-3 py-3 shadow-md shadow-amber-200/40 ring-1 ring-amber-300/40 sm:px-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-900">待分潤金額合計</p>
-                  <p className="mt-1.5 text-lg font-bold tabular-nums text-amber-950 sm:text-xl">{formatAmount(String(Math.round(payoutPendingPayoutAmountSum)))}</p>
-                  <p className="mt-0.5 text-[10px] text-amber-900/70">僅「待分潤」列加總</p>
+                <div className="group relative overflow-hidden rounded-2xl border border-amber-300/80 bg-gradient-to-br from-amber-100/90 via-amber-50 to-orange-100/60 px-3 py-3.5 shadow-[0_14px_44px_-12px_rgba(217,119,6,0.4)] ring-2 ring-amber-300/50 transition duration-300 hover:-translate-y-1 hover:shadow-[0_22px_56px_-10px_rgba(217,119,6,0.5)] sm:px-4 sm:py-4">
+                  <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_100%_0%,rgba(251,191,36,0.35),transparent_55%)] opacity-90" />
+                  <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-600 via-orange-500 to-amber-400" />
+                  <div className="relative">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-amber-950/90">待分潤金額合計</p>
+                    <p className="mt-2 bg-gradient-to-br from-amber-950 to-orange-900 bg-clip-text text-xl font-extrabold tabular-nums tracking-tight text-transparent sm:text-2xl">{formatAmount(String(Math.round(payoutPendingPayoutAmountSum)))}</p>
+                    <p className="mt-1 text-[10px] font-semibold text-amber-950/65">僅「待分潤」列加總</p>
+                  </div>
                 </div>
               </div>
               {/* 小螢幕：卡片式收納顯示（分潤金額為主、次要資訊、其他可摺疊） */}
