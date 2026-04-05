@@ -52,13 +52,11 @@ supabase/migrations/000_required_tables.sql
 ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS "KOL開發者" text;
 ```
 
-## partners 新增欄位 合約開始日期
+## partners 開始日欄位（歷史：021 曾新增「合約開始日期」）
 
-`supabase/migrations/021_partners_合約開始日期.sql` 或：
+舊環境若曾執行 `021_partners_合約開始日期.sql` 會有 `合約開始日期`。目前正式欄位為 **`經銷約開始日`**；請執行 **`037_partners_合約開始日期改為經銷約開始日.sql`**，會將資料合併至 `經銷約開始日` 並刪除 `合約開始日期`。
 
-```sql
-ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS "合約開始日期" text;
-```
+新環境依序跑完整 `supabase/migrations` 即可。
 
 ## partners KOL 審核流程（待審核 → 董事長核准後才上主列表）
 

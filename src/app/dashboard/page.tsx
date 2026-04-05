@@ -202,7 +202,7 @@ function formatPartnerDateDisplay(raw: string | null | undefined): string {
 const PARTNER_EXPAND_SECTION_KEYS: { title: string; keys: string[] }[] = [
   { title: "識別與分類", keys: ["PartnerID", "合作夥伴名稱", "類別一", "類別二", "類別三"] },
   { title: "聯絡與管道", keys: ["社群網站", "Email", "資料夾", "粉絲數", "頻道｜節目名稱"] },
-  { title: "分潤與合約", keys: ["自來件分潤", "SDH開發分件分潤", "合約開始日期", "經銷約結束日"] },
+  { title: "分潤與合約", keys: ["自來件分潤", "SDH開發分件分潤", "經銷約開始日", "經銷約結束日"] },
   { title: "人員", keys: ["經紀人", "KOL開發者", "主管"] },
   { title: "夥伴類型與其他", keys: ["分級", "是否有經營 私域群", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴"] },
 ];
@@ -496,7 +496,7 @@ export default function DashboardPage() {
     經紀人: string;
     KOL開發者: string;
     主管: string;
-    合約開始日期: string;
+    經銷約開始日: string;
     自來件分潤: string;
     "SDH開發分件分潤": string;
     經銷約結束日: string;
@@ -519,7 +519,7 @@ export default function DashboardPage() {
     經紀人: "",
     KOL開發者: "",
     主管: "",
-    合約開始日期: "",
+    經銷約開始日: "",
     自來件分潤: "",
     "SDH開發分件分潤": "",
     經銷約結束日: "",
@@ -549,7 +549,7 @@ export default function DashboardPage() {
     經紀人: string;
     KOL開發者: string;
     主管: string;
-    合約開始日期: string;
+    經銷約開始日: string;
     自來件分潤: string;
     "SDH開發分件分潤": string;
     經銷約結束日: string;
@@ -572,7 +572,7 @@ export default function DashboardPage() {
     經紀人: "",
     KOL開發者: "",
     主管: "",
-    合約開始日期: "",
+    經銷約開始日: "",
     自來件分潤: "",
     "SDH開發分件分潤": "",
     經銷約結束日: "",
@@ -1188,8 +1188,8 @@ export default function DashboardPage() {
    */
   const partnerListCols = useMemo(
     () =>
-      /** KOL開發者、合約開始日期不顯示在主列表，僅在新增/編輯 Modal 與展開詳情維護 */
-      /** 自來件分潤、SDH分潤、合約／經銷約日期等詳見列下方展開區 */
+      /** KOL開發者、經銷約開始日不顯示在主列表，僅在新增/編輯 Modal 與展開詳情維護 */
+      /** 自來件分潤、SDH分潤、經銷約起迄等詳見列下方展開區 */
       ["合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "資料夾", "經紀人", "分級"].filter((k) =>
         partnersVisibleCols.includes(k)
       ),
@@ -3991,11 +3991,11 @@ export default function DashboardPage() {
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">合約／經銷約開始日</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">經銷約開始日</label>
                     <input
                       type="date"
-                      value={toHtmlDateValue(createPartnerForm.合約開始日期)}
-                      onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 合約開始日期: e.target.value }))}
+                      value={toHtmlDateValue(createPartnerForm.經銷約開始日)}
+                      onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 經銷約開始日: e.target.value }))}
                       className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
@@ -4357,22 +4357,22 @@ export default function DashboardPage() {
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">合約／經銷約開始日</label>
-                    {partnerFieldEditable("合約開始日期") ? (
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">經銷約開始日</label>
+                    {partnerFieldEditable("經銷約開始日") ? (
                       <>
                         <input
                           type="date"
-                          value={toHtmlDateValue(editPartnerForm.合約開始日期)}
-                          onChange={(e) => setEditPartnerForm((f) => ({ ...f, 合約開始日期: e.target.value }))}
+                          value={toHtmlDateValue(editPartnerForm.經銷約開始日)}
+                          onChange={(e) => setEditPartnerForm((f) => ({ ...f, 經銷約開始日: e.target.value }))}
                           className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                         />
-                        {editPartnerForm.合約開始日期.trim() !== "" && !toHtmlDateValue(editPartnerForm.合約開始日期) && (
-                          <p className="mt-1 text-[10px] text-amber-800">原紀錄（非標準日期）：{editPartnerForm.合約開始日期}</p>
+                        {editPartnerForm.經銷約開始日.trim() !== "" && !toHtmlDateValue(editPartnerForm.經銷約開始日) && (
+                          <p className="mt-1 text-[10px] text-amber-800">原紀錄（非標準日期）：{editPartnerForm.經銷約開始日}</p>
                         )}
                       </>
                     ) : (
                       <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">
-                        {formatPartnerDateDisplay(editPartnerForm.合約開始日期)}
+                        {formatPartnerDateDisplay(editPartnerForm.經銷約開始日)}
                       </p>
                     )}
                   </div>
@@ -4558,7 +4558,7 @@ export default function DashboardPage() {
                             經紀人: editPartnerForm.經紀人 || undefined,
                             KOL開發者: editPartnerForm.KOL開發者 || undefined,
                             主管: editPartnerForm.主管 || undefined,
-                            合約開始日期: editPartnerForm.合約開始日期 || undefined,
+                            經銷約開始日: editPartnerForm.經銷約開始日 || undefined,
                             自來件分潤: editPartnerForm.自來件分潤 || undefined,
                             "SDH開發分件分潤": editPartnerForm["SDH開發分件分潤"] || undefined,
                             經銷約結束日: editPartnerForm.經銷約結束日 || undefined,
@@ -4803,7 +4803,7 @@ export default function DashboardPage() {
                         經紀人: me?.name ?? "",
                         KOL開發者: "",
                         主管: "",
-                        合約開始日期: "",
+                        經銷約開始日: "",
                         自來件分潤: "",
                         "SDH開發分件分潤": "",
                         經銷約結束日: "",
@@ -4880,7 +4880,7 @@ export default function DashboardPage() {
                             經紀人: String(pt.經紀人 ?? ""),
                             KOL開發者: String(pt.KOL開發者 ?? ""),
                             主管: String(pt.主管 ?? ""),
-                            合約開始日期: String(pt.合約開始日期 ?? ""),
+                            經銷約開始日: String(pt.經銷約開始日 ?? ""),
                             自來件分潤: String(pt.自來件分潤 ?? ""),
                             "SDH開發分件分潤": String(pt["SDH開發分件分潤"] ?? ""),
                             經銷約結束日: String(pt.經銷約結束日 ?? ""),
@@ -4988,7 +4988,7 @@ export default function DashboardPage() {
                                       let text: string;
                                       if (isBool) {
                                         text = Boolean(val) ? "是" : "否";
-                                      } else if (key === "合約開始日期" || key === "經銷約結束日") {
+                                      } else if (key === "經銷約開始日" || key === "經銷約結束日") {
                                         text = formatPartnerDateDisplay(val as string);
                                       } else {
                                         const s = String(val ?? "").trim();
@@ -4999,7 +4999,7 @@ export default function DashboardPage() {
                                           <dt className="text-[11px] font-semibold uppercase tracking-wide text-stone-500">{label}</dt>
                                           <dd
                                             className={`mt-1 text-sm leading-snug text-stone-800 ${
-                                              key === "合約開始日期" || key === "經銷約結束日" ? "tabular-nums" : ""
+                                              key === "經銷約開始日" || key === "經銷約結束日" ? "tabular-nums" : ""
                                             }`}
                                           >
                                             {text}
@@ -5237,7 +5237,7 @@ export default function DashboardPage() {
                                     經紀人: String(pt.經紀人 ?? ""),
                                     KOL開發者: String(pt.KOL開發者 ?? ""),
                                     主管: String(pt.主管 ?? ""),
-                                    合約開始日期: String(pt.合約開始日期 ?? ""),
+                                    經銷約開始日: String(pt.經銷約開始日 ?? ""),
                                     自來件分潤: String(pt.自來件分潤 ?? ""),
                                     "SDH開發分件分潤": String(pt["SDH開發分件分潤"] ?? ""),
                                     經銷約結束日: String(pt.經銷約結束日 ?? ""),
@@ -5274,7 +5274,7 @@ export default function DashboardPage() {
                                   經紀人: String(pt.經紀人 ?? ""),
                                   KOL開發者: String(pt.KOL開發者 ?? ""),
                                   主管: String(pt.主管 ?? ""),
-                                  合約開始日期: String(pt.合約開始日期 ?? ""),
+                                  經銷約開始日: String(pt.經銷約開始日 ?? ""),
                                   自來件分潤: String(pt.自來件分潤 ?? ""),
                                   "SDH開發分件分潤": String(pt["SDH開發分件分潤"] ?? ""),
                                   經銷約結束日: String(pt.經銷約結束日 ?? ""),

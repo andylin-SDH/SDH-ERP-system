@@ -66,7 +66,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "資料夾", label: "資料夾" },
     { key: "經紀人", label: "經紀人" },
     { key: "KOL開發者", label: "KOL開發者" },
-    { key: "合約開始日期", label: "合約／經銷約開始日" },
+    { key: "經銷約開始日", label: "經銷約開始日" },
     { key: "自來件分潤", label: "自來件分潤" },
     { key: "SDH開發分件分潤", label: "SDH開發分件分潤" },
     { key: "經銷約結束日", label: "經銷約結束日" },

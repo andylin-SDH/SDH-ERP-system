@@ -10,7 +10,7 @@ import { PARTNER_STATUS, normalizePartnerStatus } from "@/lib/db/partner-approva
 
 /** 與目前 DB 中文欄位一致；若任一名稱不符 PostgREST 會整段失敗 */
 const PARTNER_SELECT =
-  '"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "經紀人", "KOL開發者", "主管", "合約開始日期", "自來件分潤", "SDH開發分件分潤", "經銷約結束日", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級", "審核狀態", "建立者", "駁回理由", "待審核送出者"';
+  '"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "經紀人", "KOL開發者", "主管", "經銷約開始日", "自來件分潤", "SDH開發分件分潤", "經銷約結束日", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級", "審核狀態", "建立者", "駁回理由", "待審核送出者"';
 
 function rowToPartner(r: Record<string, unknown>): PartnerRow {
   // 舊表 partners（migration 000）為 partner_id / partner_name 等，一併對應
@@ -35,7 +35,7 @@ function rowToPartner(r: Record<string, unknown>): PartnerRow {
       (r["經紀人"] as string) || (r.responsible_agent as string) || undefined,
     KOL開發者: (r["KOL開發者"] as string) || undefined,
     主管: (r["主管"] as string) || undefined,
-    合約開始日期: (r["合約開始日期"] as string) || undefined,
+    經銷約開始日: (r["經銷約開始日"] as string) || undefined,
     自來件分潤: (r["自來件分潤"] as string) || undefined,
     "SDH開發分件分潤": (r["SDH開發分件分潤"] as string) || undefined,
     經銷約結束日: (r["經銷約結束日"] as string) || undefined,
@@ -65,7 +65,7 @@ export interface NewPartnerInput {
   經紀人?: string;
   KOL開發者?: string;
   主管?: string;
-  合約開始日期?: string;
+  經銷約開始日?: string;
   自來件分潤?: string;
   "SDH開發分件分潤"?: string;
   經銷約結束日?: string;
@@ -106,7 +106,7 @@ export async function createPartner(
     經紀人: payload.經紀人 ?? null,
     KOL開發者: payload.KOL開發者 ?? null,
     主管: payload.主管 ?? null,
-    合約開始日期: payload.合約開始日期 ?? null,
+    經銷約開始日: payload.經銷約開始日 ?? null,
     自來件分潤: payload.自來件分潤 ?? null,
     "SDH開發分件分潤": payload["SDH開發分件分潤"] ?? null,
     經銷約結束日: payload.經銷約結束日 ?? null,
@@ -145,7 +145,7 @@ export interface UpdatePartnerInput {
   經紀人?: string;
   KOL開發者?: string;
   主管?: string;
-  合約開始日期?: string;
+  經銷約開始日?: string;
   自來件分潤?: string;
   "SDH開發分件分潤"?: string;
   經銷約結束日?: string;
@@ -175,7 +175,7 @@ export async function updatePartner(PartnerID: string, payload: UpdatePartnerInp
   if (payload.經紀人 !== undefined) update["經紀人"] = payload.經紀人 ?? null;
   if (payload.KOL開發者 !== undefined) update["KOL開發者"] = payload.KOL開發者 ?? null;
   if (payload.主管 !== undefined) update["主管"] = payload.主管 ?? null;
-  if (payload.合約開始日期 !== undefined) update["合約開始日期"] = payload.合約開始日期 ?? null;
+  if (payload.經銷約開始日 !== undefined) update["經銷約開始日"] = payload.經銷約開始日 ?? null;
   if (payload.自來件分潤 !== undefined) update["自來件分潤"] = payload.自來件分潤 ?? null;
   if (payload["SDH開發分件分潤"] !== undefined) update["SDH開發分件分潤"] = payload["SDH開發分件分潤"] ?? null;
   if (payload.經銷約結束日 !== undefined) update["經銷約結束日"] = payload.經銷約結束日 ?? null;
