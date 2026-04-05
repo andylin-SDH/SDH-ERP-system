@@ -169,6 +169,44 @@ function parseNumericField(v: string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** 將常見日期字串轉成 yyyy-MM-dd 供 input type="date" */
+function toHtmlDateValue(raw: string | null | undefined): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{4})[/.年\-](\d{1,2})[/.月\-](\d{1,2})/);
+  if (m) {
+    const y = m[1];
+    const mo = m[2].padStart(2, "0");
+    const d = m[3].replace(/日$/, "").padStart(2, "0");
+    return `${y}-${mo}-${d}`;
+  }
+  return "";
+}
+
+/** 展開列顯示：本地化日期或可讀原字 */
+function formatPartnerDateDisplay(raw: string | null | undefined): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "—";
+  const iso = toHtmlDateValue(s);
+  if (iso) {
+    const d = new Date(`${iso}T12:00:00`);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString("zh-TW", { year: "numeric", month: "2-digit", day: "2-digit" });
+    }
+  }
+  return s;
+}
+
+/** KOL 展開列：分組標題與欄位 key（主表不顯示的詳細欄位集中於此） */
+const PARTNER_EXPAND_SECTION_KEYS: { title: string; keys: string[] }[] = [
+  { title: "識別與分類", keys: ["PartnerID", "合作夥伴名稱", "類別一", "類別二", "類別三"] },
+  { title: "聯絡與管道", keys: ["社群網站", "Email", "資料夾", "粉絲數", "頻道｜節目名稱"] },
+  { title: "分潤與合約", keys: ["自來件分潤", "SDH開發分件分潤", "合約開始日期", "經銷約結束日"] },
+  { title: "人員", keys: ["經紀人", "KOL開發者", "主管"] },
+  { title: "夥伴類型與其他", keys: ["分級", "是否有經營 私域群", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴"] },
+];
+
 function masterRowRevenue(row: MasterRow): number {
   const r = row.專案營收;
   if (r != null && String(r).trim() !== "") return parseNumericField(r);
@@ -461,7 +499,6 @@ export default function DashboardPage() {
     合約開始日期: string;
     自來件分潤: string;
     "SDH開發分件分潤": string;
-    經銷約開始日: string;
     經銷約結束日: string;
     廣告經銷夥伴: boolean;
     節目製作夥伴: boolean;
@@ -485,7 +522,6 @@ export default function DashboardPage() {
     合約開始日期: "",
     自來件分潤: "",
     "SDH開發分件分潤": "",
-    經銷約開始日: "",
     經銷約結束日: "",
     廣告經銷夥伴: false,
     節目製作夥伴: false,
@@ -516,7 +552,6 @@ export default function DashboardPage() {
     合約開始日期: string;
     自來件分潤: string;
     "SDH開發分件分潤": string;
-    經銷約開始日: string;
     經銷約結束日: string;
     廣告經銷夥伴: boolean;
     節目製作夥伴: boolean;
@@ -540,7 +575,6 @@ export default function DashboardPage() {
     合約開始日期: "",
     自來件分潤: "",
     "SDH開發分件分潤": "",
-    經銷約開始日: "",
     經銷約結束日: "",
     廣告經銷夥伴: false,
     節目製作夥伴: false,
@@ -1155,19 +1189,10 @@ export default function DashboardPage() {
   const partnerListCols = useMemo(
     () =>
       /** KOL開發者、合約開始日期不顯示在主列表，僅在新增/編輯 Modal 與展開詳情維護 */
-      [
-        "合作夥伴名稱",
-        "社群網站",
-        "粉絲數",
-        "頻道｜節目名稱",
-        "資料夾",
-        "經紀人",
-        "分級",
-        "自來件分潤",
-        "SDH開發分件分潤",
-        "經銷約開始日",
-        "經銷約結束日",
-      ].filter((k) => partnersVisibleCols.includes(k)),
+      /** 自來件分潤、SDH分潤、合約／經銷約日期等詳見列下方展開區 */
+      ["合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "資料夾", "經紀人", "分級"].filter((k) =>
+        partnersVisibleCols.includes(k)
+      ),
     [partnersVisibleCols]
   );
 
@@ -3966,12 +3991,20 @@ export default function DashboardPage() {
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">合約開始日期</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">合約／經銷約開始日</label>
                     <input
-                      type="text"
-                      placeholder="例：2025-01-01"
-                      value={createPartnerForm.合約開始日期}
+                      type="date"
+                      value={toHtmlDateValue(createPartnerForm.合約開始日期)}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 合約開始日期: e.target.value }))}
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">經銷約結束日</label>
+                    <input
+                      type="date"
+                      value={toHtmlDateValue(createPartnerForm.經銷約結束日)}
+                      onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 經銷約結束日: e.target.value }))}
                       className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
@@ -3992,26 +4025,6 @@ export default function DashboardPage() {
                       placeholder="例：成數或備註"
                       value={createPartnerForm["SDH開發分件分潤"]}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, "SDH開發分件分潤": e.target.value }))}
-                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">經銷約開始日</label>
-                    <input
-                      type="text"
-                      placeholder="例：2025-01-01"
-                      value={createPartnerForm.經銷約開始日}
-                      onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 經銷約開始日: e.target.value }))}
-                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">經銷約結束日</label>
-                    <input
-                      type="text"
-                      placeholder="例：2026-12-31"
-                      value={createPartnerForm.經銷約結束日}
-                      onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 經銷約結束日: e.target.value }))}
                       className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
@@ -4344,17 +4357,43 @@ export default function DashboardPage() {
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">合約開始日期</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">合約／經銷約開始日</label>
                     {partnerFieldEditable("合約開始日期") ? (
-                      <input
-                        type="text"
-                        placeholder="例：2025-01-01"
-                        value={editPartnerForm.合約開始日期}
-                        onChange={(e) => setEditPartnerForm((f) => ({ ...f, 合約開始日期: e.target.value }))}
-                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
-                      />
+                      <>
+                        <input
+                          type="date"
+                          value={toHtmlDateValue(editPartnerForm.合約開始日期)}
+                          onChange={(e) => setEditPartnerForm((f) => ({ ...f, 合約開始日期: e.target.value }))}
+                          className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
+                        />
+                        {editPartnerForm.合約開始日期.trim() !== "" && !toHtmlDateValue(editPartnerForm.合約開始日期) && (
+                          <p className="mt-1 text-[10px] text-amber-800">原紀錄（非標準日期）：{editPartnerForm.合約開始日期}</p>
+                        )}
+                      </>
                     ) : (
-                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.合約開始日期 || "—"}</p>
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">
+                        {formatPartnerDateDisplay(editPartnerForm.合約開始日期)}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">經銷約結束日</label>
+                    {partnerFieldEditable("經銷約結束日") ? (
+                      <>
+                        <input
+                          type="date"
+                          value={toHtmlDateValue(editPartnerForm.經銷約結束日)}
+                          onChange={(e) => setEditPartnerForm((f) => ({ ...f, 經銷約結束日: e.target.value }))}
+                          className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
+                        />
+                        {editPartnerForm.經銷約結束日.trim() !== "" && !toHtmlDateValue(editPartnerForm.經銷約結束日) && (
+                          <p className="mt-1 text-[10px] text-amber-800">原紀錄（非標準日期）：{editPartnerForm.經銷約結束日}</p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">
+                        {formatPartnerDateDisplay(editPartnerForm.經銷約結束日)}
+                      </p>
                     )}
                   </div>
                   <div>
@@ -4383,34 +4422,6 @@ export default function DashboardPage() {
                       />
                     ) : (
                       <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm["SDH開發分件分潤"] || "—"}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">經銷約開始日</label>
-                    {partnerFieldEditable("經銷約開始日") ? (
-                      <input
-                        type="text"
-                        placeholder="例：2025-01-01"
-                        value={editPartnerForm.經銷約開始日}
-                        onChange={(e) => setEditPartnerForm((f) => ({ ...f, 經銷約開始日: e.target.value }))}
-                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
-                      />
-                    ) : (
-                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.經銷約開始日 || "—"}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">經銷約結束日</label>
-                    {partnerFieldEditable("經銷約結束日") ? (
-                      <input
-                        type="text"
-                        placeholder="例：2026-12-31"
-                        value={editPartnerForm.經銷約結束日}
-                        onChange={(e) => setEditPartnerForm((f) => ({ ...f, 經銷約結束日: e.target.value }))}
-                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
-                      />
-                    ) : (
-                      <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.經銷約結束日 || "—"}</p>
                     )}
                   </div>
                   <div>
@@ -4550,7 +4561,6 @@ export default function DashboardPage() {
                             合約開始日期: editPartnerForm.合約開始日期 || undefined,
                             自來件分潤: editPartnerForm.自來件分潤 || undefined,
                             "SDH開發分件分潤": editPartnerForm["SDH開發分件分潤"] || undefined,
-                            經銷約開始日: editPartnerForm.經銷約開始日 || undefined,
                             經銷約結束日: editPartnerForm.經銷約結束日 || undefined,
                             廣告經銷夥伴: editPartnerForm.廣告經銷夥伴,
                             節目製作夥伴: editPartnerForm.節目製作夥伴,
@@ -4796,7 +4806,6 @@ export default function DashboardPage() {
                         合約開始日期: "",
                         自來件分潤: "",
                         "SDH開發分件分潤": "",
-                        經銷約開始日: "",
                         經銷約結束日: "",
                         廣告經銷夥伴: false,
                         節目製作夥伴: false,
@@ -4874,7 +4883,6 @@ export default function DashboardPage() {
                             合約開始日期: String(pt.合約開始日期 ?? ""),
                             自來件分潤: String(pt.自來件分潤 ?? ""),
                             "SDH開發分件分潤": String(pt["SDH開發分件分潤"] ?? ""),
-                            經銷約開始日: String(pt.經銷約開始日 ?? ""),
                             經銷約結束日: String(pt.經銷約結束日 ?? ""),
                             廣告經銷夥伴: Boolean(pt.廣告經銷夥伴),
                             節目製作夥伴: Boolean(pt.節目製作夥伴),
@@ -4935,12 +4943,8 @@ export default function DashboardPage() {
                           return (
                             <td
                               key={k}
-                              className={`px-4 py-3.5 text-sm font-medium ${k === "PartnerID" || k === "合作夥伴名稱" ? "whitespace-nowrap text-stone-900" : "text-stone-600"} ${k === "Email" || k === "頻道｜節目名稱" || k === "自來件分潤" || k === "SDH開發分件分潤" ? "max-w-[220px] truncate" : ""}`}
-                              title={
-                                k === "Email" || k === "頻道｜節目名稱" || k === "自來件分潤" || k === "SDH開發分件分潤"
-                                  ? str
-                                  : undefined
-                              }
+                              className={`px-4 py-3.5 text-sm font-medium ${k === "PartnerID" || k === "合作夥伴名稱" ? "whitespace-nowrap text-stone-900" : "text-stone-600"} ${k === "Email" || k === "頻道｜節目名稱" ? "max-w-[220px] truncate" : ""}`}
+                              title={k === "Email" || k === "頻道｜節目名稱" ? str : undefined}
                             >
                               {str}
                             </td>
@@ -4953,34 +4957,59 @@ export default function DashboardPage() {
                             colSpan={(partnerListCols.length || 6) + 1}
                             className="px-6 py-4 text-sm"
                           >
-                            <div className="grid grid-cols-2 gap-x-6 gap-y-3 md:grid-cols-3 lg:grid-cols-4">
-                              {TABLE_COLUMNS.partners.map((c) => {
-                                const val = (pt as unknown as Record<string, unknown>)[c.key];
-                                const display =
-                                  c.key === "是否有經營 私域群" || c.key === "廣告經銷夥伴" || c.key === "節目製作夥伴" || c.key === "課程製作夥伴"
-                                    ? Boolean(val)
-                                      ? "✓"
-                                      : "—"
-                                    : c.key === "社群網站"
-                                    ? null
-                                    : String(val ?? "—");
-                                if (display === null && c.key === "社群網站") {
-                                  return (
-                                    <div key={c.key} className="md:col-span-2">
-                                      <span className="text-xs font-medium text-stone-500">{c.label}：</span>
-                                      <span className="ml-1">
-                                        <SocialLinkIcons value={val as string} />
-                                      </span>
-                                    </div>
-                                  );
-                                }
-                                return (
-                                  <div key={c.key}>
-                                    <span className="text-xs font-medium text-stone-500">{c.label}：</span>
-                                    <span className="ml-1 text-stone-600">{display}</span>
-                                  </div>
-                                );
-                              })}
+                            <div className="space-y-4">
+                              {PARTNER_EXPAND_SECTION_KEYS.map((section) => (
+                                <div
+                                  key={section.title}
+                                  className="rounded-xl border border-amber-200/50 bg-gradient-to-br from-amber-50/50 via-white to-stone-50/40 p-4 shadow-sm ring-1 ring-amber-100/60"
+                                >
+                                  <h4 className="mb-3 border-b border-amber-200/70 pb-2 text-xs font-bold tracking-wide text-amber-900/90">
+                                    {section.title}
+                                  </h4>
+                                  <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                    {section.keys.map((key) => {
+                                      const val = (pt as unknown as Record<string, unknown>)[key];
+                                      const label = tableColumnLabels.partners?.[key] ?? key;
+                                      const isBool =
+                                        key === "是否有經營 私域群" ||
+                                        key === "廣告經銷夥伴" ||
+                                        key === "節目製作夥伴" ||
+                                        key === "課程製作夥伴";
+                                      if (key === "社群網站") {
+                                        return (
+                                          <div key={key} className="sm:col-span-2 lg:col-span-3">
+                                            <dt className="text-[11px] font-semibold uppercase tracking-wide text-stone-500">{label}</dt>
+                                            <dd className="mt-1">
+                                              <SocialLinkIcons value={val as string} />
+                                            </dd>
+                                          </div>
+                                        );
+                                      }
+                                      let text: string;
+                                      if (isBool) {
+                                        text = Boolean(val) ? "是" : "否";
+                                      } else if (key === "合約開始日期" || key === "經銷約結束日") {
+                                        text = formatPartnerDateDisplay(val as string);
+                                      } else {
+                                        const s = String(val ?? "").trim();
+                                        text = s === "" ? "—" : s;
+                                      }
+                                      return (
+                                        <div key={key}>
+                                          <dt className="text-[11px] font-semibold uppercase tracking-wide text-stone-500">{label}</dt>
+                                          <dd
+                                            className={`mt-1 text-sm leading-snug text-stone-800 ${
+                                              key === "合約開始日期" || key === "經銷約結束日" ? "tabular-nums" : ""
+                                            }`}
+                                          >
+                                            {text}
+                                          </dd>
+                                        </div>
+                                      );
+                                    })}
+                                  </dl>
+                                </div>
+                              ))}
                             </div>
                           </td>
                         </tr>
@@ -5211,7 +5240,6 @@ export default function DashboardPage() {
                                     合約開始日期: String(pt.合約開始日期 ?? ""),
                                     自來件分潤: String(pt.自來件分潤 ?? ""),
                                     "SDH開發分件分潤": String(pt["SDH開發分件分潤"] ?? ""),
-                                    經銷約開始日: String(pt.經銷約開始日 ?? ""),
                                     經銷約結束日: String(pt.經銷約結束日 ?? ""),
                                     廣告經銷夥伴: Boolean(pt.廣告經銷夥伴),
                                     節目製作夥伴: Boolean(pt.節目製作夥伴),
@@ -5249,7 +5277,6 @@ export default function DashboardPage() {
                                   合約開始日期: String(pt.合約開始日期 ?? ""),
                                   自來件分潤: String(pt.自來件分潤 ?? ""),
                                   "SDH開發分件分潤": String(pt["SDH開發分件分潤"] ?? ""),
-                                  經銷約開始日: String(pt.經銷約開始日 ?? ""),
                                   經銷約結束日: String(pt.經銷約結束日 ?? ""),
                                   廣告經銷夥伴: Boolean(pt.廣告經銷夥伴),
                                   節目製作夥伴: Boolean(pt.節目製作夥伴),

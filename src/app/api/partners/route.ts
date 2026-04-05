@@ -102,7 +102,6 @@ export async function POST(request: NextRequest) {
         合約開始日期: body?.合約開始日期,
         自來件分潤: body?.自來件分潤,
         "SDH開發分件分潤": body?.["SDH開發分件分潤"],
-        經銷約開始日: body?.經銷約開始日,
         經銷約結束日: body?.經銷約結束日,
         廣告經銷夥伴: Boolean(body?.廣告經銷夥伴),
         節目製作夥伴: Boolean(body?.節目製作夥伴),

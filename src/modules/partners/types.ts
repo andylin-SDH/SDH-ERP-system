@@ -19,14 +19,13 @@ export interface PartnerRow {
   KOL開發者?: string;
   /** 主管（分潤模式 B 用） */
   主管?: string;
-  /** 合約開始日期（可存 yyyy-MM-dd 或文字） */
+  /** 合約／經銷約開始日（建議 yyyy-MM-dd） */
   合約開始日期?: string;
   /** 自來件分潤（成數或文字，依業務約定） */
   自來件分潤?: string;
   /** SDH 開發分件分潤（成數或文字） */
   "SDH開發分件分潤"?: string;
-  /** 經銷約起訖（可 yyyy-MM-dd 或自由文字） */
-  經銷約開始日?: string;
+  /** 經銷約結束日（建議 yyyy-MM-dd） */
   經銷約結束日?: string;
   廣告經銷夥伴?: boolean;
   節目製作夥伴?: boolean;
