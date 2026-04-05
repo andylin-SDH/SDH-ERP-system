@@ -5641,7 +5641,7 @@ export default function DashboardPage() {
               )}
               {finance.length > 0 && (
                 <p className="mb-2 text-[11px] text-stone-500">
-                  僅「廠商付款日期」「員工分潤日期」可編輯；約 0.65 秒無變更或離開欄位時儲存。若儲存失敗，請確認 Supabase 已套用 migration「034_財務_廠商員工欄位改為日期」。
+                  僅「廠商付款日期」「員工分潤日期」可編輯（日曆選擇）；約 0.65 秒無變更或離開欄位時儲存。若儲存失敗，請確認 Supabase 已套用 migration「034_財務_廠商員工欄位改為日期」。
                 </p>
               )}
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
@@ -5706,21 +5706,23 @@ export default function DashboardPage() {
                                     </td>
                                   );
                                 }
-                                const val = v == null ? "" : String(v);
-                                const finInputCls =
-                                  "w-full min-w-[4rem] rounded border border-stone-200 bg-white px-2 py-1 text-xs text-stone-800 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none disabled:opacity-60";
-                                const wide = k === "廠商付款日期" || k === "員工分潤日期";
+                                const rawVal = v == null ? "" : String(v);
+                                const dateVal = normalizeDateForInput(rawVal);
+                                const finDateInputCls =
+                                  "w-full min-w-[9.5rem] max-w-[11rem] rounded border border-stone-200 bg-white px-1.5 py-1 text-xs font-sans tabular-nums text-stone-800 focus:border-amber-500/60 focus:outline-none disabled:opacity-60 [color-scheme:light]";
                                 return (
-                                  <td key={k} className={`px-2 py-2 align-middle ${wide ? "min-w-[6.5rem] max-w-[9rem]" : "min-w-[4.5rem] max-w-[8rem]"}`}>
+                                  <td key={k} className="min-w-[9.5rem] max-w-[11rem] px-2 py-2 align-middle">
                                     <input
-                                      type="text"
-                                      value={val}
+                                      type="date"
+                                      value={dateVal}
                                       disabled={financeSaving}
+                                      title={rawVal && rawVal !== dateVal ? `已正規化為西元日期；原值：${rawVal}` : undefined}
                                       onChange={(e) => {
                                         setFinanceEditError(null);
+                                        const next = e.target.value;
                                         setFinance((prev) =>
                                           prev.map((r) =>
-                                            String(r.專案ID ?? "").trim() === fid ? { ...r, [k]: e.target.value } : r
+                                            String(r.專案ID ?? "").trim() === fid ? { ...r, [k]: next } : r
                                           )
                                         );
                                         schedulePersistFinanceRow(fid);
@@ -5728,7 +5730,7 @@ export default function DashboardPage() {
                                       onBlur={() => {
                                         flushPersistFinanceRow(fid);
                                       }}
-                                      className={finInputCls}
+                                      className={finDateInputCls}
                                     />
                                   </td>
                                 );
