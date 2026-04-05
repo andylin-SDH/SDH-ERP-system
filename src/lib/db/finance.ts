@@ -95,6 +95,84 @@ export async function syncAllFinanceFromMaster(): Promise<void> {
   }
 }
 
+/** 財務「依專案」僅允許 PATCH 此二欄；其餘由大總表同步帶入 */
+export type FinanceUpdateFields = {
+  廠商付款日期?: string | null;
+  員工分潤日期?: string | null;
+};
+
+function mapFinanceDbRow(r: Record<string, unknown>, 專案名稱: string | undefined): FinanceRow {
+  return {
+    專案ID: r.專案ID != null ? String(r.專案ID) : undefined,
+    專案名稱,
+    專案總金額未稅: r.專案總金額未稅 != null ? String(r.專案總金額未稅) : undefined,
+    專案成本: r.專案成本 != null ? String(r.專案成本) : undefined,
+    專案實際成本: r.專案實際成本 != null ? String(r.專案實際成本) : undefined,
+    專案分潤: r.專案分潤 != null ? String(r.專案分潤) : undefined,
+    專案利潤: r.專案利潤 != null ? String(r.專案利潤) : undefined,
+    專案利潤比: r.專案利潤比 != null ? String(r.專案利潤比) : undefined,
+    發票號碼: r.發票號碼 != null ? String(r.發票號碼) : undefined,
+    廠商付款日期:
+      r.廠商付款日期 != null
+        ? String(r.廠商付款日期)
+        : r.廠商付款狀態 != null
+          ? String(r.廠商付款狀態)
+          : undefined,
+    員工分潤日期:
+      r.員工分潤日期 != null
+        ? String(r.員工分潤日期)
+        : r.員工分潤狀態 != null
+          ? String(r.員工分潤狀態)
+          : undefined,
+  };
+}
+
+/**
+ * 財務寫入廠商／員工日期後，將同專案所有分潤表列的「專案實際入帳日期」「分潤匯款日期」與財務對齊。
+ * （語意：廠商付款日 → 專案已入帳；員工分潤日 → 分潤已匯出）
+ */
+async function syncPayoutRowsFromFinanceDates(
+  專案ID: string,
+  廠商付款日期Val: string | undefined,
+  員工分潤日期Val: string | undefined
+): Promise<void> {
+  const pid = String(專案ID ?? "").trim();
+  if (!pid) return;
+  const vIn =
+    廠商付款日期Val == null || String(廠商付款日期Val).trim() === "" ? null : String(廠商付款日期Val).trim();
+  const pOut =
+    員工分潤日期Val == null || String(員工分潤日期Val).trim() === "" ? null : String(員工分潤日期Val).trim();
+  const { error } = await getSupabase()
+    .from("分潤表")
+    .update({ 專案實際入帳日期: vIn, 分潤匯款日期: pOut })
+    .eq("專案ID", pid);
+  if (error) {
+    if (error.code === "42P01") return;
+    throw error;
+  }
+}
+
+/**
+ * 依專案ID 更新財務列（僅廠商付款日期、員工分潤日期）。migration 需已將欄位更名。
+ * 成功後會同步更新該專案所有分潤表列之入帳日／分潤匯款日。
+ */
+export async function updateFinanceBy專案ID(專案ID: string, row: FinanceUpdateFields): Promise<FinanceRow> {
+  const pid = String(專案ID ?? "").trim();
+  if (!pid) throw new Error("缺少專案ID");
+
+  const payload = {
+    廠商付款日期: trimOrNull(row.廠商付款日期),
+    員工分潤日期: trimOrNull(row.員工分潤日期),
+  };
+
+  const { data, error } = await getSupabase().from("財務").update(payload).eq("專案ID", pid).select("*").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("找不到該專案之財務列或更新失敗");
+  const updated = mapFinanceDbRow(data as Record<string, unknown>, undefined);
+  await syncPayoutRowsFromFinanceDates(pid, updated.廠商付款日期, updated.員工分潤日期);
+  return updated;
+}
+
 export async function getInvoices(): Promise<InvoiceRow[]> {
   const { data, error } = await getSupabase()
     .from("發票")
@@ -193,19 +271,7 @@ export async function getFinance(): Promise<FinanceRow[]> {
     const pid = String(r.專案ID ?? "").trim();
     const fromMaster = pid ? nameBy專案ID.get(pid) : undefined;
     const 專案名稱 = fromMaster && fromMaster !== "" ? fromMaster : undefined;
-    return {
-      專案ID: r.專案ID as string | undefined,
-      專案名稱,
-      專案總金額未稅: r.專案總金額未稅 as string | undefined,
-      專案成本: r.專案成本 as string | undefined,
-      專案實際成本: r.專案實際成本 as string | undefined,
-      專案分潤: r.專案分潤 as string | undefined,
-      專案利潤: r.專案利潤 as string | undefined,
-      專案利潤比: r.專案利潤比 as string | undefined,
-      發票號碼: r.發票號碼 as string | undefined,
-      廠商付款狀態: r.廠商付款狀態 as string | undefined,
-      員工分潤狀態: r.員工分潤狀態 as string | undefined,
-    };
+    return mapFinanceDbRow(r, 專案名稱);
   });
 }
 

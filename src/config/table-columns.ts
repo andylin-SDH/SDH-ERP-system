@@ -32,6 +32,8 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "專案ID", label: "專案ID" },
     { key: "專案名稱", label: "專案名稱" },
     { key: "專案狀態", label: "專案狀態" },
+    /** 依財務「廠商付款日期／員工分潤日期」衍生，非大總表 DB 欄位 */
+    { key: "款項進度", label: "款項進度" },
     { key: "開案日期", label: "開案日期" },
     { key: "專案總金額未稅", label: "專案總金額未稅" },
     { key: "專案營收", label: "專案營收" },
@@ -104,8 +106,8 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "專案利潤", label: "專案利潤" },
     { key: "專案利潤比", label: "專案利潤比" },
     { key: "發票號碼", label: "發票號碼" },
-    { key: "廠商付款狀態", label: "廠商付款狀態" },
-    { key: "員工分潤狀態", label: "員工分潤狀態" },
+    { key: "廠商付款日期", label: "廠商付款日期" },
+    { key: "員工分潤日期", label: "員工分潤日期" },
   ],
   invoices: [
     { key: "專案ID", label: "專案ID（可空白）" },

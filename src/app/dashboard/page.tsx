@@ -7,7 +7,8 @@ import type { User } from "@/lib/types";
 import type { TaskRow } from "@/modules/tasks";
 import type { PartnerRow } from "@/modules/partners";
 import type { MasterRow } from "@/lib/db/master";
-import type { InvoiceRow, InvoiceInsertInput } from "@/modules/finance";
+import type { InvoiceRow, InvoiceInsertInput, FinanceRow } from "@/modules/finance";
+import type { FinanceUpdateFields } from "@/lib/db/finance";
 import type { PayoutRow } from "@/lib/db/payout";
 import { applyDedupeRules } from "@/lib/payout-dedupe";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
@@ -131,6 +132,18 @@ function invoiceRowToInsertInput(row: InvoiceRow): InvoiceInsertInput {
   };
 }
 
+function financeRowToUpdatePayload(row: FinanceRow): FinanceUpdateFields {
+  const r = row as Record<string, string | undefined>;
+  return {
+    廠商付款日期: r.廠商付款日期 ?? "",
+    員工分潤日期: r.員工分潤日期 ?? "",
+  };
+}
+
+function isFinanceByProjectEditableColumn(k: string): boolean {
+  return k === "廠商付款日期" || k === "員工分潤日期";
+}
+
 const LS_INVOICE_PREFIX = "sdh-invoice-seq-prefix";
 const LS_INVOICE_PAD = "sdh-invoice-seq-pad";
 const LS_INVOICE_NEXT = "sdh-invoice-seq-next";
@@ -222,8 +235,54 @@ function isMasterRowRelatedToUser(
   return Boolean(pid && projectIdsFromMyTasks.has(pid));
 }
 
+/** 依財務列衍生：待結帳／待分潤／已分潤（無財務列時顯示 —） */
+function financeProgressShortLabel(f: FinanceRow | undefined): string {
+  if (!f) return "—";
+  const v = String(f.廠商付款日期 ?? "").trim();
+  const e = String(f.員工分潤日期 ?? "").trim();
+  if (!v) return "待結帳";
+  if (!e) return "待分潤";
+  return "已分潤";
+}
+
+function financeProgressDetail(f: FinanceRow | undefined): string {
+  if (!f) return "尚無財務列或無法對應專案";
+  const v = String(f.廠商付款日期 ?? "").trim();
+  const e = String(f.員工分潤日期 ?? "").trim();
+  if (!v) return "財務尚未填廠商付款日期（視同廠商未付款）";
+  if (!e) return "廠商已付款；財務尚未填員工分潤日期（公司未匯出分潤）";
+  return `廠商付款日：${v}；員工分潤日：${e}`;
+}
+
+function financeProgressBadgeClass(short: string): string {
+  if (short === "待結帳") return "bg-stone-200 text-stone-700";
+  if (short === "待分潤") return "bg-amber-100 text-amber-900 ring-1 ring-amber-300/60";
+  if (short === "已分潤") return "bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300/50";
+  return "bg-stone-100 text-stone-500";
+}
+
+/** 分潤表三態：對應列上「專案實際入帳日期」（廠商已付）與「分潤匯款日期」（公司已匯） */
+type PayoutWorkflowTabKey = "pending_vendor" | "pending_payout" | "settled";
+
+function payoutRowWorkflowStage(row: PayoutRow): PayoutWorkflowTabKey {
+  const vendorIn = String(row.專案實際入帳日期 ?? "").trim();
+  const empOut = String(row.分潤匯款日期 ?? "").trim();
+  if (empOut) return "settled";
+  if (vendorIn) return "pending_payout";
+  return "pending_vendor";
+}
+
 /** 大總表儲存格：模式 B 之經紀人／主管／KOL開發者取自合作夥伴；模式 A 不顯示該三欄（回傳空字串） */
-function masterTableCellText(row: MasterRow, colKey: string, partnerByKolName: Map<string, PartnerRow>): string {
+function masterTableCellText(
+  row: MasterRow,
+  colKey: string,
+  partnerByKolName: Map<string, PartnerRow>,
+  financeByProjectId?: Map<string, FinanceRow>
+): string {
+  if (colKey === "款項進度") {
+    const pid = String(row.專案ID ?? "").trim();
+    return financeProgressShortLabel(pid ? financeByProjectId?.get(pid) : undefined);
+  }
   const modeB = isPayoutModeB(String(row.專案類型 ?? ""));
   if (colKey === "經紀人" || colKey === "主管" || colKey === "KOL開發者") {
     if (!modeB) return "";
@@ -535,7 +594,13 @@ export default function DashboardPage() {
   const invoiceSaveInflightRef = useRef<Set<string>>(new Set());
   const invoiceSavePendingRef = useRef<Set<string>>(new Set());
   const invoiceSaveDebounceRef = useRef<Map<string, number>>(new Map());
-  const [finance, setFinance] = useState<Record<string, string | undefined>[]>([]);
+  const [finance, setFinance] = useState<FinanceRow[]>([]);
+  const [financeEditSaving專案ID, setFinanceEditSaving專案ID] = useState<string | null>(null);
+  const [financeEditError, setFinanceEditError] = useState<string | null>(null);
+  const financeRef = useRef<FinanceRow[]>([]);
+  const financeSaveInflightRef = useRef<Set<string>>(new Set());
+  const financeSavePendingRef = useRef<Set<string>>(new Set());
+  const financeSaveDebounceRef = useRef<Map<string, number>>(new Map());
   const [payoutList, setPayoutList] = useState<PayoutRow[]>([]);
   /** Dashboard 分頁搜尋關鍵字（各區塊獨立） */
   const [masterSearch, setMasterSearch] = useState("");
@@ -547,6 +612,7 @@ export default function DashboardPage() {
   const [partnersSearch, setPartnersSearch] = useState("");
   const [tasksSearch, setTasksSearch] = useState("");
   const [payoutSearch, setPayoutSearch] = useState("");
+  const [payoutWorkflowTab, setPayoutWorkflowTab] = useState<PayoutWorkflowTabKey>("pending_vendor");
   const [financeSearch, setFinanceSearch] = useState("");
   const [invoicesSearch, setInvoicesSearch] = useState("");
   /** 財務分頁內：依專案列 vs 發票清冊（發票已併入財務） */
@@ -839,10 +905,17 @@ export default function DashboardPage() {
         return cols.filter((k) => allKeys.includes(k));
       }
       const cols = myVisibility?.columns?.[tableKey];
-      const normalized =
+      let normalized: string[] | undefined =
         tableKey === "tasks" && cols && !cols.includes("*")
           ? cols.map((c) => (c === "狀態" ? "任務類型" : c))
           : cols;
+      if (tableKey === "finance" && Array.isArray(normalized) && !normalized.includes("*")) {
+        const legacy: Record<string, string> = {
+          廠商付款狀態: "廠商付款日期",
+          員工分潤狀態: "員工分潤日期",
+        };
+        normalized = [...new Set(normalized.map((k) => legacy[k] ?? k))];
+      }
       const allKeys = (TABLE_COLUMNS[tableKey] ?? []).map((c) => c.key);
       if (!normalized || normalized.includes("*")) return allKeys;
       /** 任務表：系統時間欄位併入可見清單（舊 ③ 設定未勾選時仍顯示） */
@@ -860,6 +933,16 @@ export default function DashboardPage() {
           const idx = merged.indexOf("專案ID");
           if (idx !== -1) merged.splice(idx + 1, 0, "專案名稱");
           else merged.unshift("專案名稱");
+        }
+        return merged.filter((k) => allKeys.includes(k));
+      }
+      /** 大總表：款項進度（依財務衍生，預設緊接在專案狀態後） */
+      if (tableKey === "master") {
+        const merged = [...normalized];
+        if (allKeys.includes("款項進度") && !merged.includes("款項進度")) {
+          const idx = merged.indexOf("專案狀態");
+          if (idx !== -1) merged.splice(idx + 1, 0, "款項進度");
+          else merged.push("款項進度");
         }
         return merged.filter((k) => allKeys.includes(k));
       }
@@ -1040,6 +1123,15 @@ export default function DashboardPage() {
   const financeVisibleCols = useMemo(() => getVisibleColumnKeys("finance"), [getVisibleColumnKeys]);
   const invoicesVisibleCols = useMemo(() => getVisibleColumnKeys("invoices"), [getVisibleColumnKeys]);
 
+  const financeByProjectId = useMemo(() => {
+    const m = new Map<string, FinanceRow>();
+    for (const f of finance) {
+      const pid = String(f.專案ID ?? "").trim();
+      if (pid) m.set(pid, f);
+    }
+    return m;
+  }, [finance]);
+
   /**
    * KOL 區塊主列表欄位（與 ③ 可見欄位交集）
    * 含「經紀人」方便對照 ② 篩選：該欄必須與登入者 Users.姓名 或 Users.帳號 完全一致才會留下該列
@@ -1058,9 +1150,11 @@ export default function DashboardPage() {
     const q = deferredMasterSearch.trim().toLowerCase();
     if (!q) return masterTabFilteredList;
     return masterTabFilteredList.filter((row) =>
-      masterVisibleCols.some((k) => masterTableCellText(row, k, partnerByKolName).toLowerCase().includes(q))
+      masterVisibleCols.some((k) =>
+        masterTableCellText(row, k, partnerByKolName, financeByProjectId).toLowerCase().includes(q)
+      )
     );
-  }, [masterTabFilteredList, masterVisibleCols, deferredMasterSearch, partnerByKolName]);
+  }, [masterTabFilteredList, masterVisibleCols, deferredMasterSearch, partnerByKolName, financeByProjectId]);
 
   /**
    * 依「目前子分頁篩選後」是否同時含模式 A 與模式 B 專案，決定表頭角色欄。
@@ -1141,10 +1235,32 @@ export default function DashboardPage() {
     return out;
   }, [filteredPayout, masterTypeByProjectId, payoutDedupeRules]);
 
+  const payoutWorkflowFiltered = useMemo(
+    () => dedupedPayoutForDisplay.filter((r) => payoutRowWorkflowStage(r) === payoutWorkflowTab),
+    [dedupedPayoutForDisplay, payoutWorkflowTab]
+  );
+
+  const payoutWorkflowCounts = useMemo(() => {
+    let pending_vendor = 0;
+    let pending_payout = 0;
+    let settled = 0;
+    for (const r of dedupedPayoutForDisplay) {
+      const s = payoutRowWorkflowStage(r);
+      if (s === "pending_vendor") pending_vendor += 1;
+      else if (s === "pending_payout") pending_payout += 1;
+      else settled += 1;
+    }
+    return { pending_vendor, pending_payout, settled };
+  }, [dedupedPayoutForDisplay]);
+
   const searchedPayout = useMemo(
     () =>
-      filterRowsBySearch(dedupedPayoutForDisplay as unknown as Record<string, unknown>[], payoutVisibleCols, deferredPayoutSearch) as unknown as PayoutRow[],
-    [dedupedPayoutForDisplay, payoutVisibleCols, deferredPayoutSearch, filterRowsBySearch]
+      filterRowsBySearch(
+        payoutWorkflowFiltered as unknown as Record<string, unknown>[],
+        payoutVisibleCols,
+        deferredPayoutSearch
+      ) as unknown as PayoutRow[],
+    [payoutWorkflowFiltered, payoutVisibleCols, deferredPayoutSearch, filterRowsBySearch]
   );
   const searchedFinance = useMemo(
     () => filterRowsBySearch(finance as unknown as Record<string, unknown>[], financeVisibleCols, deferredFinanceSearch),
@@ -1225,7 +1341,8 @@ export default function DashboardPage() {
     };
     timer = window.setTimeout(tick, 0);
     return () => { if (timer) window.clearTimeout(timer); };
-  }, [activeSection, searchedPayout.length]);
+  }, [activeSection, searchedPayout.length, payoutWorkflowTab]);
+
   useEffect(() => {
     if (activeSection !== "tasks") return;
     setTasksRenderCount(RENDER_CHUNK_SIZE);
@@ -1461,7 +1578,7 @@ export default function DashboardPage() {
       if (invRes.status === "fulfilled" && invRes.value && (invRes.value as { ok?: boolean }).ok)
         setInvoices(((invRes.value as { invoices?: InvoiceRow[] }).invoices) ?? []);
       if (finRes.status === "fulfilled" && finRes.value && (finRes.value as { ok?: boolean }).ok)
-        setFinance(((finRes.value as { finance?: Record<string, string | undefined>[] }).finance) ?? []);
+        setFinance(((finRes.value as { finance?: FinanceRow[] }).finance) ?? []);
       if (payoutRes.status === "fulfilled" && payoutRes.value && (payoutRes.value as { ok?: boolean }).ok)
         setPayoutList(((payoutRes.value as { list?: PayoutRow[] }).list) ?? []);
     },
@@ -1545,6 +1662,89 @@ export default function DashboardPage() {
     return () => {
       for (const t of invoiceSaveDebounceRef.current.values()) window.clearTimeout(t);
       invoiceSaveDebounceRef.current.clear();
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    financeRef.current = finance;
+  }, [finance]);
+
+  /** 財務依專案：僅「廠商付款日期」「員工分潤日期」寫回 DB（不重打 GET，避免整表 reload 覆蓋本地狀態） */
+  const persistFinanceRowBy專案ID = useCallback(async (專案IDKey: string) => {
+    if (!專案IDKey) return;
+    if (financeSaveInflightRef.current.has(專案IDKey)) {
+      financeSavePendingRef.current.add(專案IDKey);
+      return;
+    }
+    const row = financeRef.current.find((r) => String(r.專案ID ?? "").trim() === 專案IDKey);
+    if (!row || !String(row.專案ID ?? "").trim()) return;
+    financeSaveInflightRef.current.add(專案IDKey);
+    setFinanceEditSaving專案ID(專案IDKey);
+    setFinanceEditError(null);
+    try {
+      const res = await fetch("/api/finance", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 專案ID: row.專案ID, ...financeRowToUpdatePayload(row) }),
+      });
+      const data = (await safeResJson(res)) as { ok?: boolean; error?: string; finance?: FinanceRow };
+      if (!res.ok || data.ok === false) {
+        setFinanceEditError(String(data.error ?? "儲存失敗"));
+        return;
+      }
+      if (data.finance) {
+        setFinance((prev) =>
+          prev.map((r) =>
+            String(r.專案ID ?? "").trim() === 專案IDKey
+              ? { ...r, ...data.finance, 專案名稱: r.專案名稱 ?? data.finance?.專案名稱 }
+              : r
+          )
+        );
+      }
+      await refreshDashboardData(["payout"]);
+    } catch (e) {
+      setFinanceEditError(e instanceof Error ? e.message : "儲存失敗");
+    } finally {
+      financeSaveInflightRef.current.delete(專案IDKey);
+      setFinanceEditSaving專案ID((cur) => (cur === 專案IDKey ? null : cur));
+      if (financeSavePendingRef.current.has(專案IDKey)) {
+        financeSavePendingRef.current.delete(專案IDKey);
+        queueMicrotask(() => {
+          void persistFinanceRowBy專案ID(專案IDKey);
+        });
+      }
+    }
+  }, [refreshDashboardData]);
+
+  const schedulePersistFinanceRow = useCallback(
+    (專案IDKey: string) => {
+      const existing = financeSaveDebounceRef.current.get(專案IDKey);
+      if (existing) window.clearTimeout(existing);
+      const t = window.setTimeout(() => {
+        financeSaveDebounceRef.current.delete(專案IDKey);
+        void persistFinanceRowBy專案ID(專案IDKey);
+      }, 650);
+      financeSaveDebounceRef.current.set(專案IDKey, t);
+    },
+    [persistFinanceRowBy專案ID]
+  );
+
+  const flushPersistFinanceRow = useCallback(
+    (專案IDKey: string) => {
+      const existing = financeSaveDebounceRef.current.get(專案IDKey);
+      if (existing) {
+        window.clearTimeout(existing);
+        financeSaveDebounceRef.current.delete(專案IDKey);
+      }
+      void persistFinanceRowBy專案ID(專案IDKey);
+    },
+    [persistFinanceRowBy專案ID]
+  );
+
+  useEffect(() => {
+    return () => {
+      for (const t of financeSaveDebounceRef.current.values()) window.clearTimeout(t);
+      financeSaveDebounceRef.current.clear();
     };
   }, []);
 
@@ -1648,6 +1848,23 @@ export default function DashboardPage() {
       /* ignore */
     }
   }, [financeSubTab]);
+
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem("sdh-payout-workflow-tab");
+      if (v === "pending_vendor" || v === "pending_payout" || v === "settled") setPayoutWorkflowTab(v);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("sdh-payout-workflow-tab", payoutWorkflowTab);
+    } catch {
+      /* ignore */
+    }
+  }, [payoutWorkflowTab]);
 
   /** system_config 首次載入後還原大總表子分頁（僅一次） */
   const masterSubTabRestored = useRef(false);
@@ -2397,7 +2614,18 @@ export default function DashboardPage() {
               <table className="min-w-full table-fixed divide-y divide-stone-200">
                 <colgroup>
                   {masterColsForDisplay.map((k) => (
-                    <col key={k} className={k === "專案ID" ? "w-[5rem] min-w-[5rem]" : k === "專案名稱" ? "min-w-[12rem]" : "min-w-[5rem]"} />
+                    <col
+                      key={k}
+                      className={
+                        k === "專案ID"
+                          ? "w-[5rem] min-w-[5rem]"
+                          : k === "專案名稱"
+                            ? "min-w-[12rem]"
+                            : k === "款項進度"
+                              ? "min-w-[5.5rem]"
+                              : "min-w-[5rem]"
+                      }
+                    />
                   ))}
                 </colgroup>
                 <thead className="sticky top-0 z-20 bg-stone-100">
@@ -2410,7 +2638,9 @@ export default function DashboardPage() {
                             ? "sticky left-0 z-30 w-[5rem] min-w-[5rem] max-w-[5rem] bg-stone-100 px-2 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
                             : k === "專案名稱"
                               ? "sticky left-[5rem] z-30 w-48 min-w-[12rem] max-w-[12rem] bg-stone-100 px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
-                              : "min-w-[5rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600 whitespace-nowrap"
+                              : k === "款項進度"
+                                ? "min-w-[5.5rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
+                                : "min-w-[5rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600 whitespace-nowrap"
                         }
                       >
                         {tableColumnLabels.master?.[k] ?? k}
@@ -2491,7 +2721,22 @@ export default function DashboardPage() {
                                   </td>
                                 );
                               }
-                              const cellText = masterTableCellText(row, k, partnerByKolName);
+                              if (k === "款項進度") {
+                                const fpid = String(row.專案ID ?? "").trim();
+                                const fr = fpid ? financeByProjectId.get(fpid) : undefined;
+                                const short = financeProgressShortLabel(fr);
+                                const detail = financeProgressDetail(fr);
+                                return (
+                                  <td key={k} className="whitespace-nowrap bg-white/90 px-4 py-3.5" title={detail}>
+                                    <span
+                                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${financeProgressBadgeClass(short)}`}
+                                    >
+                                      {short}
+                                    </span>
+                                  </td>
+                                );
+                              }
+                              const cellText = masterTableCellText(row, k, partnerByKolName, financeByProjectId);
                               const displayStr = cellText || "—";
                               return (
                                 <td
@@ -5149,8 +5394,44 @@ export default function DashboardPage() {
         {/* 分潤表 */}
         {activeSection === "payout" && (
         <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-xl font-bold tracking-tight text-stone-900">分潤表</h2>
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-xl font-bold tracking-tight text-stone-900">分潤表</h2>
+              <p className="mt-1 max-w-2xl text-xs text-stone-500">
+                財務填寫「廠商付款日期」後，此處同專案列會帶入「專案實際入帳日期」並歸入「待分潤」；填寫「員工分潤日期」後會帶入「分潤匯款日期」並歸入「已分潤」。
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-stone-200 bg-amber-50/90 p-1">
+              {(
+                [
+                  { key: "pending_vendor" as const, label: "待結帳" },
+                  { key: "pending_payout" as const, label: "待分潤" },
+                  { key: "settled" as const, label: "已分潤" },
+                ] as const
+              ).map(({ key, label }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setPayoutWorkflowTab(key)}
+                  className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                    payoutWorkflowTab === key ? "bg-amber-500 text-slate-900 shadow shadow-amber-200/40" : "text-stone-500 hover:text-stone-900"
+                  }`}
+                >
+                  {label}
+                  <span className="ml-1 tabular-nums text-[10px] opacity-80">
+                    (
+                    {key === "pending_vendor"
+                      ? payoutWorkflowCounts.pending_vendor
+                      : key === "pending_payout"
+                        ? payoutWorkflowCounts.pending_payout
+                        : payoutWorkflowCounts.settled}
+                    )
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
             <input
               type="text"
               value={payoutSearch}
@@ -5166,7 +5447,11 @@ export default function DashboardPage() {
               {/* 小螢幕：卡片式收納顯示（分潤金額為主、次要資訊、其他可摺疊） */}
               <div className="space-y-3 md:hidden">
                 {searchedPayout.length === 0 ? (
-                  <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">沒有符合搜尋結果</p>
+                  <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">
+                    {deferredPayoutSearch.trim()
+                      ? "沒有符合搜尋結果"
+                      : "此階段目前沒有分潤列，可切換上方「待結帳／待分潤／已分潤」或至財務填寫廠商／員工日期。"}
+                  </p>
                 ) : (
                   visiblePayoutRows.map((row, i) => {
                     const r = row as unknown as Record<string, unknown>;
@@ -5272,7 +5557,9 @@ export default function DashboardPage() {
                     {searchedPayout.length === 0 ? (
                       <tr>
                         <td colSpan={payoutColsForDisplay.length || 7} className="px-4 py-8 text-center text-base font-medium text-stone-500">
-                          沒有符合搜尋結果
+                          {deferredPayoutSearch.trim()
+                            ? "沒有符合搜尋結果"
+                            : "此階段目前沒有分潤列，可切換上方「待結帳／待分潤／已分潤」或至財務填寫廠商／員工日期。"}
                         </td>
                       </tr>
                     ) : (
@@ -5312,7 +5599,9 @@ export default function DashboardPage() {
           <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div>
               <h2 className="text-xl font-bold tracking-tight text-stone-900">財務</h2>
-              <p className="mt-1 text-xs text-stone-500">依專案對應大總表財務列；發票清冊為全部開立憑證（可不綁專案）。</p>
+              <p className="mt-1 text-xs text-stone-500">
+                依專案：金額與指標由大總表同步帶入；僅「廠商付款日期」「員工分潤日期」可於此編輯。發票清冊為全部開立憑證（可不綁專案）。
+              </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-stone-200 bg-amber-50/90 p-1">
               <button
@@ -5343,10 +5632,18 @@ export default function DashboardPage() {
                   type="text"
                   value={financeSearch}
                   onChange={(e) => setFinanceSearch(e.target.value)}
-                  placeholder="搜尋專案ID、專案名稱、利潤、狀態…"
+                  placeholder="搜尋專案ID、專案名稱、金額、日期…"
                   className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
                 />
               </div>
+              {financeEditError && (
+                <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{financeEditError}</p>
+              )}
+              {finance.length > 0 && (
+                <p className="mb-2 text-[11px] text-stone-500">
+                  僅「廠商付款日期」「員工分潤日期」可編輯；約 0.65 秒無變更或離開欄位時儲存。若儲存失敗，請確認 Supabase 已套用 migration「034_財務_廠商員工欄位改為日期」。
+                </p>
+              )}
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
                 {finance.length === 0 ? (
                   <p className="px-4 py-8 text-center text-stone-500">尚無財務資料（專案建立後會自動對應一列）</p>
@@ -5376,33 +5673,69 @@ export default function DashboardPage() {
                           </td>
                         </tr>
                       ) : (
-                        visibleFinanceRows.map((row, i) => (
-                          <tr key={i} className="hover:bg-amber-50/80">
-                            {financeVisibleCols.map((k) => {
-                              const v = (row as unknown as Record<string, unknown>)[k];
-                              const str = String(v ?? "—");
-                              if (k === "專案ID") {
+                        visibleFinanceRows.map((row, i) => {
+                          const fid = String(row.專案ID ?? "").trim();
+                          const financeSaving = fid !== "" && financeEditSaving專案ID === fid;
+                          return (
+                            <tr key={fid || `fin-row-${i}`} className="hover:bg-amber-50/80">
+                              {financeVisibleCols.map((k) => {
+                                const v = (row as unknown as Record<string, unknown>)[k];
+                                const str = String(v ?? "—");
+                                if (k === "專案ID") {
+                                  return (
+                                    <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm font-medium text-stone-900">
+                                      {str}
+                                    </td>
+                                  );
+                                }
+                                if (k === "專案名稱") {
+                                  return (
+                                    <td
+                                      key={k}
+                                      className="max-w-[200px] truncate px-4 py-3.5 text-sm text-stone-700"
+                                      title={str !== "—" ? str : undefined}
+                                    >
+                                      {str}
+                                    </td>
+                                  );
+                                }
+                                if (!fid || !isFinanceByProjectEditableColumn(k)) {
+                                  return (
+                                    <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm text-stone-600">
+                                      {str}
+                                    </td>
+                                  );
+                                }
+                                const val = v == null ? "" : String(v);
+                                const finInputCls =
+                                  "w-full min-w-[4rem] rounded border border-stone-200 bg-white px-2 py-1 text-xs text-stone-800 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none disabled:opacity-60";
+                                const wide = k === "廠商付款日期" || k === "員工分潤日期";
                                 return (
-                                  <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm font-medium text-stone-900">
-                                    {str}
+                                  <td key={k} className={`px-2 py-2 align-middle ${wide ? "min-w-[6.5rem] max-w-[9rem]" : "min-w-[4.5rem] max-w-[8rem]"}`}>
+                                    <input
+                                      type="text"
+                                      value={val}
+                                      disabled={financeSaving}
+                                      onChange={(e) => {
+                                        setFinanceEditError(null);
+                                        setFinance((prev) =>
+                                          prev.map((r) =>
+                                            String(r.專案ID ?? "").trim() === fid ? { ...r, [k]: e.target.value } : r
+                                          )
+                                        );
+                                        schedulePersistFinanceRow(fid);
+                                      }}
+                                      onBlur={() => {
+                                        flushPersistFinanceRow(fid);
+                                      }}
+                                      className={finInputCls}
+                                    />
                                   </td>
                                 );
-                              }
-                              if (k === "專案名稱") {
-                                return (
-                                  <td
-                                    key={k}
-                                    className="max-w-[200px] truncate px-4 py-3.5 text-sm text-stone-700"
-                                    title={str !== "—" ? str : undefined}
-                                  >
-                                    {str}
-                                  </td>
-                                );
-                              }
-                              return <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm text-stone-600">{str}</td>;
-                            })}
-                          </tr>
-                        ))
+                              })}
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
