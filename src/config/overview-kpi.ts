@@ -28,6 +28,7 @@ export const DEFAULT_OVERVIEW_KPI_BY_ROLE: Record<string, OverviewKpiKey[]> = {
   製作人: [...OVERVIEW_KPI_KEYS],
   會計: [...OVERVIEW_KPI_KEYS],
   行政: [...OVERVIEW_KPI_KEYS],
+  KOL: [...OVERVIEW_KPI_KEYS],
 };
 
 export function getDefaultOverviewKpisForRole(role: string): OverviewKpiKey[] {

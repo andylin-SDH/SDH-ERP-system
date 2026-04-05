@@ -11,6 +11,9 @@ import type { User } from "@/lib/types";
 const COOKIE_NAME = "erp_email";
 export const ADMIN_ROLES = ["董事長", "管理者"] as const;
 
+/** KOL 專用入口（與員工後台分離） */
+export const KOL_ROLE = "KOL" as const;
+
 export function getEmailFromCookie(request: NextRequest | Request): string | null {
   const cookieHeader = request.headers.get("cookie");
   if (!cookieHeader) return null;
@@ -48,6 +51,16 @@ export async function requireAdmin(request: NextRequest | Request): Promise<{ us
   const role = result.user.role as (typeof ADMIN_ROLES)[number] | string;
   if (!ADMIN_ROLES.includes(role as (typeof ADMIN_ROLES)[number])) {
     return NextResponse.json({ ok: false, error: "僅董事長或管理者可執行此操作" }, { status: 403 });
+  }
+  return result;
+}
+
+/** 必須為 KOL 角色（與員工帳號區隔） */
+export async function requireKol(request: NextRequest | Request): Promise<{ user: User } | NextResponse> {
+  const result = await requireAuth(request);
+  if (result instanceof NextResponse) return result;
+  if (String(result.user.role ?? "").trim() !== KOL_ROLE) {
+    return NextResponse.json({ ok: false, error: "此操作僅限 KOL 帳號" }, { status: 403 });
   }
   return result;
 }

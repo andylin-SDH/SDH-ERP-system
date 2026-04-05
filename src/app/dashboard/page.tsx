@@ -39,6 +39,30 @@ async function safeResJson(r: Response): Promise<Record<string, unknown>> {
   }
 }
 
+/** KOL 帳號 scope 存 PartnerID；選單選項為「ID — 合作夥伴名稱」 */
+function kolPartnerSelectOptions(partners: PartnerRow[]): string[] {
+  const rows = partners
+    .filter((p) => String(p.PartnerID ?? "").trim())
+    .map((p) => `${String(p.PartnerID).trim()} — ${String(p.合作夥伴名稱 ?? "").trim()}`)
+    .sort((a, b) => a.localeCompare(b, "zh-TW"));
+  return [...new Set(rows)];
+}
+
+function parseKolPartnerOptionToScope(opt: string): string {
+  const s = opt.trim();
+  if (!s) return "";
+  const sep = " — ";
+  const i = s.indexOf(sep);
+  return i === -1 ? s : s.slice(0, i).trim();
+}
+
+function kolScopeButtonLabel(scopeStored: string, options: string[]): string {
+  const id = String(scopeStored ?? "").trim();
+  if (!id) return "";
+  const hit = options.find((o) => o.startsWith(`${id} — `) || parseKolPartnerOptionToScope(o) === id);
+  return hit ?? id;
+}
+
 /** 專案營收 = 專案總金額未稅 - 專案成本 - KOL費用未稅 */
 function calc專案營收(總金額: string, 成本: string, kol費用: string): string {
   const a = Number(總金額) || 0;
@@ -753,11 +777,13 @@ export default function DashboardPage() {
     };
   }, [systemConfig?.payout_dedupe_rules]);
 
-  /** 角色列表：優先使用系統設定（DB），無則用 config 預設；與「角色管理」「新增使用者」下拉一致 */
-  const displayRoles = useMemo(
-    () => (systemConfig?.roles?.length ? systemConfig.roles : [...ROLES]),
-    [systemConfig?.roles]
-  );
+  /** 角色列表：優先使用系統設定（DB），無則用 config 預設；一律附帶 KOL（訪客入口），避免舊 DB 未列而選不到 */
+  const displayRoles = useMemo(() => {
+    const base = systemConfig?.roles?.length ? systemConfig.roles : [...ROLES];
+    return base.includes("KOL") ? base : [...base, "KOL"];
+  }, [systemConfig?.roles]);
+
+  const kolPartnerScopeOptions = useMemo(() => kolPartnerSelectOptions(partners), [partners]);
 
   /** 專案權限設定：預設 create = 所有角色；update/delete = 董事長 + 管理者，可在 UI 調整 */
   const rolePermissions = useMemo(() => {
@@ -1862,6 +1888,10 @@ export default function DashboardPage() {
         if (!sess.ok || !sess.user) {
           setError("請先登入");
           setLoading(false);
+          return;
+        }
+        if (String(sess.user.role ?? "").trim() === "KOL") {
+          window.location.replace("/kol");
           return;
         }
         setMe(sess.user);
@@ -3714,13 +3744,42 @@ export default function DashboardPage() {
                 <InputField label="姓名" value={createUserForm.name} onChange={(v) => setCreateUserForm((f) => ({ ...f, name: v }))} />
                 <InputField label="密碼" type="password" value={createUserForm.password} onChange={(v) => setCreateUserForm((f) => ({ ...f, password: v }))} />
                 <SelectField
+                  className="relative z-[25]"
                   label="角色"
                   value={displayRoles.includes(createUserForm.role) ? createUserForm.role : (displayRoles[0] ?? "經紀人")}
                   onChange={(v) => setCreateUserForm((f) => ({ ...f, role: v }))}
                   options={[...displayRoles]}
                 />
-                <InputField label="部門" value={createUserForm.dept} onChange={(v) => setCreateUserForm((f) => ({ ...f, dept: v }))} />
-                <InputField label="責任範圍 (scope)" value={createUserForm.scope} onChange={(v) => setCreateUserForm((f) => ({ ...f, scope: v }))} />
+                <div>
+                  <InputField label="部門（選填）" value={createUserForm.dept} onChange={(v) => setCreateUserForm((f) => ({ ...f, dept: v }))} />
+                  <p className="mt-1 text-xs leading-relaxed text-stone-500">
+                    內部備註用（例如業務組），可留空。這裡不是「職位選單」：職位請改上面「角色」。
+                  </p>
+                </div>
+                {createUserForm.role === "KOL" ? (
+                  <div>
+                    <SearchableSelectField
+                      label="責任範圍：綁定合作夥伴 (PartnerID)"
+                      value={kolScopeButtonLabel(createUserForm.scope, kolPartnerScopeOptions)}
+                      onChange={(v) =>
+                        setCreateUserForm((f) => ({ ...f, scope: v ? parseKolPartnerOptionToScope(v) : "" }))
+                      }
+                      options={kolPartnerScopeOptions}
+                      searchPlaceholder="搜尋編號或 KOL 名稱…"
+                      emptyHint="尚無合作夥伴時請先到「合作夥伴」新增（核准後才會出現）"
+                    />
+                    <p className="mt-1 text-xs leading-relaxed text-stone-500">
+                      選填：選取後會寫入 PartnerID，用來對應專案。若不選，則以登入 Email 與合作夥伴表的 Email 一致時仍可對應。
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <InputField label="責任範圍 (scope)" value={createUserForm.scope} onChange={(v) => setCreateUserForm((f) => ({ ...f, scope: v }))} />
+                    <p className="mt-1 text-xs leading-relaxed text-stone-500">
+                      經紀人常見：<span className="font-mono text-stone-600">主管</span>、<span className="font-mono text-stone-600">*</span> 或留空（依公司規範）。
+                    </p>
+                  </div>
+                )}
               </div>
               <div className="mt-6 flex justify-end gap-3">
                 <button
@@ -6641,13 +6700,38 @@ export default function DashboardPage() {
                   </div>
                   <InputField label="姓名" value={editUserForm.name} onChange={(v) => setEditUserForm((f) => ({ ...f, name: v }))} />
                   <SelectField
+                    className="relative z-[25]"
                     label="角色"
                     value={displayRoles.includes(editUserForm.role) ? editUserForm.role : (displayRoles[0] ?? "")}
                     onChange={(v) => setEditUserForm((f) => ({ ...f, role: v }))}
                     options={[...displayRoles]}
                   />
-                  <InputField label="部門" value={editUserForm.dept} onChange={(v) => setEditUserForm((f) => ({ ...f, dept: v }))} />
-                  <InputField label="責任範圍 (scope)" value={editUserForm.scope} onChange={(v) => setEditUserForm((f) => ({ ...f, scope: v }))} />
+                  <div>
+                    <InputField label="部門（選填）" value={editUserForm.dept} onChange={(v) => setEditUserForm((f) => ({ ...f, dept: v }))} />
+                    <p className="mt-1 text-xs leading-relaxed text-stone-500">內部備註用，可留空；職位請改「角色」。</p>
+                  </div>
+                  {editUserForm.role === "KOL" ? (
+                    <div className="sm:col-span-2">
+                      <SearchableSelectField
+                        label="責任範圍：綁定合作夥伴 (PartnerID)"
+                        value={kolScopeButtonLabel(editUserForm.scope, kolPartnerScopeOptions)}
+                        onChange={(v) =>
+                          setEditUserForm((f) => ({ ...f, scope: v ? parseKolPartnerOptionToScope(v) : "" }))
+                        }
+                        options={kolPartnerScopeOptions}
+                        searchPlaceholder="搜尋編號或 KOL 名稱…"
+                        emptyHint="尚無合作夥伴時請先到「合作夥伴」新增（核准後才會出現）"
+                      />
+                      <p className="mt-1 text-xs leading-relaxed text-stone-500">
+                        選填：選取後寫入 PartnerID。可不選，改以 Email 對應合作夥伴。
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="sm:col-span-2">
+                      <InputField label="責任範圍 (scope)" value={editUserForm.scope} onChange={(v) => setEditUserForm((f) => ({ ...f, scope: v }))} />
+                      <p className="mt-1 text-xs leading-relaxed text-stone-500">經紀人常見：主管、* 或留空。</p>
+                    </div>
+                  )}
                   <div className="sm:col-span-2">
                     <InputField label="新密碼（不修改請留白）" type="password" value={editUserForm.password} onChange={(v) => setEditUserForm((f) => ({ ...f, password: v }))} />
                   </div>

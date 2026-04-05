@@ -2,10 +2,10 @@
  * 依角色決定「每個帳號該顯示什麼」
  * 對應 docs/DATA_MODEL.md 的關聯性，方便從大總表／分潤表統一設定
  *
- * 角色列表：董事長、管理者、經紀人、製作人、會計、行政
+ * 角色列表：董事長、管理者、經紀人、製作人、會計、行政、KOL（訪客入口）
  */
 
-export const ROLES = ["董事長", "管理者", "經紀人", "製作人", "會計", "行政"] as const;
+export const ROLES = ["董事長", "管理者", "經紀人", "製作人", "會計", "行政", "KOL"] as const;
 export type RoleKey = (typeof ROLES)[number] | string;
 
 /** 各角色可看到的「區塊」與資料範圍 */
@@ -52,6 +52,12 @@ export const ROLE_VISIBILITY: Record<string, RoleVisibilityConfig> = {
     fullAccess: false,
     sections: ["overview", "partners", "tasks"],
     filterNote: "合作夥伴與任務",
+  },
+  /** 僅使用 /kol 訪客頁；不進員工 Dashboard 資料區塊 */
+  KOL: {
+    fullAccess: false,
+    sections: [],
+    filterNote: "訪客入口，與員工後台分離",
   },
 };
 

@@ -24,7 +24,8 @@ export default function Home() {
       .then(safeResJson)
       .then((data) => {
         if (data.ok && data.user) {
-          window.location.href = "/dashboard";
+          const role = String((data.user as { role?: string }).role ?? "").trim();
+          window.location.href = role === "KOL" ? "/kol" : "/dashboard";
           return;
         }
         setChecking(false);
@@ -50,7 +51,9 @@ export default function Home() {
           setLoggingIn(false);
           return;
         }
-        window.location.href = "/dashboard";
+        const u = data.user as { role?: string } | undefined;
+        const role = String(u?.role ?? "").trim();
+        window.location.href = role === "KOL" ? "/kol" : "/dashboard";
       })
       .catch(() => {
         setError("登入失敗");
