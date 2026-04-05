@@ -495,7 +495,6 @@ export default function DashboardPage() {
     資料夾: string;
     經紀人: string;
     KOL開發者: string;
-    主管: string;
     經銷約開始日: string;
     自來件分潤: string;
     "SDH開發分件分潤": string;
@@ -518,7 +517,6 @@ export default function DashboardPage() {
     資料夾: "",
     經紀人: "",
     KOL開發者: "",
-    主管: "",
     經銷約開始日: "",
     自來件分潤: "",
     "SDH開發分件分潤": "",
@@ -548,7 +546,6 @@ export default function DashboardPage() {
     資料夾: string;
     經紀人: string;
     KOL開發者: string;
-    主管: string;
     經銷約開始日: string;
     自來件分潤: string;
     "SDH開發分件分潤": string;
@@ -571,7 +568,6 @@ export default function DashboardPage() {
     資料夾: "",
     經紀人: "",
     KOL開發者: "",
-    主管: "",
     經銷約開始日: "",
     自來件分潤: "",
     "SDH開發分件分潤": "",
@@ -3979,18 +3975,6 @@ export default function DashboardPage() {
                     )}
                   </div>
                   <div>
-                    <SearchableSelectField
-                      label="主管（分潤模式 B 用）"
-                      value={createPartnerForm.主管}
-                      onChange={(v) => setCreatePartnerForm((f) => ({ ...f, 主管: v }))}
-                      options={[...new Set([...userNames, createPartnerForm.主管].filter(Boolean))].sort((a, b) =>
-                        a.localeCompare(b, "zh-TW")
-                      )}
-                      searchPlaceholder="搜尋人員姓名或帳號…"
-                      emptyHint="尚無使用者資料時請先至「使用者」新增帳號"
-                    />
-                  </div>
-                  <div>
                     <label className="mb-1 block text-xs font-semibold text-stone-500">經銷約開始日</label>
                     <input
                       type="date"
@@ -4338,25 +4322,6 @@ export default function DashboardPage() {
                     )}
                   </div>
                   <div>
-                    {partnerFieldEditable("主管") ? (
-                      <SearchableSelectField
-                        label="主管（分潤模式 B 用）"
-                        value={editPartnerForm.主管}
-                        onChange={(v) => setEditPartnerForm((f) => ({ ...f, 主管: v }))}
-                        options={[...new Set([...userNames, editPartnerForm.主管].filter(Boolean))].sort((a, b) =>
-                          a.localeCompare(b, "zh-TW")
-                        )}
-                        searchPlaceholder="搜尋人員姓名或帳號…"
-                        emptyHint="尚無使用者資料時請先至「使用者」新增帳號"
-                      />
-                    ) : (
-                      <>
-                        <label className="mb-1 block text-xs font-semibold text-stone-500">主管（分潤模式 B 用）</label>
-                        <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.主管 || "—"}</p>
-                      </>
-                    )}
-                  </div>
-                  <div>
                     <label className="mb-1 block text-xs font-semibold text-stone-500">經銷約開始日</label>
                     {partnerFieldEditable("經銷約開始日") ? (
                       <>
@@ -4557,7 +4522,6 @@ export default function DashboardPage() {
                             資料夾: editPartnerForm.資料夾 || undefined,
                             經紀人: editPartnerForm.經紀人 || undefined,
                             KOL開發者: editPartnerForm.KOL開發者 || undefined,
-                            主管: editPartnerForm.主管 || undefined,
                             經銷約開始日: editPartnerForm.經銷約開始日 || undefined,
                             自來件分潤: editPartnerForm.自來件分潤 || undefined,
                             "SDH開發分件分潤": editPartnerForm["SDH開發分件分潤"] || undefined,
@@ -4802,7 +4766,6 @@ export default function DashboardPage() {
                         資料夾: "",
                         經紀人: me?.name ?? "",
                         KOL開發者: "",
-                        主管: "",
                         經銷約開始日: "",
                         自來件分潤: "",
                         "SDH開發分件分潤": "",
@@ -4879,7 +4842,6 @@ export default function DashboardPage() {
                             資料夾: String(pt.資料夾 ?? ""),
                             經紀人: String(pt.經紀人 ?? ""),
                             KOL開發者: String(pt.KOL開發者 ?? ""),
-                            主管: String(pt.主管 ?? ""),
                             經銷約開始日: String(pt.經銷約開始日 ?? ""),
                             自來件分潤: String(pt.自來件分潤 ?? ""),
                             "SDH開發分件分潤": String(pt["SDH開發分件分潤"] ?? ""),
@@ -5240,7 +5202,6 @@ export default function DashboardPage() {
                                     資料夾: String(pt.資料夾 ?? ""),
                                     經紀人: String(pt.經紀人 ?? ""),
                                     KOL開發者: String(pt.KOL開發者 ?? ""),
-                                    主管: String(pt.主管 ?? ""),
                                     經銷約開始日: String(pt.經銷約開始日 ?? ""),
                                     自來件分潤: String(pt.自來件分潤 ?? ""),
                                     "SDH開發分件分潤": String(pt["SDH開發分件分潤"] ?? ""),
@@ -5277,7 +5238,6 @@ export default function DashboardPage() {
                                   資料夾: String(pt.資料夾 ?? ""),
                                   經紀人: String(pt.經紀人 ?? ""),
                                   KOL開發者: String(pt.KOL開發者 ?? ""),
-                                  主管: String(pt.主管 ?? ""),
                                   經銷約開始日: String(pt.經銷約開始日 ?? ""),
                                   自來件分潤: String(pt.自來件分潤 ?? ""),
                                   "SDH開發分件分潤": String(pt["SDH開發分件分潤"] ?? ""),

@@ -98,7 +98,6 @@ export async function POST(request: NextRequest) {
         經紀人: body?.經紀人 ?? auth.user.name ?? auth.user.email,
         /** 非管理者不可指定 KOL開發者，由董事長後續補 */
         KOL開發者: admin ? body?.KOL開發者 : undefined,
-        主管: body?.主管,
         經銷約開始日: body?.經銷約開始日,
         自來件分潤: body?.自來件分潤,
         "SDH開發分件分潤": body?.["SDH開發分件分潤"],
