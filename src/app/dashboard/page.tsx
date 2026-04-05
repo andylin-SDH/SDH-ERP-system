@@ -1253,6 +1253,16 @@ export default function DashboardPage() {
     return { pending_vendor, pending_payout, settled };
   }, [dedupedPayoutForDisplay]);
 
+  /** 分潤表頂部儀表：待分潤列的分潤金額加總（同列表②可見範圍與去重後） */
+  const payoutPendingPayoutAmountSum = useMemo(() => {
+    let sum = 0;
+    for (const r of dedupedPayoutForDisplay) {
+      if (payoutRowWorkflowStage(r) !== "pending_payout") continue;
+      sum += parseNumericField(r.分潤金額);
+    }
+    return sum;
+  }, [dedupedPayoutForDisplay]);
+
   const searchedPayout = useMemo(
     () =>
       filterRowsBySearch(
@@ -5444,6 +5454,28 @@ export default function DashboardPage() {
             <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">尚無分潤表資料</p>
           ) : (
             <>
+              <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <div className="rounded-2xl border border-stone-200/80 bg-gradient-to-br from-white to-stone-50/90 px-3 py-3 shadow-sm shadow-stone-200/50 ring-1 ring-amber-100/40 sm:px-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">待結帳筆數</p>
+                  <p className="mt-1.5 text-xl font-bold tabular-nums text-stone-900 sm:text-2xl">{payoutWorkflowCounts.pending_vendor}</p>
+                  <p className="mt-0.5 text-[10px] text-stone-400">廠商未付款</p>
+                </div>
+                <div className="rounded-2xl border border-stone-200/80 bg-gradient-to-br from-white to-amber-50/50 px-3 py-3 shadow-sm shadow-amber-200/30 ring-1 ring-amber-200/50 sm:px-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-800/90">待分潤筆數</p>
+                  <p className="mt-1.5 text-xl font-bold tabular-nums text-amber-900 sm:text-2xl">{payoutWorkflowCounts.pending_payout}</p>
+                  <p className="mt-0.5 text-[10px] text-stone-500">廠商已付、待匯分潤</p>
+                </div>
+                <div className="rounded-2xl border border-stone-200/80 bg-gradient-to-br from-white to-emerald-50/40 px-3 py-3 shadow-sm shadow-stone-200/50 ring-1 ring-emerald-100/50 sm:px-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">已分潤筆數</p>
+                  <p className="mt-1.5 text-xl font-bold tabular-nums text-emerald-900 sm:text-2xl">{payoutWorkflowCounts.settled}</p>
+                  <p className="mt-0.5 text-[10px] text-stone-400">已填分潤匯款日</p>
+                </div>
+                <div className="rounded-2xl border border-amber-200/90 bg-gradient-to-br from-amber-50/90 to-amber-100/50 px-3 py-3 shadow-md shadow-amber-200/40 ring-1 ring-amber-300/40 sm:px-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-900">待分潤金額合計</p>
+                  <p className="mt-1.5 text-lg font-bold tabular-nums text-amber-950 sm:text-xl">{formatAmount(String(Math.round(payoutPendingPayoutAmountSum)))}</p>
+                  <p className="mt-0.5 text-[10px] text-amber-900/70">僅「待分潤」列加總</p>
+                </div>
+              </div>
               {/* 小螢幕：卡片式收納顯示（分潤金額為主、次要資訊、其他可摺疊） */}
               <div className="space-y-3 md:hidden">
                 {searchedPayout.length === 0 ? (
