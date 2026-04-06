@@ -6582,40 +6582,31 @@ export default function DashboardPage() {
                           onChange={(v) => setCreateForm((f) => ({ ...f, 專案引薦人: v }))}
                           options={userNames}
                         />
-                        <Field label="專案引薦人分潤成數" value={payoutDefaults.專案引薦人分潤成數} />
                         <Field label="經紀人（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === createForm.KOL名稱)?.經紀人 ?? "—"} />
-                        <Field label="經紀人分潤成數" value={payoutDefaults.經紀人分潤成數} />
                         <Field label="主管（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === createForm.KOL名稱)?.主管 ?? "—"} />
-                        <Field label="主管分潤成數" value={payoutDefaults.主管分潤成數} />
                         <Field label="KOL開發者（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === createForm.KOL名稱)?.KOL開發者 ?? "—"} />
-                        <Field label="KOL開發者分潤成數" value={payoutDefaults.KOL開發者分潤成數} />
                       </>
                     ) : (
                       <>
                         <SelectField label="專案BDPM" value={createForm.專案BDPM} onChange={(v) => setCreateForm((f) => ({ ...f, 專案BDPM: v }))} options={userNames} />
-                        <Field label="專案BDPM分潤成數" value={payoutDefaults.專案BDPM分潤成數} />
                         <SelectField
                           label="專案引薦人"
                           value={createForm.專案引薦人}
                           onChange={(v) => setCreateForm((f) => ({ ...f, 專案引薦人: v }))}
                           options={userNames}
                         />
-                        <Field label="專案引薦人分潤成數" value={payoutDefaults.專案引薦人分潤成數} />
                         <SelectField
                           label="專案管理員"
                           value={createForm.專案管理員}
                           onChange={(v) => setCreateForm((f) => ({ ...f, 專案管理員: v }))}
                           options={userNames}
                         />
-                        <Field label="專案管理員分潤成數" value={payoutDefaults.專案管理員分潤成數} />
                         <SelectField
                           label="執行管理員"
                           value={createForm.執行管理員}
                           onChange={(v) => setCreateForm((f) => ({ ...f, 執行管理員: v }))}
                           options={userNames}
                         />
-                        <Field label="執行管理員分潤成數" value={payoutDefaults.執行管理員分潤成數} />
-                        <Field label="KOL開發者分潤成數" value={payoutDefaults.KOL開發者分潤成數} />
                       </>
                     )}
                   </div>
@@ -7211,13 +7202,9 @@ export default function DashboardPage() {
                       ) : (
                         <Field label="專案引薦人" value={selectedMaster.專案引薦人} />
                       )}
-                      <Field label="專案引薦人分潤成數" value={payoutDefaults.專案引薦人分潤成數} />
                       <Field label="經紀人（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === (isEditingMaster ? editMasterForm.KOL名稱 : selectedMaster.KOL名稱))?.經紀人 ?? "—"} />
-                      <Field label="經紀人分潤成數" value={payoutDefaults.經紀人分潤成數} />
                       <Field label="主管（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === (isEditingMaster ? editMasterForm.KOL名稱 : selectedMaster.KOL名稱))?.主管 ?? "—"} />
-                      <Field label="主管分潤成數" value={payoutDefaults.主管分潤成數} />
                       <Field label="KOL開發者（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === (isEditingMaster ? editMasterForm.KOL名稱 : selectedMaster.KOL名稱))?.KOL開發者 ?? "—"} />
-                      <Field label="KOL開發者分潤成數" value={payoutDefaults.KOL開發者分潤成數} />
                     </>
                   ) : (
                     <>
@@ -7231,26 +7218,21 @@ export default function DashboardPage() {
                       ) : (
                         <Field label="專案BDPM" value={selectedMaster.專案BDPM} />
                       )}
-                      <Field label="專案BDPM分潤成數" value={payoutDefaults.專案BDPM分潤成數} />
                       {isEditingMaster ? (
                         <SelectField label="專案引薦人" value={editMasterForm.專案引薦人} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案引薦人: v }))} options={userNames} />
                       ) : (
                         <Field label="專案引薦人" value={selectedMaster.專案引薦人} />
                       )}
-                      <Field label="專案引薦人分潤成數" value={payoutDefaults.專案引薦人分潤成數} />
                       {isEditingMaster ? (
                         <SelectField label="專案管理員" value={editMasterForm.專案管理員} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案管理員: v }))} options={userNames} />
                       ) : (
                         <Field label="專案管理員" value={selectedMaster.專案管理員} />
                       )}
-                      <Field label="專案管理員分潤成數" value={payoutDefaults.專案管理員分潤成數} />
                       {isEditingMaster ? (
                         <SelectField label="執行管理員" value={editMasterForm.執行管理員} onChange={(v) => setEditMasterForm((f) => ({ ...f, 執行管理員: v }))} options={userNames} />
                       ) : (
                         <Field label="執行管理員" value={selectedMaster.執行管理員} />
                       )}
-                      <Field label="執行管理員分潤成數" value={payoutDefaults.執行管理員分潤成數} />
-                      <Field label="KOL開發者分潤成數" value={payoutDefaults.KOL開發者分潤成數} />
                     </>
                   )}
                 </div>
