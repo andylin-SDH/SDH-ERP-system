@@ -48,6 +48,7 @@ export async function syncFinanceForProject(master: MasterRow): Promise<void> {
   const payload = {
     專案總金額未稅: master.專案總金額未稅 ?? null,
     專案成本: master.專案成本 ?? null,
+    廠商預計付款日: master.廠商預計付款日 ?? null,
   };
 
   const { data: exists, error: qErr } = await supabase
@@ -112,6 +113,7 @@ function mapFinanceDbRow(r: Record<string, unknown>, 專案名稱: string | unde
     專案利潤: r.專案利潤 != null ? String(r.專案利潤) : undefined,
     專案利潤比: r.專案利潤比 != null ? String(r.專案利潤比) : undefined,
     發票號碼: r.發票號碼 != null ? String(r.發票號碼) : undefined,
+    廠商預計付款日: r.廠商預計付款日 != null ? String(r.廠商預計付款日) : undefined,
     廠商付款日期:
       r.廠商付款日期 != null
         ? String(r.廠商付款日期)
@@ -128,8 +130,8 @@ function mapFinanceDbRow(r: Record<string, unknown>, 專案名稱: string | unde
 }
 
 /**
- * 財務寫入廠商／員工日期後，將同專案所有分潤表列的「專案實際入帳日期」「分潤匯款日期」與財務對齊。
- * （語意：廠商付款日 → 專案已入帳；員工分潤日 → 分潤已匯出）
+ * 財務寫入廠商／員工日期後，將同專案所有分潤表列的「廠商付款日期」「分潤匯款日期」與財務對齊。
+ * （語意：廠商付款日期 ↔ 財務；員工分潤日 → 分潤已匯出）
  */
 async function syncPayoutRowsFromFinanceDates(
   專案ID: string,
@@ -144,7 +146,7 @@ async function syncPayoutRowsFromFinanceDates(
     員工分潤日期Val == null || String(員工分潤日期Val).trim() === "" ? null : String(員工分潤日期Val).trim();
   const { error } = await getSupabase()
     .from("分潤表")
-    .update({ 專案實際入帳日期: vIn, 分潤匯款日期: pOut })
+    .update({ 廠商付款日期: vIn, 分潤匯款日期: pOut })
     .eq("專案ID", pid);
   if (error) {
     if (error.code === "42P01") return;
@@ -154,7 +156,7 @@ async function syncPayoutRowsFromFinanceDates(
 
 /**
  * 依專案ID 更新財務列（僅廠商付款日期、員工分潤日期）。migration 需已將欄位更名。
- * 成功後會同步更新該專案所有分潤表列之入帳日／分潤匯款日。
+ * 成功後會同步更新該專案所有分潤表列之廠商付款日期／分潤匯款日。
  */
 export async function updateFinanceBy專案ID(專案ID: string, row: FinanceUpdateFields): Promise<FinanceRow> {
   const pid = String(專案ID ?? "").trim();

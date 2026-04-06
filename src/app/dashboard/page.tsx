@@ -77,14 +77,24 @@ const PAYOUT_DISPLAY_ORDER = [
   "分潤成數",
   "專案名稱",
   "專案ID",
-  "專案預計匯款日",
-  "專案實際入帳日期",
+  "廠商預計付款日",
+  "廠商付款日期",
   "分潤匯款日期",
   "專案營收",
   "專案總金額未稅",
   "分潤類型",
   "領取人",
 ] as const;
+
+/** ③ 可見欄位儲存舊 key 時對應到新欄位 */
+const PAYOUT_COLUMN_LEGACY_MAP: Record<string, string> = {
+  專案預計匯款日: "廠商預計付款日",
+  專案實際入帳日期: "廠商付款日期",
+};
+
+function normalizePayoutVisibleKeys(keys: string[]): string[] {
+  return [...new Set(keys.map((k) => PAYOUT_COLUMN_LEGACY_MAP[k] ?? k))];
+}
 
 function sortPayoutColumnsForDisplay(cols: string[]): string[] {
   return [...cols].sort((a, b) => {
@@ -323,11 +333,11 @@ function financeProgressBadgeClass(short: string): string {
   return "bg-stone-100 text-stone-500";
 }
 
-/** 分潤表三態：對應列上「專案實際入帳日期」（廠商已付）與「分潤匯款日期」（公司已匯） */
+/** 分潤表三態：對應列上「廠商付款日期」（廠商已付）與「分潤匯款日期」（公司已匯） */
 type PayoutWorkflowTabKey = "pending_vendor" | "pending_payout" | "settled";
 
 function payoutRowWorkflowStage(row: PayoutRow): PayoutWorkflowTabKey {
-  const vendorIn = String(row.專案實際入帳日期 ?? "").trim();
+  const vendorIn = String(row.廠商付款日期 ?? "").trim();
   const empOut = String(row.分潤匯款日期 ?? "").trim();
   if (empOut) return "settled";
   if (vendorIn) return "pending_payout";
@@ -416,6 +426,7 @@ export default function DashboardPage() {
     專案狀態: "",
     狀態確認日期: "",
     開案日期: "",
+    廠商預計付款日: "",
     專案總金額未稅: "",
     專案營收: "",
     專案成本: "",
@@ -447,6 +458,7 @@ export default function DashboardPage() {
     專案狀態: "",
     狀態確認日期: "",
     開案日期: "",
+    廠商預計付款日: "",
     專案資料夾: "",
     專案總金額未稅: "",
     專案營收: "",
@@ -1189,7 +1201,10 @@ export default function DashboardPage() {
     () => filterRowsByVisibility(payoutList as unknown as Record<string, unknown>[], "payout") as unknown as PayoutRow[],
     [payoutList, filterRowsByVisibility]
   );
-  const payoutVisibleCols = useMemo(() => getVisibleColumnKeys("payout"), [getVisibleColumnKeys]);
+  const payoutVisibleCols = useMemo(
+    () => normalizePayoutVisibleKeys(getVisibleColumnKeys("payout")),
+    [getVisibleColumnKeys]
+  );
   /** 分潤表實際欄順序：與權限／可見欄位一致，但全角色統一為「分潤金額優先」 */
   const payoutColsForDisplay = useMemo(() => sortPayoutColumnsForDisplay(payoutVisibleCols), [payoutVisibleCols]);
   const financeVisibleCols = useMemo(() => getVisibleColumnKeys("finance"), [getVisibleColumnKeys]);
@@ -1499,6 +1514,7 @@ export default function DashboardPage() {
       專案狀態: selectedMaster.專案狀態 ?? "",
       狀態確認日期: normalizeDateForInput(selectedMaster.狀態確認日期),
       開案日期: normalizeDateForInput(selectedMaster.開案日期),
+      廠商預計付款日: normalizeDateForInput(selectedMaster.廠商預計付款日),
       專案資料夾: selectedMaster.專案資料夾 ?? "",
       專案總金額未稅: selectedMaster.專案總金額未稅 ?? "",
       專案成本: selectedMaster.專案成本 ?? "",
@@ -2655,6 +2671,7 @@ export default function DashboardPage() {
                       專案狀態: "",
                       狀態確認日期: "",
                       開案日期: today,
+                      廠商預計付款日: "",
                       專案總金額未稅: "",
                       專案營收: "",
                       專案成本: "",
@@ -5614,7 +5631,7 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-xl font-bold tracking-tight text-stone-900">分潤表</h2>
               <p className="mt-1 max-w-2xl text-xs text-stone-500">
-                財務填寫「廠商付款日期」後，此處同專案列會帶入「專案實際入帳日期」並歸入「待分潤」；填寫「員工分潤日期」後會帶入「分潤匯款日期」並歸入「已分潤」。
+                「廠商預計付款日」由大總表專案編輯；財務填寫「廠商付款日期」後，同專案分潤列會帶入並歸入「待分潤」；填寫「員工分潤日期」後帶入「分潤匯款日期」並歸入「已分潤」。
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-stone-200 bg-amber-50/90 p-1">
@@ -5714,7 +5731,7 @@ export default function DashboardPage() {
                     const showAmt = payoutVisibleCols.includes("分潤金額");
                     const showPct = payoutVisibleCols.includes("分潤成數");
                     const showTitle = payoutVisibleCols.includes("專案名稱");
-                    const detailKeys = ["專案ID", "專案預計匯款日", "專案實際入帳日期", "分潤匯款日期", "專案營收", "專案總金額未稅", "分潤類型", "領取人"] as const;
+                    const detailKeys = ["專案ID", "廠商預計付款日", "廠商付款日期", "分潤匯款日期", "專案營收", "專案總金額未稅", "分潤類型", "領取人"] as const;
                     const hasExpandable = detailKeys.some((k) => payoutVisibleCols.includes(k));
                     return (
                       <div key={cardKey} className="rounded-xl border border-stone-200/90 bg-amber-50/50 p-4">
@@ -5762,11 +5779,11 @@ export default function DashboardPage() {
                                 {payoutVisibleCols.includes("專案總金額未稅") && (
                                   <p><span className="text-stone-500">專案總金額未稅</span> {formatAmount(String(r.專案總金額未稅 ?? ""))}</p>
                                 )}
-                                {payoutVisibleCols.includes("專案預計匯款日") && (
-                                  <p><span className="text-stone-500">專案預計匯款日</span> {String(r.專案預計匯款日 ?? "—")}</p>
+                                {payoutVisibleCols.includes("廠商預計付款日") && (
+                                  <p><span className="text-stone-500">廠商預計付款日</span> {String(r.廠商預計付款日 ?? "—")}</p>
                                 )}
-                                {payoutVisibleCols.includes("專案實際入帳日期") && (
-                                  <p><span className="text-stone-500">專案實際入帳日期</span> {String(r.專案實際入帳日期 ?? "—")}</p>
+                                {payoutVisibleCols.includes("廠商付款日期") && (
+                                  <p><span className="text-stone-500">廠商付款日期</span> {String(r.廠商付款日期 ?? "—")}</p>
                                 )}
                                 {payoutVisibleCols.includes("分潤匯款日期") && (
                                   <p><span className="text-stone-500">分潤匯款日期</span> {String(r.分潤匯款日期 ?? "—")}</p>
@@ -6503,6 +6520,11 @@ export default function DashboardPage() {
                     />
                     <DateField label="開案日期" value={createForm.開案日期} onChange={(v) => setCreateForm((f) => ({ ...f, 開案日期: v }))} />
                     <DateField label="狀態確認日期" value={createForm.狀態確認日期} onChange={(v) => setCreateForm((f) => ({ ...f, 狀態確認日期: v }))} />
+                    <DateField
+                      label="廠商預計付款日"
+                      value={createForm.廠商預計付款日}
+                      onChange={(v) => setCreateForm((f) => ({ ...f, 廠商預計付款日: v }))}
+                    />
                     <InputField label="專案資料夾" value={createForm.專案資料夾} onChange={(v) => setCreateForm((f) => ({ ...f, 專案資料夾: v }))} className="col-span-2" />
                   </div>
                 </section>
@@ -6948,6 +6970,7 @@ export default function DashboardPage() {
                       專案狀態: selectedMaster.專案狀態 ?? "",
                       狀態確認日期: normalizeDateForInput(selectedMaster.狀態確認日期),
                       開案日期: normalizeDateForInput(selectedMaster.開案日期),
+                      廠商預計付款日: normalizeDateForInput(selectedMaster.廠商預計付款日),
                       專案資料夾: selectedMaster.專案資料夾 ?? "",
                       專案總金額未稅: selectedMaster.專案總金額未稅 ?? "",
                       專案成本: selectedMaster.專案成本 ?? "",
@@ -7083,6 +7106,15 @@ export default function DashboardPage() {
                     <DateField label="狀態確認日期" value={editMasterForm.狀態確認日期} onChange={(v) => setEditMasterForm((f) => ({ ...f, 狀態確認日期: v }))} />
                   ) : (
                     <Field label="狀態確認日期" value={selectedMaster.狀態確認日期} />
+                  )}
+                  {isEditingMaster ? (
+                    <DateField
+                      label="廠商預計付款日"
+                      value={editMasterForm.廠商預計付款日}
+                      onChange={(v) => setEditMasterForm((f) => ({ ...f, 廠商預計付款日: v }))}
+                    />
+                  ) : (
+                    <Field label="廠商預計付款日" value={selectedMaster.廠商預計付款日} />
                   )}
                   {isEditingMaster ? (
                     <InputField label="專案資料夾" value={editMasterForm.專案資料夾} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案資料夾: v }))} className="col-span-2" />

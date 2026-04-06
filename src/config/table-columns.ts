@@ -42,6 +42,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "KOL名稱", label: "KOL名稱" },
     { key: "專案費用類型", label: "專案費用類型" },
     { key: "廠商名稱", label: "廠商名稱" },
+    { key: "廠商預計付款日", label: "廠商預計付款日" },
     /** 模式 A/B 共用；模式 B 另見經紀人／主管／KOL開發者（由合作夥伴帶出） */
     { key: "專案引薦人", label: "專案引薦人" },
     /** 分潤模式 A（製作案、活動案等） */
@@ -91,8 +92,8 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "專案名稱", label: "專案名稱" },
     { key: "專案總金額未稅", label: "專案總金額未稅" },
     { key: "專案營收", label: "專案營收" },
-    { key: "專案預計匯款日", label: "專案預計匯款日" },
-    { key: "專案實際入帳日期", label: "專案實際入帳日期" },
+    { key: "廠商預計付款日", label: "廠商預計付款日" },
+    { key: "廠商付款日期", label: "廠商付款日期" },
     { key: "分潤匯款日期", label: "分潤匯款日期" },
     { key: "分潤類型", label: "分潤類型" },
     { key: "分潤成數", label: "分潤成數" },
@@ -109,6 +110,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "專案利潤", label: "專案利潤" },
     { key: "專案利潤比", label: "專案利潤比" },
     { key: "發票號碼", label: "發票號碼" },
+    { key: "廠商預計付款日", label: "廠商預計付款日" },
     { key: "廠商付款日期", label: "廠商付款日期" },
     { key: "員工分潤日期", label: "員工分潤日期" },
   ],

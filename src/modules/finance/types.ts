@@ -31,6 +31,8 @@ export interface FinanceRow {
   專案利潤?: string;
   專案利潤比?: string;
   發票號碼?: string;
+  /** 與大總表「廠商預計付款日」同步 */
+  廠商預計付款日?: string;
   /** 財務依專案表（與發票表之「廠商付款日期」為不同資料表欄位） */
   廠商付款日期?: string;
   員工分潤日期?: string;
