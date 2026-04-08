@@ -1207,6 +1207,11 @@ export default function DashboardPage() {
   );
   /** 分潤表實際欄順序：與權限／可見欄位一致，但全角色統一為「分潤金額優先」 */
   const payoutColsForDisplay = useMemo(() => sortPayoutColumnsForDisplay(payoutVisibleCols), [payoutVisibleCols]);
+  /** 待結帳／待分潤不顯示「分潤匯款日期」（有值即已分潤，僅在已分潤分頁有意義） */
+  const payoutColsForActiveWorkflowTab = useMemo(() => {
+    if (payoutWorkflowTab === "settled") return payoutColsForDisplay;
+    return payoutColsForDisplay.filter((k) => k !== "分潤匯款日期");
+  }, [payoutColsForDisplay, payoutWorkflowTab]);
   const financeVisibleCols = useMemo(() => getVisibleColumnKeys("finance"), [getVisibleColumnKeys]);
   const invoicesVisibleCols = useMemo(() => getVisibleColumnKeys("invoices"), [getVisibleColumnKeys]);
 
@@ -5731,7 +5736,10 @@ export default function DashboardPage() {
                     const showAmt = payoutVisibleCols.includes("分潤金額");
                     const showPct = payoutVisibleCols.includes("分潤成數");
                     const showTitle = payoutVisibleCols.includes("專案名稱");
-                    const detailKeys = ["專案ID", "廠商預計付款日", "廠商付款日期", "分潤匯款日期", "專案營收", "專案總金額未稅", "分潤類型", "領取人"] as const;
+                    const detailKeys =
+                      payoutWorkflowTab === "settled"
+                        ? (["專案ID", "廠商預計付款日", "廠商付款日期", "分潤匯款日期", "專案營收", "專案總金額未稅", "分潤類型", "領取人"] as const)
+                        : (["專案ID", "廠商預計付款日", "廠商付款日期", "專案營收", "專案總金額未稅", "分潤類型", "領取人"] as const);
                     const hasExpandable = detailKeys.some((k) => payoutVisibleCols.includes(k));
                     return (
                       <div key={cardKey} className="rounded-xl border border-stone-200/90 bg-amber-50/50 p-4">
@@ -5785,7 +5793,7 @@ export default function DashboardPage() {
                                 {payoutVisibleCols.includes("廠商付款日期") && (
                                   <p><span className="text-stone-500">廠商付款日期</span> {String(r.廠商付款日期 ?? "—")}</p>
                                 )}
-                                {payoutVisibleCols.includes("分潤匯款日期") && (
+                                {payoutWorkflowTab === "settled" && payoutVisibleCols.includes("分潤匯款日期") && (
                                   <p><span className="text-stone-500">分潤匯款日期</span> {String(r.分潤匯款日期 ?? "—")}</p>
                                 )}
                                 {payoutVisibleCols.includes("分潤類型") && (
@@ -5808,7 +5816,7 @@ export default function DashboardPage() {
                 <table className="min-w-full divide-y divide-stone-200">
                   <thead className="bg-stone-100">
                     <tr>
-                      {payoutColsForDisplay.map((k) => (
+                      {payoutColsForActiveWorkflowTab.map((k) => (
                         <th
                           key={k}
                           className={
@@ -5827,7 +5835,7 @@ export default function DashboardPage() {
                   <tbody className="divide-y divide-stone-200 bg-amber-50/40">
                     {searchedPayout.length === 0 ? (
                       <tr>
-                        <td colSpan={payoutColsForDisplay.length || 7} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                        <td colSpan={payoutColsForActiveWorkflowTab.length || 7} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                           {deferredPayoutSearch.trim()
                             ? "沒有符合搜尋結果"
                             : "此階段目前沒有分潤列，可切換上方「待結帳／待分潤／已分潤」或至財務填寫廠商／員工日期。"}
@@ -5836,7 +5844,7 @@ export default function DashboardPage() {
                     ) : (
                       visiblePayoutRows.map((row, i) => (
                         <tr key={row.id ?? i} className="hover:bg-amber-50/80">
-                          {payoutColsForDisplay.map((k) => {
+                          {payoutColsForActiveWorkflowTab.map((k) => {
                             const val = (row as unknown as Record<string, unknown>)[k];
                             const str = k === "分潤金額" ? formatAmount(String(val ?? "")) : String(val ?? "—");
                             return (
