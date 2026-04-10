@@ -15,4 +15,6 @@ export interface TaskRow {
   /** 系統於勾選「任務完成」時寫入；取消完成時清空 */
   完成時間?: string;
   任務完成?: boolean;
+  /** 使用者設定之預定完成日（YYYY-MM-DD） */
+  到期日?: string;
 }

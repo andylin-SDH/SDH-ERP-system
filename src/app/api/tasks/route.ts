@@ -23,7 +23,14 @@ export async function POST(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   try {
-    const body = (await request.json()) as { 專案ID?: string; 專案名稱?: string; 任務名稱?: string; 任務類型?: string; 負責人?: string } | null;
+    const body = (await request.json()) as {
+      專案ID?: string;
+      專案名稱?: string;
+      任務名稱?: string;
+      任務類型?: string;
+      負責人?: string;
+      到期日?: string | null;
+    } | null;
     const 專案ID = String(body?.專案ID ?? "").trim();
     if (!專案ID) {
       return NextResponse.json({ ok: false, error: "專案ID 為必填" }, { status: 400 });
@@ -39,6 +46,7 @@ export async function POST(request: NextRequest) {
       任務名稱,
       任務類型: body?.任務類型 ?? null,
       負責人: body?.負責人 ?? null,
+      到期日: body?.到期日 !== undefined ? (body.到期日 === null || body.到期日 === "" ? null : String(body.到期日)) : undefined,
     });
     // 若有指定負責人，非同步寄送指派通知（失敗不影響 API 回應）
     const 負責人 = (body?.負責人 ?? "").toString().trim();
@@ -74,6 +82,7 @@ export async function PATCH(request: NextRequest) {
       任務類型?: string;
       負責人?: string;
       任務完成?: boolean;
+      到期日?: string | null;
     } | null;
     const 任務ID = String(body?.任務ID ?? "").trim();
     if (!任務ID) {
@@ -85,6 +94,7 @@ export async function PATCH(request: NextRequest) {
       任務類型: body?.任務類型,
       負責人: body?.負責人,
       任務完成: body?.任務完成,
+      到期日: body?.到期日 !== undefined ? (body.到期日 === null || body.到期日 === "" ? null : String(body.到期日)) : undefined,
     });
     // 若此次更新有指定負責人，寄送指派通知
     const 負責人 = body?.負責人 !== undefined ? String(body.負責人 ?? "").trim() : null;

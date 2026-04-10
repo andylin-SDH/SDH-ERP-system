@@ -27,6 +27,8 @@ import {
 } from "@/config/overview-kpi";
 import { SocialLinkIcons } from "@/components/SocialLinkIcons";
 import { PARTNER_STATUS, isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
+import { TASK_DUE_SOON_DAYS } from "@/config/task-due";
+import { aggregateTasksByAssignee, dueDaysFromToday, getTaskDueUiStatus } from "@/lib/task-due";
 
 /** 安全解析 Response：空 body 或非 JSON 時回傳 {}，避免 "Unexpected end of JSON input" */
 async function safeResJson(r: Response): Promise<Record<string, unknown>> {
@@ -129,6 +131,14 @@ function formatTaskDisplayTime(iso: string | null | undefined): string {
     second: "2-digit",
     hour12: false,
   });
+}
+
+function formatTaskDueYmd(ymd: string | null | undefined): string {
+  const s = String(ymd ?? "").trim();
+  if (!s) return "—";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (!m) return s;
+  return `${m[1]}/${m[2]}/${m[3]}`;
 }
 
 /** 新增／批次發票表單欄位順序（與 TABLE_COLUMNS.invoices 一致） */
@@ -517,14 +527,15 @@ export default function DashboardPage() {
   const [partnersLoadError, setPartnersLoadError] = useState<string | null>(null);
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const [addingTaskFor, setAddingTaskFor] = useState<string | null>(null);
-  const [newTaskForm, setNewTaskForm] = useState({ 任務名稱: "", 任務類型: "", 任務負責人: "" });
+  const [newTaskForm, setNewTaskForm] = useState({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "" });
   const [addingTask, setAddingTask] = useState(false);
   const [addTaskError, setAddTaskError] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskRow | null>(null);
-  const [editTaskForm, setEditTaskForm] = useState({ 任務名稱: "", 任務類型: "", 任務負責人: "", 任務完成: false });
+  const [editTaskForm, setEditTaskForm] = useState({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 任務完成: false });
   const [savingTask, setSavingTask] = useState(false);
   const [saveTaskError, setSaveTaskError] = useState<string | null>(null);
   const [remindingTaskId, setRemindingTaskId] = useState<string | null>(null);
+  const [tasksSectionViewMode, setTasksSectionViewMode] = useState<"list" | "byAssignee">("list");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedUserForVisibility, setSelectedUserForVisibility] = useState<User | null>(null);
@@ -1321,6 +1332,12 @@ export default function DashboardPage() {
     [filteredTasks, tasksVisibleCols, deferredTasksSearch, filterRowsBySearch]
   );
 
+  const canManageTaskWorkloadView = useMemo(
+    () => Boolean(me && ["董事長", "管理者"].includes(me.role)),
+    [me]
+  );
+  const taskWorkloadByAssignee = useMemo(() => aggregateTasksByAssignee(searchedTasks), [searchedTasks]);
+
   /** 分潤表：依 system_config 的 dedupe 規則在「顯示層」做一次去重（確保 UI 與規則永遠同步） */
   const masterTypeByProjectId = useMemo(() => {
     const m = new Map<string, string>();
@@ -1641,6 +1658,7 @@ export default function DashboardPage() {
       任務名稱: selectedTask.任務 ?? "",
       任務類型: selectedTask.任務類型 ?? "",
       任務負責人: selectedTask.任務負責人 ?? "",
+      到期日: selectedTask.到期日?.trim() ? selectedTask.到期日.trim().slice(0, 10) : "",
       任務完成: Boolean(selectedTask.任務完成),
     });
   }, [selectedTask]);
@@ -2858,7 +2876,7 @@ export default function DashboardPage() {
                                         setExpandedProjectId((prev) => (prev === pid ? null : pid));
                                         setAddingTaskFor(null);
                                         setAddTaskError(null);
-                                        setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "" });
+                                        setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "" });
                                       }}
                                       className="mr-2 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-stone-50 text-stone-500 transition hover:bg-amber-100/90 hover:border-amber-300 hover:text-amber-800"
                                       title={isExpanded ? "收合任務" : "展開任務"}
@@ -3065,6 +3083,7 @@ export default function DashboardPage() {
                                               任務名稱: newTaskForm.任務名稱.trim(),
                                               任務類型: newTaskForm.任務類型.trim() || null,
                                               負責人: newTaskForm.任務負責人.trim() || null,
+                                              到期日: newTaskForm.到期日.trim() || null,
                                             }),
                                           });
                                           const data = (await safeResJson(res)) as { ok?: boolean; error?: string; task?: TaskRow };
@@ -3074,7 +3093,7 @@ export default function DashboardPage() {
                                             return;
                                           }
                                           setTasks((prev) => [data.task!, ...prev]);
-                                          setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "" });
+                                          setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "" });
                                           setAddingTaskFor(null);
                                         } catch (err: unknown) {
                                           setAddTaskError(err instanceof Error ? err.message : "新增失敗");
@@ -3123,6 +3142,15 @@ export default function DashboardPage() {
                                           ))}
                                         </select>
                                       </div>
+                                      <div>
+                                        <label className="mb-1 block text-xs font-semibold text-stone-500">到期日</label>
+                                        <input
+                                          type="date"
+                                          value={newTaskForm.到期日}
+                                          onChange={(e) => setNewTaskForm((f) => ({ ...f, 到期日: e.target.value }))}
+                                          className="w-44 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                                        />
+                                      </div>
                                       <div className="flex gap-2">
                                         <button
                                           type="submit"
@@ -3136,7 +3164,7 @@ export default function DashboardPage() {
                                           onClick={() => {
                                             setAddingTaskFor(null);
                                             setAddTaskError(null);
-                                            setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "" });
+                                            setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "" });
                                           }}
                                           className="rounded-lg border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-100"
                                         >
@@ -3150,7 +3178,7 @@ export default function DashboardPage() {
                                       onClick={() => {
                                         setAddingTaskFor(pid);
                                         setAddTaskError(null);
-                                        setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "" });
+                                        setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "" });
                                       }}
                                       className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100/90"
                                     >
@@ -5330,14 +5358,71 @@ export default function DashboardPage() {
         <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-xl font-bold tracking-tight text-stone-900">任務</h2>
-            <input
-              type="text"
-              value={tasksSearch}
-              onChange={(e) => setTasksSearch(e.target.value)}
-              placeholder="搜尋專案名稱、任務、負責人…"
-              className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
-            />
+            <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+              {canManageTaskWorkloadView && (
+                <div className="flex shrink-0 rounded-lg border border-amber-200 bg-amber-50/90 p-0.5 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setTasksSectionViewMode("list")}
+                    className={`rounded-md px-3 py-1.5 transition ${tasksSectionViewMode === "list" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:text-stone-900"}`}
+                  >
+                    列表
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTasksSectionViewMode("byAssignee")}
+                    className={`rounded-md px-3 py-1.5 transition ${tasksSectionViewMode === "byAssignee" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:text-stone-900"}`}
+                  >
+                    依員工
+                  </button>
+                </div>
+              )}
+              <input
+                type="text"
+                value={tasksSearch}
+                onChange={(e) => setTasksSearch(e.target.value)}
+                placeholder="搜尋專案名稱、任務、負責人、到期日…"
+                className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
+              />
+            </div>
           </div>
+          {canManageTaskWorkloadView && tasksSectionViewMode === "byAssignee" ? (
+            <div className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-4">
+              <p className="mb-3 text-xs leading-relaxed text-stone-600">
+                依「② 資料可見規則」與上方搜尋結果，彙總每位負責人<strong>未完成</strong>任務數。
+                <strong className="text-amber-900">即將到期</strong>：今天起算 {TASK_DUE_SOON_DAYS} 天內（含當天）；<strong className="text-red-800">已逾期</strong>：超過到期日仍未完成。
+              </p>
+              {taskWorkloadByAssignee.length === 0 ? (
+                <p className="text-sm text-stone-500">無符合資料</p>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-stone-200/90 bg-white/90">
+                  <table className="min-w-full divide-y divide-stone-200 text-sm">
+                    <thead className="bg-stone-100">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800">負責人</th>
+                        <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-stone-600">進行中</th>
+                        <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-amber-800">即將到期</th>
+                        <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-red-800">已逾期</th>
+                        <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-stone-500">未設到期日</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100 bg-white">
+                      {taskWorkloadByAssignee.map((row) => (
+                        <tr key={row.assigneeLabel} className="hover:bg-amber-50/50">
+                          <td className="whitespace-nowrap px-4 py-3 font-medium text-stone-800">{row.assigneeLabel}</td>
+                          <td className="px-4 py-3 text-center tabular-nums text-stone-700">{row.open}</td>
+                          <td className="px-4 py-3 text-center tabular-nums font-semibold text-amber-800">{row.soon}</td>
+                          <td className="px-4 py-3 text-center tabular-nums font-semibold text-red-700">{row.overdue}</td>
+                          <td className="px-4 py-3 text-center tabular-nums text-stone-500">{row.noDueOpen}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
           {/* 小螢幕：任務卡片 */}
           <div className="space-y-3 md:hidden">
             {filteredTasks.length === 0 ? (
@@ -5362,6 +5447,20 @@ export default function DashboardPage() {
                     <span>開始：{formatTaskDisplayTime(t.開始時間)}</span>
                     <span>完成：{formatTaskDisplayTime(t.完成時間)}</span>
                   </div>
+                  <p className="mt-1 text-[11px] text-stone-600" onClick={(e) => e.stopPropagation()}>
+                    到期日：
+                    <span
+                      className={
+                        getTaskDueUiStatus(t.任務完成, t.到期日) === "overdue"
+                          ? "font-semibold text-red-700"
+                          : getTaskDueUiStatus(t.任務完成, t.到期日) === "soon"
+                            ? "font-semibold text-amber-800"
+                            : ""
+                      }
+                    >
+                      {formatTaskDueYmd(t.到期日)}
+                    </span>
+                  </p>
                   <div className="mt-2 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
                     <span className="text-xs font-medium text-stone-600">任務完成</span>
                     <button
@@ -5488,6 +5587,33 @@ export default function DashboardPage() {
                             </td>
                           );
                         }
+                        if (k === "到期日") {
+                          const ymd = t.到期日;
+                          const st = getTaskDueUiStatus(t.任務完成, ymd);
+                          const cls =
+                            st === "overdue"
+                              ? "text-red-700"
+                              : st === "soon"
+                                ? "text-amber-800"
+                                : "text-stone-600";
+                          const days = dueDaysFromToday(ymd);
+                          const hint =
+                            days === null || t.任務完成
+                              ? ""
+                              : days < 0
+                                ? `逾期 ${-days} 天`
+                                : days <= TASK_DUE_SOON_DAYS
+                                  ? `剩 ${days} 天`
+                                  : "";
+                          return (
+                            <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-xs tabular-nums ${cls}`}>
+                              <span className="font-medium">{formatTaskDueYmd(ymd)}</span>
+                              {hint ? (
+                                <span className="ml-1 text-[10px] font-normal text-stone-500">{hint}</span>
+                              ) : null}
+                            </td>
+                          );
+                        }
                         if (k === "開始時間" || k === "完成時間") {
                           const raw = k === "開始時間" ? t.開始時間 : t.完成時間;
                           return (
@@ -5601,6 +5727,8 @@ export default function DashboardPage() {
           </div>
           {searchedTasks.length > visibleTasksRows.length && (
             <p className="mt-2 text-right text-xs text-stone-500">載入中 {visibleTasksRows.length} / {searchedTasks.length}</p>
+          )}
+            </>
           )}
         </section>
         )}
@@ -7395,6 +7523,7 @@ export default function DashboardPage() {
                       任務名稱: editTaskForm.任務名稱.trim() || null,
                       任務類型: editTaskForm.任務類型.trim() || null,
                       負責人: editTaskForm.任務負責人.trim() || null,
+                      到期日: editTaskForm.到期日.trim() || null,
                       任務完成: editTaskForm.任務完成,
                     }),
                   });
@@ -7411,6 +7540,7 @@ export default function DashboardPage() {
                     任務名稱: data.task.任務 ?? "",
                     任務類型: data.task.任務類型 ?? "",
                     任務負責人: data.task.任務負責人 ?? "",
+                    到期日: data.task.到期日?.trim() ? data.task.到期日.trim().slice(0, 10) : "",
                     任務完成: Boolean(data.task.任務完成),
                   });
                 } catch (err: unknown) {
@@ -7470,6 +7600,16 @@ export default function DashboardPage() {
                       <option key={name} value={name}>{name}</option>
                     ))}
                   </select>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">到期日</label>
+                  <input
+                    type="date"
+                    value={editTaskForm.到期日}
+                    onChange={(e) => setEditTaskForm((f) => ({ ...f, 到期日: e.target.value }))}
+                    className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                  />
+                  <p className="mt-1 text-[11px] text-stone-500">系統每日寄送「即將到期／逾期」通知給負責人（需設定 RESEND 與 CRON_SECRET）。</p>
                 </div>
                 <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-stone-300 bg-stone-50 px-4 py-3 transition hover:bg-stone-100">
                   <input

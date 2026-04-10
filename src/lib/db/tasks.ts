@@ -9,6 +9,12 @@ import type { TaskRow } from "@/modules/tasks/types";
 function rowToTask(r: Record<string, unknown>): TaskRow {
   const 開始 = r.開始時間;
   const 完成 = r.完成時間;
+  const 到期 = r.到期日;
+  let 到期日Str: string | undefined;
+  if (到期 != null && String(到期).trim() !== "") {
+    const s = String(到期);
+    到期日Str = /^(\d{4}-\d{2}-\d{2})/.exec(s)?.[1] ?? s.slice(0, 10);
+  }
   return {
     任務ID: r.任務ID as string,
     專案ID: r.專案ID as string,
@@ -19,6 +25,7 @@ function rowToTask(r: Record<string, unknown>): TaskRow {
     開始時間: 開始 != null && String(開始).trim() !== "" ? String(開始) : undefined,
     完成時間: 完成 != null && String(完成).trim() !== "" ? String(完成) : undefined,
     任務完成: Boolean(r.任務完成),
+    到期日: 到期日Str,
   };
 }
 
@@ -38,6 +45,8 @@ export type NewTaskInput = {
   任務名稱: string;
   任務類型?: string | null;
   負責人?: string | null;
+  /** YYYY-MM-DD */
+  到期日?: string | null;
 };
 
 export async function createTask(payload: NewTaskInput): Promise<TaskRow> {
@@ -53,6 +62,12 @@ export async function createTask(payload: NewTaskInput): Promise<TaskRow> {
     負責人: payload.負責人?.trim() ?? null,
     開始時間: nowIso,
   };
+  if (payload.到期日 !== undefined && payload.到期日 !== null && String(payload.到期日).trim() !== "") {
+    const d = String(payload.到期日).trim().slice(0, 10);
+    insertData.到期日 = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+  } else if (payload.到期日 === null) {
+    insertData.到期日 = null;
+  }
 
   const { data, error } = await getSupabase()
     .from("任務")
@@ -71,6 +86,8 @@ export type UpdateTaskInput = {
   任務類型?: string | null;
   負責人?: string | null;
   任務完成?: boolean;
+  /** YYYY-MM-DD；傳 null 可清空 */
+  到期日?: string | null;
 };
 
 /** 刪除該專案底下所有任務（與大總表刪除連動） */
@@ -96,10 +113,29 @@ export async function updateTask(payload: UpdateTaskInput): Promise<TaskRow> {
   if (fetchErr) throw fetchErr;
   if (!existing) throw new Error("找不到任務");
 
+  const prev負責人 = String((existing as Record<string, unknown>).負責人 ?? "").trim();
+  const prev到期 = (existing as Record<string, unknown>).到期日;
+  const prev到期Str = prev到期 != null && String(prev到期).trim() !== "" ? String(prev到期).slice(0, 10) : "";
+
   const updateData: Record<string, unknown> = {};
   if (payload.任務名稱 !== undefined) updateData.任務名稱 = payload.任務名稱?.trim() ?? null;
   if (payload.任務類型 !== undefined) updateData.任務類型 = payload.任務類型?.trim() ?? null;
-  if (payload.負責人 !== undefined) updateData.負責人 = payload.負責人?.trim() ?? null;
+  if (payload.負責人 !== undefined) {
+    const next = payload.負責人?.trim() ?? null;
+    updateData.負責人 = next;
+    if (next !== prev負責人) updateData.到期提醒寄送於 = null;
+  }
+  if (payload.到期日 !== undefined) {
+    const raw = payload.到期日;
+    const next =
+      raw === null || String(raw).trim() === ""
+        ? null
+        : String(raw).trim().slice(0, 10);
+    updateData.到期日 = next && /^\d{4}-\d{2}-\d{2}$/.test(next) ? next : null;
+    const nextNorm = updateData.到期日 as string | null;
+    const prevNorm = prev到期Str && /^\d{4}-\d{2}-\d{2}$/.test(prev到期Str) ? prev到期Str : "";
+    if (String(nextNorm ?? "") !== String(prevNorm)) updateData.到期提醒寄送於 = null;
+  }
   if (payload.任務完成 !== undefined) {
     const next = Boolean(payload.任務完成);
     const prev = Boolean((existing as Record<string, unknown>).任務完成);
@@ -121,4 +157,27 @@ export async function updateTask(payload: UpdateTaskInput): Promise<TaskRow> {
   if (error) throw error;
   if (!data) throw new Error("更新任務失敗，未取得資料");
   return rowToTask(data as Record<string, unknown>);
+}
+
+/** Cron：未完成、已填到期日、尚未寄送提醒者（再以 shouldSendDueReminder 過濾） */
+export async function listTasksForDueReminderCron(): Promise<TaskRow[]> {
+  const { data, error } = await getSupabase()
+    .from("任務")
+    .select("*")
+    .eq("任務完成", false)
+    .not("到期日", "is", null)
+    .is("到期提醒寄送於", null);
+
+  if (error) throw error;
+  return (data ?? []).map((r) => rowToTask(r as Record<string, unknown>));
+}
+
+export async function markTaskDueReminderSent(任務ID: string): Promise<void> {
+  const id = String(任務ID ?? "").trim();
+  if (!id) return;
+  const { error } = await getSupabase()
+    .from("任務")
+    .update({ 到期提醒寄送於: new Date().toISOString() })
+    .eq("任務ID", id);
+  if (error) throw error;
 }
