@@ -190,9 +190,10 @@ export async function syncPayoutForProject(
   const rows: PayoutInsertRow[] = [];
 
   if (isPayoutModeB(專案類型)) {
-    const 專案引薦人 = master.專案引薦人 ?? null;
-    const rate引薦人 = parsePayoutRate(defaults.專案引薦人分潤成數);
-    if (專案引薦人) {
+    const 專案開發人 = master.專案開發人 ?? null;
+    const rateStr開發人 = master.專案開發人分潤成數 ?? defaults.專案開發人分潤成數;
+    const rate開發人 = parsePayoutRate(rateStr開發人);
+    if (專案開發人) {
       rows.push({
         專案ID,
         專案名稱,
@@ -201,10 +202,10 @@ export async function syncPayoutForProject(
         廠商預計付款日,
         廠商付款日期: null,
         分潤匯款日期: null,
-        分潤類型: "專案引薦人",
-        分潤成數: defaults.專案引薦人分潤成數 ?? null,
-        分潤金額: String(Math.round(amount * rate引薦人)),
-        領取人: 專案引薦人,
+        分潤類型: "專案開發人",
+        分潤成數: rateStr開發人 ?? null,
+        分潤金額: String(Math.round(amount * rate開發人)),
+        領取人: 專案開發人,
       });
     }
     const partners = await getPartners();

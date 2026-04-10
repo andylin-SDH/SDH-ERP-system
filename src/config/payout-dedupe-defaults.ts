@@ -17,7 +17,7 @@ export type PayoutDedupeRulesByMode = {
 };
 
 export const DEFAULT_MODE_A_PRIORITY = ["專案BDPM", "專案引薦人", "專案管理員", "執行管理員"] as const;
-export const DEFAULT_MODE_B_PRIORITY = ["專案引薦人", "經紀人", "主管", "KOL開發者"] as const;
+export const DEFAULT_MODE_B_PRIORITY = ["專案開發人", "經紀人", "主管", "KOL開發者"] as const;
 
 /** 與 lib/db/system-config 的 DEFAULT 一致 */
 export const DEFAULT_PAYOUT_DEDUPE_RULES: PayoutDedupeRulesByMode = {

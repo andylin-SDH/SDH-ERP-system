@@ -19,6 +19,7 @@ function compactRoleKey(s: string): string {
 const PAYOUT_ROLE_SYNONYM_GROUPS: string[][] = [
   ["專案BDPM", "BDPM", "bdpm", "專案bdpm"],
   ["專案引薦人", "引薦人"],
+  ["專案開發人", "開發人"],
   ["專案管理員", "管理員"],
   ["執行管理員"],
   ["經紀人"],

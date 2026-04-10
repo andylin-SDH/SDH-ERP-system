@@ -43,8 +43,10 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "專案費用類型", label: "專案費用類型" },
     { key: "廠商名稱", label: "廠商名稱" },
     { key: "廠商預計付款日", label: "廠商預計付款日" },
-    /** 模式 A/B 共用；模式 B 另見經紀人（專案手填）／主管／KOL開發者（後二者依合作夥伴帶出） */
-    { key: "專案引薦人", label: "專案引薦人" },
+    /** 模式 A（製作／活動） */
+    { key: "專案引薦人", label: "專案引薦人（製作／活動）" },
+    /** 模式 B（廣告業配）；與「專案引薦人」分欄 */
+    { key: "專案開發人", label: "專案開發人（廣告業配）" },
     /** 分潤模式 A（製作案、活動案等） */
     { key: "專案BDPM", label: "專案BDPM（製作/活動）" },
     { key: "專案管理員", label: "專案管理員（製作/活動）" },

@@ -267,7 +267,7 @@ function generateProjectId(): string {
 const OVERVIEW_SCOPE_STORAGE_KEY = "sdh-dashboard-overview-scope";
 
 /** 大總表上與「這個人與專案有關」可能對得上的欄位（姓名／Email 需與 Users 一致） */
-const MASTER_RELATED_FIELD_KEYS = ["專案BDPM", "專案引薦人", "專案管理員", "執行管理員", "KOL名稱", "經紀人"] as const;
+const MASTER_RELATED_FIELD_KEYS = ["專案BDPM", "專案引薦人", "專案開發人", "專案管理員", "執行管理員", "KOL名稱", "經紀人"] as const;
 
 function fieldMatchesUser(val: string | null | undefined, userName: string, userEmail: string): boolean {
   const v = String(val ?? "").trim();
@@ -283,7 +283,11 @@ function isMasterRowRelatedToUser(
   partnerByKolName: Map<string, PartnerRow>
 ): boolean {
   if (!userName && !userEmail) return false;
-  if (fieldMatchesUser(row.專案引薦人, userName, userEmail)) return true;
+  if (isPayoutModeB(String(row.專案類型 ?? ""))) {
+    if (fieldMatchesUser(row.專案開發人, userName, userEmail)) return true;
+  } else {
+    if (fieldMatchesUser(row.專案引薦人, userName, userEmail)) return true;
+  }
 
   if (isPayoutModeB(String(row.專案類型 ?? ""))) {
     if (fieldMatchesUser(row.經紀人, userName, userEmail)) return true;
@@ -370,6 +374,14 @@ function masterTableCellText(
     if (modeB) return "";
     return String((row as unknown as Record<string, unknown>)[colKey] ?? "").trim();
   }
+  if (colKey === "專案引薦人") {
+    if (modeB) return "";
+    return String(row.專案引薦人 ?? "").trim();
+  }
+  if (colKey === "專案開發人") {
+    if (!modeB) return "";
+    return String(row.專案開發人 ?? "").trim();
+  }
   return String((row as unknown as Record<string, unknown>)[colKey] ?? "").trim();
 }
 
@@ -377,9 +389,14 @@ function masterTableCellText(
 const MASTER_PAYOUT_MODE_A_COL_KEYS = new Set(["專案BDPM", "專案管理員", "執行管理員"]);
 /** 大總表：分潤模式 B 專用欄 */
 const MASTER_PAYOUT_MODE_B_COL_KEYS = new Set(["經紀人", "主管", "KOL開發者"]);
+/** 模式 A 專用：專案引薦人（製作／活動） */
+const MASTER_PAYOUT_MODE_A_ONLY_COL_KEYS = new Set(["專案引薦人"]);
+/** 模式 B 專用：專案開發人（廣告業配） */
+const MASTER_PAYOUT_MODE_B_ONLY_COL_KEYS = new Set(["專案開發人"]);
 
 /** 系統設定「分潤成數預設」：模式 B 輸入框顯示標籤（JSON key 仍為 master_payout_defaults 既有鍵名） */
 const MASTER_PAYOUT_MODE_B_CONFIG_LABELS: Partial<Record<string, string>> = {
+  專案開發人分潤成數: "專案開發人",
   KOL開發者分潤成數: "KOL開發者",
 };
 
@@ -450,6 +467,8 @@ export default function DashboardPage() {
     專案BDPM分潤成數: "",
     專案引薦人: "",
     專案引薦人分潤成數: "",
+    專案開發人: "",
+    專案開發人分潤成數: "",
     專案管理員: "",
     專案管理員分潤成數: "",
     執行管理員: "",
@@ -483,6 +502,8 @@ export default function DashboardPage() {
     專案BDPM分潤成數: "",
     專案引薦人: "",
     專案引薦人分潤成數: "",
+    專案開發人: "",
+    專案開發人分潤成數: "",
     專案管理員: "",
     專案管理員分潤成數: "",
     執行管理員: "",
@@ -1275,6 +1296,8 @@ export default function DashboardPage() {
     const filtered = cols.filter((k) => {
       if (MASTER_PAYOUT_MODE_A_COL_KEYS.has(k)) return hasModeA;
       if (MASTER_PAYOUT_MODE_B_COL_KEYS.has(k)) return hasModeB;
+      if (MASTER_PAYOUT_MODE_A_ONLY_COL_KEYS.has(k)) return hasModeA;
+      if (MASTER_PAYOUT_MODE_B_ONLY_COL_KEYS.has(k)) return hasModeB;
       return true;
     });
     return {
@@ -1545,6 +1568,8 @@ export default function DashboardPage() {
       專案BDPM分潤成數: selectedMaster.專案BDPM分潤成數 ?? "",
       專案引薦人: selectedMaster.專案引薦人 ?? "",
       專案引薦人分潤成數: selectedMaster.專案引薦人分潤成數 ?? "",
+      專案開發人: selectedMaster.專案開發人 ?? "",
+      專案開發人分潤成數: selectedMaster.專案開發人分潤成數 ?? "",
       專案管理員: selectedMaster.專案管理員 ?? "",
       專案管理員分潤成數: selectedMaster.專案管理員分潤成數 ?? "",
       執行管理員: selectedMaster.執行管理員 ?? "",
@@ -2699,6 +2724,8 @@ export default function DashboardPage() {
                       專案BDPM分潤成數: payoutDefaults.專案BDPM分潤成數,
                       專案引薦人: "",
                       專案引薦人分潤成數: payoutDefaults.專案引薦人分潤成數,
+                      專案開發人: "",
+                      專案開發人分潤成數: payoutDefaults.專案開發人分潤成數,
                       專案管理員: "",
                       專案管理員分潤成數: payoutDefaults.專案管理員分潤成數,
                       執行管理員: "",
@@ -3201,7 +3228,7 @@ export default function DashboardPage() {
                   <div>
                     <p className="mb-2 text-xs font-medium text-stone-500">分潤模式 B（廣告案）</p>
                     <div className="flex flex-wrap gap-x-6 gap-y-2">
-                      {(["專案引薦人分潤成數", "經紀人分潤成數", "主管分潤成數", "KOL開發者分潤成數"] as const).map((k) => (
+                      {(["專案開發人分潤成數", "經紀人分潤成數", "主管分潤成數", "KOL開發者分潤成數"] as const).map((k) => (
                         <div key={k} className="flex items-center gap-2">
                           <span className="text-xs text-stone-500">{MASTER_PAYOUT_MODE_B_CONFIG_LABELS[k] ?? k}</span>
                           <input
@@ -3263,7 +3290,7 @@ export default function DashboardPage() {
                   {
                     mode: "mode_b" as const,
                     label: "模式 B（廣告業配）",
-                    roles: ["專案引薦人", "經紀人", "主管", "KOL開發者"] as const,
+                    roles: ["專案開發人", "經紀人", "主管", "KOL開發者"] as const,
                   },
                 ].map(({ mode, label, roles }) => (
                   <div key={mode} className="mb-4 last:mb-0">
@@ -6555,9 +6582,9 @@ export default function DashboardPage() {
                     {isPayoutModeB(createForm.專案類型) ? (
                       <>
                         <SelectField
-                          label="專案引薦人"
-                          value={createForm.專案引薦人}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, 專案引薦人: v }))}
+                          label="專案開發人"
+                          value={createForm.專案開發人}
+                          onChange={(v) => setCreateForm((f) => ({ ...f, 專案開發人: v }))}
                           options={userNames}
                         />
                         <SelectField
@@ -6949,6 +6976,8 @@ export default function DashboardPage() {
                       專案BDPM分潤成數: selectedMaster.專案BDPM分潤成數 ?? "",
                       專案引薦人: selectedMaster.專案引薦人 ?? "",
                       專案引薦人分潤成數: selectedMaster.專案引薦人分潤成數 ?? "",
+                      專案開發人: selectedMaster.專案開發人 ?? "",
+                      專案開發人分潤成數: selectedMaster.專案開發人分潤成數 ?? "",
                       專案管理員: selectedMaster.專案管理員 ?? "",
                       專案管理員分潤成數: selectedMaster.專案管理員分潤成數 ?? "",
                       執行管理員: selectedMaster.執行管理員 ?? "",
@@ -6997,7 +7026,7 @@ export default function DashboardPage() {
                           body: JSON.stringify({
                             id: selectedMaster.id,
                             ...(() => {
-                              const { 專案BDPM分潤成數, 專案引薦人分潤成數, 專案管理員分潤成數, 執行管理員分潤成數, ...rest } = editMasterForm;
+                              const { 專案BDPM分潤成數, 專案引薦人分潤成數, 專案開發人分潤成數, 專案管理員分潤成數, 執行管理員分潤成數, ...rest } = editMasterForm;
                               return rest;
                             })(),
                             專案營收: calc專案營收(
@@ -7192,9 +7221,9 @@ export default function DashboardPage() {
                   {isPayoutModeB(isEditingMaster ? editMasterForm.專案類型 : selectedMaster.專案類型 ?? "") ? (
                     <>
                       {isEditingMaster ? (
-                        <SelectField label="專案引薦人" value={editMasterForm.專案引薦人} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案引薦人: v }))} options={userNames} />
+                        <SelectField label="專案開發人" value={editMasterForm.專案開發人} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案開發人: v }))} options={userNames} />
                       ) : (
-                        <Field label="專案引薦人" value={selectedMaster.專案引薦人} />
+                        <Field label="專案開發人" value={selectedMaster.專案開發人} />
                       )}
                       {isEditingMaster ? (
                         <SelectField

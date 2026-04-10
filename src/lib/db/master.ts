@@ -30,10 +30,14 @@ export interface MasterRow {
   專案BDPM: string | null;
   專案BDPM分潤成數: string | null;
   專案引薦人: string | null;
+  /** 分潤模式 B（廣告業配）人員；與模式 A「專案引薦人」分開 */
+  專案開發人: string | null;
   專案管理員: string | null;
   執行管理員: string | null;
   專案資料夾: string | null;
   專案引薦人分潤成數: string | null;
+  /** 模式 B 專用成數預設鍵：專案開發人分潤成數 */
+  專案開發人分潤成數: string | null;
   專案管理員分潤成數: string | null;
   執行管理員分潤成數: string | null;
   created_at?: string;
@@ -63,10 +67,12 @@ function rowToMaster(r: Record<string, unknown>): MasterRow {
     專案BDPM: (r.專案BDPM as string) ?? null,
     專案BDPM分潤成數: (r.專案BDPM分潤成數 as string) ?? null,
     專案引薦人: (r.專案引薦人 as string) ?? null,
+    專案開發人: (r.專案開發人 as string) ?? null,
     專案管理員: (r.專案管理員 as string) ?? null,
     執行管理員: (r.執行管理員 as string) ?? null,
     專案資料夾: (r.專案資料夾 as string) ?? null,
     專案引薦人分潤成數: (r.專案引薦人分潤成數 as string) ?? null,
+    專案開發人分潤成數: (r.專案開發人分潤成數 as string) ?? null,
     專案管理員分潤成數: (r.專案管理員分潤成數 as string) ?? null,
     執行管理員分潤成數: (r.執行管理員分潤成數 as string) ?? null,
     created_at: r.created_at as string | undefined,
@@ -116,10 +122,12 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     專案BDPM: payload.專案BDPM ?? null,
     專案BDPM分潤成數: payload.專案BDPM分潤成數 ?? null,
     專案引薦人: payload.專案引薦人 ?? null,
+    專案開發人: payload.專案開發人 ?? null,
     專案管理員: payload.專案管理員 ?? null,
     執行管理員: payload.執行管理員 ?? null,
     專案資料夾: payload.專案資料夾 ?? null,
     專案引薦人分潤成數: payload.專案引薦人分潤成數 ?? null,
+    專案開發人分潤成數: payload.專案開發人分潤成數 ?? null,
     專案管理員分潤成數: payload.專案管理員分潤成數 ?? null,
     執行管理員分潤成數: payload.執行管理員分潤成數 ?? null,
   };
@@ -167,6 +175,7 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
     備註: payload.備註 ?? null,
     專案BDPM: payload.專案BDPM ?? null,
     專案引薦人: payload.專案引薦人 ?? null,
+    專案開發人: payload.專案開發人 ?? null,
     專案管理員: payload.專案管理員 ?? null,
     執行管理員: payload.執行管理員 ?? null,
     專案資料夾: payload.專案資料夾 ?? null,
@@ -175,6 +184,7 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
   // 分潤成數僅由 Config 控制，前端不可修改，PATCH 時不更新
   if (payload.專案BDPM分潤成數 !== undefined) updateData.專案BDPM分潤成數 = payload.專案BDPM分潤成數 ?? null;
   if (payload.專案引薦人分潤成數 !== undefined) updateData.專案引薦人分潤成數 = payload.專案引薦人分潤成數 ?? null;
+  if (payload.專案開發人分潤成數 !== undefined) updateData.專案開發人分潤成數 = payload.專案開發人分潤成數 ?? null;
   if (payload.專案管理員分潤成數 !== undefined) updateData.專案管理員分潤成數 = payload.專案管理員分潤成數 ?? null;
   if (payload.執行管理員分潤成數 !== undefined) updateData.執行管理員分潤成數 = payload.執行管理員分潤成數 ?? null;
 

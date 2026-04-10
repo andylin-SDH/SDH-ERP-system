@@ -5,7 +5,7 @@
  */
 
 export const VISIBILITY_RULES_DEFAULTS: Record<string, string[]> = {
-  master: ["專案BDPM", "執行管理員", "專案引薦人", "專案管理員"],
+  master: ["專案BDPM", "執行管理員", "專案引薦人", "專案開發人", "專案管理員"],
   /** 空陣列 = 不過濾，所有人可看全部 KOL */
   partners: [],
   tasks: ["任務負責人"],
