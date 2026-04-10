@@ -2945,6 +2945,9 @@ export default function DashboardPage() {
                                             任務負責人
                                           </th>
                                           <th className="whitespace-nowrap px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">
+                                            到期日
+                                          </th>
+                                          <th className="whitespace-nowrap px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">
                                             開始時間
                                           </th>
                                           <th className="whitespace-nowrap px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">
@@ -2958,7 +2961,7 @@ export default function DashboardPage() {
                                       <tbody className="divide-y divide-stone-200 bg-white/90">
                                         {projectTasks.length === 0 ? (
                                           <tr>
-                                            <td colSpan={6} className="px-3 py-4 text-center text-sm text-stone-500">
+                                            <td colSpan={7} className="px-3 py-4 text-center text-sm text-stone-500">
                                               尚無任務，請點「新增任務」新增
                                             </td>
                                           </tr>
@@ -3010,6 +3013,43 @@ export default function DashboardPage() {
                                                     </button>
                                                   )}
                                                 </span>
+                                              </td>
+                                              <td
+                                                className="whitespace-nowrap px-3 py-2.5 text-center text-xs tabular-nums align-top"
+                                                onClick={(ev) => ev.stopPropagation()}
+                                              >
+                                                <input
+                                                  type="date"
+                                                  value={t.到期日?.trim() ? t.到期日.trim().slice(0, 10) : ""}
+                                                  onChange={async (ev) => {
+                                                    if (!t.任務ID) return;
+                                                    const v = ev.target.value.trim();
+                                                    try {
+                                                      const res = await fetch("/api/tasks", {
+                                                        method: "PATCH",
+                                                        headers: { "Content-Type": "application/json" },
+                                                        body: JSON.stringify({
+                                                          任務ID: t.任務ID,
+                                                          到期日: v || null,
+                                                        }),
+                                                      });
+                                                      const data = (await safeResJson(res)) as { ok?: boolean; task?: TaskRow };
+                                                      if (res.ok && data.ok && data.task) {
+                                                        setTasks((prev) => prev.map((x) => (x.任務ID === t.任務ID ? data.task! : x)));
+                                                      }
+                                                    } catch {
+                                                      /* 忽略 */
+                                                    }
+                                                  }}
+                                                  className={`max-w-[9.5rem] rounded border px-1.5 py-1 text-xs ${
+                                                    getTaskDueUiStatus(t.任務完成, t.到期日) === "overdue"
+                                                      ? "border-red-300 bg-red-50 text-red-900"
+                                                      : getTaskDueUiStatus(t.任務完成, t.到期日) === "soon"
+                                                        ? "border-amber-300 bg-amber-50 text-amber-900"
+                                                        : "border-stone-200 bg-white text-stone-800"
+                                                  }`}
+                                                  title="在此設定到期日；點列其餘處可開啟完整編輯"
+                                                />
                                               </td>
                                               <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs tabular-nums text-stone-600">
                                                 {formatTaskDisplayTime(t.開始時間)}
