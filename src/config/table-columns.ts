@@ -65,7 +65,6 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "頻道｜節目名稱", label: "頻道｜節目名稱" },
     { key: "是否有經營 私域群", label: "是否有經營 私域群" },
     { key: "資料夾", label: "資料夾" },
-    { key: "經紀人", label: "經紀人" },
     { key: "KOL開發者", label: "KOL開發者" },
     { key: "經銷約開始日", label: "經銷約開始日" },
     { key: "自來件分潤", label: "自來件分潤" },

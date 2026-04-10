@@ -20,7 +20,7 @@ function isAdminRole(role: string): boolean {
   return ADMIN_ROLES.includes(role as (typeof ADMIN_ROLES)[number]);
 }
 
-/** 經紀人 PATCH：允許除 KOL開發者／審核狀態／駁回理由 外的所有 UpdatePartnerInput 欄位 */
+/** 非管理者 PATCH：允許除 KOL開發者／審核狀態／駁回理由 外的所有 UpdatePartnerInput 欄位 */
 function filterAgentPatchPayload(rest: Record<string, unknown>): UpdatePartnerInput {
   const filtered: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(rest)) {
@@ -95,7 +95,6 @@ export async function POST(request: NextRequest) {
         "頻道｜節目名稱": body?.["頻道｜節目名稱"],
         "是否有經營 私域群": Boolean(body?.["是否有經營 私域群"]),
         資料夾: body?.資料夾,
-        經紀人: body?.經紀人 ?? auth.user.name ?? auth.user.email,
         /** 非管理者不可指定 KOL開發者，由董事長後續補 */
         KOL開發者: admin ? body?.KOL開發者 : undefined,
         經銷約開始日: body?.經銷約開始日,
@@ -148,7 +147,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: true, partner });
     }
 
-    // 經紀人：需先取得該筆判斷狀態與建立者
+    // 非管理者：需先取得該筆判斷狀態與建立者
     const { partners } = await getPartnersWithError();
     const row = partners.find((p) => p.PartnerID === PartnerID);
     if (!row) {

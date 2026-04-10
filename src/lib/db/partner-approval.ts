@@ -1,5 +1,5 @@
 /**
- * KOL / 合作夥伴審核狀態常數與經紀人可改欄位規則
+ * KOL / 合作夥伴審核狀態常數與非管理者可改欄位規則
  * 非董事長／管理者：除 KOL開發者 外其餘欄位皆可編輯（已核准或待審核建立者）
  */
 
@@ -21,7 +21,7 @@ export const PARTNER_AGENT_BLOCKED_KEYS = [
   "駁回理由",
 ] as const;
 
-/** 是否為經紀人不可自行修改的欄位 */
+/** 是否為非管理者不可自行修改的欄位 */
 export function isPartnerAgentBlockedKey(key: string): boolean {
   return (PARTNER_AGENT_BLOCKED_KEYS as readonly string[]).includes(key);
 }

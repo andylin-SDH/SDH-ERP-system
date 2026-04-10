@@ -237,7 +237,7 @@ const PARTNER_EXPAND_SECTION_KEYS: { title: string; keys: string[] }[] = [
   { title: "識別與分類", keys: ["PartnerID", "合作夥伴名稱", "類別一", "類別二", "類別三"] },
   { title: "聯絡與管道", keys: ["社群網站", "Email", "資料夾", "粉絲數", "頻道｜節目名稱"] },
   { title: "分潤與合約", keys: ["自來件分潤", "SDH開發分件分潤", "經銷約開始日", "經銷約結束日"] },
-  { title: "人員", keys: ["經紀人", "KOL開發者", "主管"] },
+  { title: "人員", keys: ["KOL開發者", "主管"] },
   { title: "夥伴類型與其他", keys: ["分級", "是否有經營 私域群", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴"] },
 ];
 
@@ -541,7 +541,6 @@ export default function DashboardPage() {
     "頻道｜節目名稱": string;
     "是否有經營 私域群": boolean;
     資料夾: string;
-    經紀人: string;
     KOL開發者: string;
     經銷約開始日: string;
     自來件分潤: string;
@@ -563,7 +562,6 @@ export default function DashboardPage() {
     "頻道｜節目名稱": "",
     "是否有經營 私域群": false,
     資料夾: "",
-    經紀人: "",
     KOL開發者: "",
     經銷約開始日: "",
     自來件分潤: "",
@@ -592,7 +590,6 @@ export default function DashboardPage() {
     "頻道｜節目名稱": string;
     "是否有經營 私域群": boolean;
     資料夾: string;
-    經紀人: string;
     KOL開發者: string;
     經銷約開始日: string;
     自來件分潤: string;
@@ -614,7 +611,6 @@ export default function DashboardPage() {
     "頻道｜節目名稱": "",
     "是否有經營 私域群": false,
     資料夾: "",
-    經紀人: "",
     KOL開發者: "",
     經銷約開始日: "",
     自來件分潤: "",
@@ -655,7 +651,7 @@ export default function DashboardPage() {
     審核狀態: string;
     駁回理由?: string;
   } | null>(null);
-  /** 編輯 Modal 開啟時的來源列（判斷經紀人可否儲存） */
+  /** 編輯 Modal 開啟時的來源列（判斷可否儲存） */
   const [editingPartnerSource, setEditingPartnerSource] = useState<PartnerRow | null>(null);
   /** 新增／編輯 KOL 表單：自動 PartnerID、類別與 KOL開發者下拉 */
   const [partnerFormOptions, setPartnerFormOptions] = useState<{
@@ -1106,7 +1102,7 @@ export default function DashboardPage() {
     return filteredMasterList.filter((row) => String(row.專案類型 ?? "").trim() === masterSubTab);
   }, [filteredMasterList, masterSubTab]);
 
-  /** 合作夥伴 / KOL：與其他表相同，依 ② match_fields 篩列（未勾選 = 不篩；勾選經紀人 = 只顯示該欄位等於登入者姓名或帳號的列） */
+  /** 合作夥伴 / KOL：與其他表相同，依 ② match_fields 篩列（未勾選 = 不篩；勾選欄位 = 該欄等於登入者姓名或帳號） */
   const filteredPartners = useMemo(
     () => filterRowsByVisibility(partners as unknown as Record<string, unknown>[], "partners") as unknown as PartnerRow[],
     [partners, filterRowsByVisibility]
@@ -1238,13 +1234,13 @@ export default function DashboardPage() {
 
   /**
    * KOL 區塊主列表欄位（與 ③ 可見欄位交集）
-   * 含「經紀人」方便對照 ② 篩選：該欄必須與登入者 Users.姓名 或 Users.帳號 完全一致才會留下該列
+   * ② 篩選：勾選之欄位須與登入者 Users.姓名 或 Users.帳號 完全一致才會留下該列（經紀人改在大總表專案維護，合作夥伴不含此欄）
    */
   const partnerListCols = useMemo(
     () =>
       /** KOL開發者、經銷約開始日不顯示在主列表，僅在新增/編輯 Modal 與展開詳情維護 */
       /** 自來件分潤、SDH分潤、經銷約起迄等詳見列下方展開區 */
-      ["合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "資料夾", "經紀人", "分級"].filter((k) =>
+      ["合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "資料夾", "分級"].filter((k) =>
         partnersVisibleCols.includes(k)
       ),
     [partnersVisibleCols]
@@ -4027,18 +4023,6 @@ export default function DashboardPage() {
                     />
                   </div>
                   <div>
-                    <SearchableSelectField
-                      label="經紀人"
-                      value={createPartnerForm.經紀人}
-                      onChange={(v) => setCreatePartnerForm((f) => ({ ...f, 經紀人: v }))}
-                      options={[...new Set([...userNames, createPartnerForm.經紀人].filter(Boolean))].sort((a, b) =>
-                        a.localeCompare(b, "zh-TW")
-                      )}
-                      searchPlaceholder="搜尋人員姓名或帳號…"
-                      emptyHint="尚無使用者資料時請先至「使用者」新增帳號"
-                    />
-                  </div>
-                  <div>
                     <label className="mb-1 block text-xs font-semibold text-stone-500">
                       KOL開發者（來自 Users）{!canEditVisibility && "— 僅董事長／管理者可指定"}
                     </label>
@@ -4371,25 +4355,6 @@ export default function DashboardPage() {
                     )}
                   </div>
                   <div>
-                    {partnerFieldEditable("經紀人") ? (
-                      <SearchableSelectField
-                        label="經紀人"
-                        value={editPartnerForm.經紀人}
-                        onChange={(v) => setEditPartnerForm((f) => ({ ...f, 經紀人: v }))}
-                        options={[...new Set([...userNames, editPartnerForm.經紀人].filter(Boolean))].sort((a, b) =>
-                          a.localeCompare(b, "zh-TW")
-                        )}
-                        searchPlaceholder="搜尋人員姓名或帳號…"
-                        emptyHint="尚無使用者資料時請先至「使用者」新增帳號"
-                      />
-                    ) : (
-                      <>
-                        <label className="mb-1 block text-xs font-semibold text-stone-500">經紀人</label>
-                        <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.經紀人 || "—"}</p>
-                      </>
-                    )}
-                  </div>
-                  <div>
                     <label className="mb-1 block text-xs font-semibold text-stone-500">
                       KOL開發者（來自 Users）{!canEditVisibility && "— 僅董事長可改"}
                     </label>
@@ -4615,7 +4580,6 @@ export default function DashboardPage() {
                             "頻道｜節目名稱": editPartnerForm["頻道｜節目名稱"] || undefined,
                             "是否有經營 私域群": editPartnerForm["是否有經營 私域群"],
                             資料夾: editPartnerForm.資料夾 || undefined,
-                            經紀人: editPartnerForm.經紀人 || undefined,
                             KOL開發者: editPartnerForm.KOL開發者 || undefined,
                             經銷約開始日: editPartnerForm.經銷約開始日 || undefined,
                             自來件分潤: editPartnerForm.自來件分潤 || undefined,
@@ -4627,7 +4591,7 @@ export default function DashboardPage() {
                             Email: editPartnerForm.Email || undefined,
                             分級: editPartnerForm.分級 || undefined,
                         };
-                        // 經紀人不可改 KOL開發者：不送該欄位，API 亦會過濾
+                        // 非管理者不可改 KOL開發者：不送該欄位，API 亦會過濾
                         const patchBody = { ...fullBody } as Record<string, unknown>;
                         if (!canEditVisibility) delete patchBody.KOL開發者;
                         const res = await fetch("/api/partners", {
@@ -4859,7 +4823,6 @@ export default function DashboardPage() {
                         "頻道｜節目名稱": "",
                         "是否有經營 私域群": false,
                         資料夾: "",
-                        經紀人: me?.name ?? "",
                         KOL開發者: "",
                         經銷約開始日: "",
                         自來件分潤: "",
@@ -4935,7 +4898,6 @@ export default function DashboardPage() {
                             "頻道｜節目名稱": String(pt["頻道｜節目名稱"] ?? ""),
                             "是否有經營 私域群": Boolean(pt["是否有經營 私域群"]),
                             資料夾: String(pt.資料夾 ?? ""),
-                            經紀人: String(pt.經紀人 ?? ""),
                             KOL開發者: String(pt.KOL開發者 ?? ""),
                             經銷約開始日: String(pt.經銷約開始日 ?? ""),
                             自來件分潤: String(pt.自來件分潤 ?? ""),
@@ -5197,7 +5159,6 @@ export default function DashboardPage() {
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">PartnerID</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">合作夥伴名稱</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">經紀人</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">狀態</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">駁回理由</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">操作</th>
@@ -5208,7 +5169,6 @@ export default function DashboardPage() {
                       <tr key={pt.PartnerID} className="bg-amber-50/40">
                         <td className="px-4 py-3 text-sm text-stone-600">{pt.PartnerID}</td>
                         <td className="px-4 py-3 text-sm text-stone-900">{pt.合作夥伴名稱 ?? "—"}</td>
-                        <td className="px-4 py-3 text-sm text-stone-600">{pt.經紀人 ?? "—"}</td>
                         <td className="px-4 py-3 text-sm">
                           <span
                             className={
@@ -5295,7 +5255,6 @@ export default function DashboardPage() {
                                     "頻道｜節目名稱": String(pt["頻道｜節目名稱"] ?? ""),
                                     "是否有經營 私域群": Boolean(pt["是否有經營 私域群"]),
                                     資料夾: String(pt.資料夾 ?? ""),
-                                    經紀人: String(pt.經紀人 ?? ""),
                                     KOL開發者: String(pt.KOL開發者 ?? ""),
                                     經銷約開始日: String(pt.經銷約開始日 ?? ""),
                                     自來件分潤: String(pt.自來件分潤 ?? ""),
@@ -5331,7 +5290,6 @@ export default function DashboardPage() {
                                   "頻道｜節目名稱": String(pt["頻道｜節目名稱"] ?? ""),
                                   "是否有經營 私域群": Boolean(pt["是否有經營 私域群"]),
                                   資料夾: String(pt.資料夾 ?? ""),
-                                  經紀人: String(pt.經紀人 ?? ""),
                                   KOL開發者: String(pt.KOL開發者 ?? ""),
                                   經銷約開始日: String(pt.經銷約開始日 ?? ""),
                                   自來件分潤: String(pt.自來件分潤 ?? ""),

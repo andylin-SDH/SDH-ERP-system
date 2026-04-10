@@ -78,7 +78,7 @@ export async function buildPartnersVisibilityDebug(user: User): Promise<Partners
   const { filtered, reason } = filterPartnersRowsByVisibility(partners, matchFields, user);
 
   const fieldsForSample = normalizeMatchFields(matchFields);
-  const sampleKeys = fieldsForSample.length > 0 ? fieldsForSample : ["經紀人"];
+  const sampleKeys = fieldsForSample.length > 0 ? fieldsForSample : ["合作夥伴名稱"];
   const sampleRowsMatchValues = partners.slice(0, 3).map((row) => {
     const r = row as unknown as Record<string, unknown>;
     const out: Record<string, string> = {};

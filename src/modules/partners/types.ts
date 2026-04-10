@@ -14,7 +14,6 @@ export interface PartnerRow {
   "頻道｜節目名稱"?: string;
   "是否有經營 私域群"?: boolean;
   資料夾?: string;
-  經紀人?: string;
   /** KOL 開發者 */
   KOL開發者?: string;
   /** 主管（分潤模式 B 用） */
