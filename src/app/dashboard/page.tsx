@@ -28,7 +28,14 @@ import {
 import { SocialLinkIcons } from "@/components/SocialLinkIcons";
 import { PARTNER_STATUS, isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
 import { TASK_DUE_SOON_DAYS } from "@/config/task-due";
-import { aggregateTasksByAssignee, dueDaysFromToday, getTaskDueUiStatus } from "@/lib/task-due";
+import {
+  aggregateTasksByAssignee,
+  dueDaysFromToday,
+  filterTasksForWorkloadDrill,
+  getTaskDueUiStatus,
+  workloadDrillKindLabel,
+  type WorkloadDrillKind,
+} from "@/lib/task-due";
 
 /** 安全解析 Response：空 body 或非 JSON 時回傳 {}，避免 "Unexpected end of JSON input" */
 async function safeResJson(r: Response): Promise<Record<string, unknown>> {
@@ -139,6 +146,15 @@ function formatTaskDueYmd(ymd: string | null | undefined): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
   if (!m) return s;
   return `${m[1]}/${m[2]}/${m[3]}`;
+}
+
+function formatTaskDueShortHint(t: TaskRow): string {
+  if (t.任務完成 || !t.到期日?.trim()) return "";
+  const d = dueDaysFromToday(t.到期日);
+  if (d === null) return "";
+  if (d < 0) return `逾期 ${-d} 天`;
+  if (d <= TASK_DUE_SOON_DAYS) return `剩 ${d} 天`;
+  return "";
 }
 
 /** 新增／批次發票表單欄位順序（與 TABLE_COLUMNS.invoices 一致） */
@@ -536,6 +552,7 @@ export default function DashboardPage() {
   const [saveTaskError, setSaveTaskError] = useState<string | null>(null);
   const [remindingTaskId, setRemindingTaskId] = useState<string | null>(null);
   const [tasksSectionViewMode, setTasksSectionViewMode] = useState<"list" | "byAssignee">("list");
+  const [workloadDrill, setWorkloadDrill] = useState<{ assigneeLabel: string; kind: WorkloadDrillKind } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedUserForVisibility, setSelectedUserForVisibility] = useState<User | null>(null);
@@ -1338,6 +1355,11 @@ export default function DashboardPage() {
   );
   const taskWorkloadByAssignee = useMemo(() => aggregateTasksByAssignee(searchedTasks), [searchedTasks]);
 
+  const workloadDrillTasks = useMemo(() => {
+    if (!workloadDrill) return [];
+    return filterTasksForWorkloadDrill(searchedTasks, workloadDrill.assigneeLabel, workloadDrill.kind);
+  }, [searchedTasks, workloadDrill]);
+
   /** 分潤表：依 system_config 的 dedupe 規則在「顯示層」做一次去重（確保 UI 與規則永遠同步） */
   const masterTypeByProjectId = useMemo(() => {
     const m = new Map<string, string>();
@@ -1662,6 +1684,10 @@ export default function DashboardPage() {
       任務完成: Boolean(selectedTask.任務完成),
     });
   }, [selectedTask]);
+
+  useEffect(() => {
+    if (tasksSectionViewMode !== "byAssignee") setWorkloadDrill(null);
+  }, [tasksSectionViewMode]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -5447,17 +5473,164 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-100 bg-white">
-                      {taskWorkloadByAssignee.map((row) => (
-                        <tr key={row.assigneeLabel} className="hover:bg-amber-50/50">
-                          <td className="whitespace-nowrap px-4 py-3 font-medium text-stone-800">{row.assigneeLabel}</td>
-                          <td className="px-4 py-3 text-center tabular-nums text-stone-700">{row.open}</td>
-                          <td className="px-4 py-3 text-center tabular-nums font-semibold text-amber-800">{row.soon}</td>
-                          <td className="px-4 py-3 text-center tabular-nums font-semibold text-red-700">{row.overdue}</td>
-                          <td className="px-4 py-3 text-center tabular-nums text-stone-500">{row.noDueOpen}</td>
-                        </tr>
-                      ))}
+                      {taskWorkloadByAssignee.map((row) => {
+                        const drillOpen =
+                          workloadDrill?.assigneeLabel === row.assigneeLabel && workloadDrill?.kind === "open";
+                        const drillSoon =
+                          workloadDrill?.assigneeLabel === row.assigneeLabel && workloadDrill?.kind === "soon";
+                        const drillOver =
+                          workloadDrill?.assigneeLabel === row.assigneeLabel && workloadDrill?.kind === "overdue";
+                        const drillNoDue =
+                          workloadDrill?.assigneeLabel === row.assigneeLabel && workloadDrill?.kind === "noDue";
+                        const cellBtn =
+                          "min-w-[2.5rem] rounded-md px-2 py-1 transition disabled:cursor-not-allowed disabled:opacity-40";
+                        return (
+                          <tr key={row.assigneeLabel} className="hover:bg-amber-50/50">
+                            <td className="whitespace-nowrap px-4 py-3 font-medium text-stone-800">{row.assigneeLabel}</td>
+                            <td className="px-2 py-2 text-center tabular-nums text-stone-700">
+                              <button
+                                type="button"
+                                disabled={row.open <= 0}
+                                onClick={() =>
+                                  setWorkloadDrill((prev) =>
+                                    prev?.assigneeLabel === row.assigneeLabel && prev.kind === "open"
+                                      ? null
+                                      : { assigneeLabel: row.assigneeLabel, kind: "open" }
+                                  )
+                                }
+                                className={`${cellBtn} ${drillOpen ? "bg-stone-200 font-semibold ring-2 ring-amber-400/70" : "hover:bg-stone-100"}`}
+                              >
+                                {row.open}
+                              </button>
+                            </td>
+                            <td className="px-2 py-2 text-center tabular-nums font-semibold text-amber-800">
+                              <button
+                                type="button"
+                                disabled={row.soon <= 0}
+                                onClick={() =>
+                                  setWorkloadDrill((prev) =>
+                                    prev?.assigneeLabel === row.assigneeLabel && prev.kind === "soon"
+                                      ? null
+                                      : { assigneeLabel: row.assigneeLabel, kind: "soon" }
+                                  )
+                                }
+                                className={`${cellBtn} ${drillSoon ? "bg-amber-100 font-semibold ring-2 ring-amber-500/80" : "hover:bg-amber-50"}`}
+                              >
+                                {row.soon}
+                              </button>
+                            </td>
+                            <td className="px-2 py-2 text-center tabular-nums font-semibold text-red-700">
+                              <button
+                                type="button"
+                                disabled={row.overdue <= 0}
+                                onClick={() =>
+                                  setWorkloadDrill((prev) =>
+                                    prev?.assigneeLabel === row.assigneeLabel && prev.kind === "overdue"
+                                      ? null
+                                      : { assigneeLabel: row.assigneeLabel, kind: "overdue" }
+                                  )
+                                }
+                                className={`${cellBtn} ${drillOver ? "bg-red-50 font-semibold ring-2 ring-red-400/70" : "hover:bg-red-50/80"}`}
+                              >
+                                {row.overdue}
+                              </button>
+                            </td>
+                            <td className="px-2 py-2 text-center tabular-nums text-stone-500">
+                              <button
+                                type="button"
+                                disabled={row.noDueOpen <= 0}
+                                onClick={() =>
+                                  setWorkloadDrill((prev) =>
+                                    prev?.assigneeLabel === row.assigneeLabel && prev.kind === "noDue"
+                                      ? null
+                                      : { assigneeLabel: row.assigneeLabel, kind: "noDue" }
+                                  )
+                                }
+                                className={`${cellBtn} ${drillNoDue ? "bg-stone-100 font-semibold ring-2 ring-stone-400/70" : "hover:bg-stone-100"}`}
+                              >
+                                {row.noDueOpen}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
+                </div>
+              )}
+              {workloadDrill && (
+                <div className="mt-4 rounded-lg border border-amber-200/90 bg-white/95 p-4 shadow-sm">
+                  <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-bold text-amber-900">
+                        {workloadDrill.assigneeLabel}
+                        <span className="mx-1.5 text-stone-400">·</span>
+                        {workloadDrillKindLabel(workloadDrill.kind)}
+                        <span className="ml-2 font-normal text-stone-500">（{workloadDrillTasks.length} 筆）</span>
+                      </h3>
+                      <p className="mt-1 text-xs text-stone-500">點列可開啟任務完整編輯；再點同一數字可收合。</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setWorkloadDrill(null)}
+                      className="shrink-0 rounded-lg border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-900"
+                    >
+                      收合
+                    </button>
+                  </div>
+                  {workloadDrillTasks.length === 0 ? (
+                    <p className="text-sm text-stone-500">目前無符合的任務（可能資料已更新）。</p>
+                  ) : (
+                    <div className="max-h-[min(360px,50vh)] overflow-y-auto overflow-x-auto rounded-md border border-stone-100">
+                      <table className="min-w-full divide-y divide-stone-100 text-sm">
+                        <thead className="sticky top-0 bg-stone-50">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-stone-600">任務</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-stone-600">專案名稱</th>
+                            <th className="px-3 py-2 text-center text-xs font-semibold text-stone-600">到期日</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-stone-600">任務類型</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-stone-50 bg-white">
+                          {workloadDrillTasks.map((t, idx) => {
+                            const dueHint = formatTaskDueShortHint(t);
+                            const dueStatus = getTaskDueUiStatus(t.任務完成, t.到期日);
+                            return (
+                            <tr
+                              key={t.任務ID ?? idx}
+                              className="cursor-pointer transition hover:bg-amber-50/80"
+                              onClick={() => setSelectedTask(t)}
+                            >
+                              <td className="max-w-[200px] px-3 py-2.5 font-medium text-stone-900">
+                                <span className="line-clamp-2">{t.任務 ?? "—"}</span>
+                              </td>
+                              <td className="max-w-[160px] px-3 py-2.5 text-stone-600">
+                                <span className="line-clamp-2">{t.專案名稱 ?? "—"}</span>
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs tabular-nums">
+                                <span
+                                  className={
+                                    dueStatus === "overdue"
+                                      ? "font-semibold text-red-700"
+                                      : dueStatus === "soon"
+                                        ? "font-semibold text-amber-800"
+                                        : "text-stone-700"
+                                  }
+                                >
+                                  {formatTaskDueYmd(t.到期日)}
+                                  {dueHint ? (
+                                    <span className="ml-1 text-[10px] font-normal text-stone-500">{dueHint}</span>
+                                  ) : null}
+                                </span>
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2.5 text-stone-600">{t.任務類型 ?? "—"}</td>
+                            </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

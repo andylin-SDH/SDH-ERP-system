@@ -90,3 +90,33 @@ export function aggregateTasksByAssignee(tasks: TaskRow[]): AssigneeWorkloadRow[
     .filter((r) => r.open > 0)
     .sort((a, b) => b.open - a.open || a.assigneeLabel.localeCompare(b.assigneeLabel, "zh-TW"));
 }
+
+/** 依員工彙總表：點擊數字後篩選任務明細 */
+export type WorkloadDrillKind = "open" | "soon" | "overdue" | "noDue";
+
+export function filterTasksForWorkloadDrill(tasks: TaskRow[], assigneeLabel: string, kind: WorkloadDrillKind): TaskRow[] {
+  return tasks.filter((t) => {
+    if (t.任務完成) return false;
+    const key = (t.任務負責人 ?? "").trim() || "（未指定）";
+    if (key !== assigneeLabel) return false;
+    if (kind === "open") return true;
+    if (kind === "noDue") return !(t.到期日?.trim());
+    const st = getTaskDueUiStatus(t.任務完成, t.到期日);
+    if (kind === "soon") return st === "soon";
+    if (kind === "overdue") return st === "overdue";
+    return false;
+  });
+}
+
+export function workloadDrillKindLabel(kind: WorkloadDrillKind): string {
+  switch (kind) {
+    case "open":
+      return "進行中（全部未完成）";
+    case "soon":
+      return "即將到期";
+    case "overdue":
+      return "已逾期";
+    case "noDue":
+      return "未設到期日";
+  }
+}
