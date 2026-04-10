@@ -48,9 +48,9 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     /** 模式 B（廣告業配）；與「專案引薦人」分欄 */
     { key: "專案開發人", label: "專案開發人（廣告業配）" },
     /** 分潤模式 A（製作案、活動案等） */
-    { key: "專案BDPM", label: "專案BDPM（製作/活動）" },
-    { key: "專案管理員", label: "專案管理員（製作/活動）" },
-    { key: "執行管理員", label: "執行管理員（製作/活動）" },
+    { key: "專案BDPM", label: "專案BDPM（製作／活動）" },
+    { key: "專案管理員", label: "專案管理員（製作／活動）" },
+    { key: "執行管理員", label: "執行管理員（製作／活動）" },
     /** 分潤模式 B（廣告業配）：經紀人為專案手填；主管／KOL開發者與合作夥伴同 KOL 名稱對應 */
     { key: "經紀人", label: "經紀人（廣告業配）" },
     { key: "主管", label: "主管（廣告業配）" },

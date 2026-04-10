@@ -1049,9 +1049,13 @@ export default function DashboardPage() {
         }
         return merged.filter((k) => allKeys.includes(k));
       }
-      /** 大總表：款項進度（依財務衍生，預設緊接在專案狀態後） */
+      /** 大總表：款項進度（依財務衍生，預設緊接在專案狀態後）；舊 ③ 僅勾「專案引薦人」時補「專案開發人」 */
       if (tableKey === "master") {
         const merged = [...normalized];
+        if (merged.includes("專案引薦人") && !merged.includes("專案開發人") && allKeys.includes("專案開發人")) {
+          const idx = merged.indexOf("專案引薦人");
+          merged.splice(idx + 1, 0, "專案開發人");
+        }
         if (allKeys.includes("款項進度") && !merged.includes("款項進度")) {
           const idx = merged.indexOf("專案狀態");
           if (idx !== -1) merged.splice(idx + 1, 0, "款項進度");

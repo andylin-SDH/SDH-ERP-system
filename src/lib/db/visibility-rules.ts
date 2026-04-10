@@ -13,6 +13,16 @@ function normalizeMatchFields(fields: string[] | null | undefined): string[] {
   return fields.map((f) => String(f).trim()).filter(Boolean);
 }
 
+/** 大總表：舊規則僅「專案引薦人」時，補上「專案開發人」（模式 B 獨立欄位後仍應能對到廣告業配列） */
+function mergeMasterMatchFields(fields: string[]): string[] {
+  if (!fields.length) return fields;
+  if (fields.includes("專案引薦人") && !fields.includes("專案開發人")) {
+    const i = fields.indexOf("專案引薦人");
+    return [...fields.slice(0, i + 1), "專案開發人", ...fields.slice(i + 1)];
+  }
+  return fields;
+}
+
 export async function getVisibilityRules(): Promise<Record<string, string[]>> {
   const { data, error } = await getSupabase()
     .from("visibility_rules")
@@ -30,7 +40,9 @@ export async function getVisibilityRules(): Promise<Record<string, string[]>> {
     const fields = (row as { match_fields?: string[] | null }).match_fields;
     // 有 table_key 就覆寫：空規則務必為 []，否則 null 會讓 result 仍留預設而繼續過濾
     if (key) {
-      result[key] = normalizeMatchFields(Array.isArray(fields) ? fields : []);
+      let next = normalizeMatchFields(Array.isArray(fields) ? fields : []);
+      if (key === "master") next = mergeMasterMatchFields(next);
+      result[key] = next;
     }
   }
   return result;
