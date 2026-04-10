@@ -267,7 +267,7 @@ function generateProjectId(): string {
 const OVERVIEW_SCOPE_STORAGE_KEY = "sdh-dashboard-overview-scope";
 
 /** 大總表上與「這個人與專案有關」可能對得上的欄位（姓名／Email 需與 Users 一致） */
-const MASTER_RELATED_FIELD_KEYS = ["專案BDPM", "專案引薦人", "專案管理員", "執行管理員", "KOL名稱"] as const;
+const MASTER_RELATED_FIELD_KEYS = ["專案BDPM", "專案引薦人", "專案管理員", "執行管理員", "KOL名稱", "經紀人"] as const;
 
 function fieldMatchesUser(val: string | null | undefined, userName: string, userEmail: string): boolean {
   const v = String(val ?? "").trim();
@@ -286,9 +286,10 @@ function isMasterRowRelatedToUser(
   if (fieldMatchesUser(row.專案引薦人, userName, userEmail)) return true;
 
   if (isPayoutModeB(String(row.專案類型 ?? ""))) {
+    if (fieldMatchesUser(row.經紀人, userName, userEmail)) return true;
     const p = partnerByKolName.get(String(row.KOL名稱 ?? "").trim());
     if (p) {
-      for (const key of ["經紀人", "主管", "KOL開發者"] as const) {
+      for (const key of ["主管", "KOL開發者"] as const) {
         if (fieldMatchesUser(p[key], userName, userEmail)) return true;
       }
     }
@@ -344,7 +345,7 @@ function payoutRowWorkflowStage(row: PayoutRow): PayoutWorkflowTabKey {
   return "pending_vendor";
 }
 
-/** 大總表儲存格：模式 B 之經紀人／主管／KOL開發者取自合作夥伴；模式 A 不顯示該三欄（回傳空字串） */
+/** 大總表儲存格：模式 B 經紀人為大總表手填；主管／KOL開發者由合作夥伴依 KOL 名稱帶出；模式 A 不顯示該三欄（回傳空字串） */
 function masterTableCellText(
   row: MasterRow,
   colKey: string,
@@ -356,7 +357,11 @@ function masterTableCellText(
     return financeProgressShortLabel(pid ? financeByProjectId?.get(pid) : undefined);
   }
   const modeB = isPayoutModeB(String(row.專案類型 ?? ""));
-  if (colKey === "經紀人" || colKey === "主管" || colKey === "KOL開發者") {
+  if (colKey === "經紀人") {
+    if (!modeB) return "";
+    return String(row.經紀人 ?? "").trim();
+  }
+  if (colKey === "主管" || colKey === "KOL開發者") {
     if (!modeB) return "";
     const p = partnerByKolName.get(String(row.KOL名稱 ?? "").trim());
     return String(p?.[colKey as keyof PartnerRow] ?? "").trim();
@@ -372,6 +377,11 @@ function masterTableCellText(
 const MASTER_PAYOUT_MODE_A_COL_KEYS = new Set(["專案BDPM", "專案管理員", "執行管理員"]);
 /** 大總表：分潤模式 B 專用欄 */
 const MASTER_PAYOUT_MODE_B_COL_KEYS = new Set(["經紀人", "主管", "KOL開發者"]);
+
+/** 系統設定「分潤成數預設」：模式 B 輸入框顯示標籤（JSON key 仍為 master_payout_defaults 既有鍵名） */
+const MASTER_PAYOUT_MODE_B_CONFIG_LABELS: Partial<Record<string, string>> = {
+  KOL開發者分潤成數: "KOL開發者",
+};
 
 /** 進行中：排除明顯已結案／完成狀態（空狀態視為進行中） */
 function isProjectInProgress(專案狀態: string | null | undefined): boolean {
@@ -432,6 +442,7 @@ export default function DashboardPage() {
     專案成本: "",
     KOL費用未稅: "",
     KOL名稱: "",
+    經紀人: "",
     專案費用類型: "",
     廠商名稱: "",
     專案資料夾: "",
@@ -466,6 +477,7 @@ export default function DashboardPage() {
     KOL費用未稅: "",
     專案費用類型: "",
     KOL名稱: "",
+    經紀人: "",
     廠商名稱: "",
     專案BDPM: "",
     專案BDPM分潤成數: "",
@@ -1047,7 +1059,7 @@ export default function DashboardPage() {
     []
   );
 
-  /** 合作夥伴「合作夥伴名稱」→ 列（大總表模式 B 依 KOL 名稱對應經紀人／主管／KOL開發者） */
+  /** 合作夥伴「合作夥伴名稱」→ 列（大總表模式 B：主管／KOL開發者依 KOL 名稱對應；經紀人為專案欄位） */
   const partnerByKolName = useMemo(() => {
     const m = new Map<string, PartnerRow>();
     for (const p of partners) {
@@ -1069,7 +1081,7 @@ export default function DashboardPage() {
       return rows.filter((row) => {
         for (const key of matchFields) {
           let val = String((row as unknown as Record<string, unknown>)[key] ?? "").trim();
-          if (!val && tableKey === "master" && (key === "經紀人" || key === "主管" || key === "KOL開發者")) {
+          if (!val && tableKey === "master" && (key === "主管" || key === "KOL開發者")) {
             const r = row as unknown as MasterRow;
             const p = partnerByKolName.get(String(r.KOL名稱 ?? "").trim());
             val = String((p as Record<string, unknown> | undefined)?.[key] ?? "").trim();
@@ -1531,6 +1543,7 @@ export default function DashboardPage() {
       ),
       專案費用類型: selectedMaster.專案費用類型 ?? "",
       KOL名稱: selectedMaster.KOL名稱 ?? "",
+      經紀人: selectedMaster.經紀人 ?? "",
       廠商名稱: selectedMaster.廠商名稱 ?? "",
       專案BDPM: selectedMaster.專案BDPM ?? "",
       專案BDPM分潤成數: selectedMaster.專案BDPM分潤成數 ?? "",
@@ -2682,6 +2695,7 @@ export default function DashboardPage() {
                       專案成本: "",
                       KOL費用未稅: "",
                       KOL名稱: "",
+                      經紀人: "",
                       專案費用類型: "",
                       廠商名稱: "",
                       專案資料夾: "",
@@ -3193,7 +3207,7 @@ export default function DashboardPage() {
                     <div className="flex flex-wrap gap-x-6 gap-y-2">
                       {(["專案引薦人分潤成數", "經紀人分潤成數", "主管分潤成數", "KOL開發者分潤成數"] as const).map((k) => (
                         <div key={k} className="flex items-center gap-2">
-                          <span className="text-xs text-stone-500">{k}</span>
+                          <span className="text-xs text-stone-500">{MASTER_PAYOUT_MODE_B_CONFIG_LABELS[k] ?? k}</span>
                           <input
                             type="text"
                             value={payoutDefaults[k] ?? ""}
@@ -6612,7 +6626,12 @@ export default function DashboardPage() {
                           onChange={(v) => setCreateForm((f) => ({ ...f, 專案引薦人: v }))}
                           options={userNames}
                         />
-                        <Field label="經紀人（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === createForm.KOL名稱)?.經紀人 ?? "—"} />
+                        <SelectField
+                          label="經紀人"
+                          value={createForm.經紀人}
+                          onChange={(v) => setCreateForm((f) => ({ ...f, 經紀人: v }))}
+                          options={[...new Set([...userNames, createForm.經紀人].filter(Boolean))]}
+                        />
                         <Field label="主管（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === createForm.KOL名稱)?.主管 ?? "—"} />
                         <Field label="KOL開發者（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === createForm.KOL名稱)?.KOL開發者 ?? "—"} />
                       </>
@@ -6990,6 +7009,7 @@ export default function DashboardPage() {
                       ),
                       專案費用類型: selectedMaster.專案費用類型 ?? "",
                       KOL名稱: selectedMaster.KOL名稱 ?? "",
+                      經紀人: selectedMaster.經紀人 ?? "",
                       廠商名稱: selectedMaster.廠商名稱 ?? "",
                       專案BDPM: selectedMaster.專案BDPM ?? "",
                       專案BDPM分潤成數: selectedMaster.專案BDPM分潤成數 ?? "",
@@ -7242,7 +7262,16 @@ export default function DashboardPage() {
                       ) : (
                         <Field label="專案引薦人" value={selectedMaster.專案引薦人} />
                       )}
-                      <Field label="經紀人（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === (isEditingMaster ? editMasterForm.KOL名稱 : selectedMaster.KOL名稱))?.經紀人 ?? "—"} />
+                      {isEditingMaster ? (
+                        <SelectField
+                          label="經紀人"
+                          value={editMasterForm.經紀人}
+                          onChange={(v) => setEditMasterForm((f) => ({ ...f, 經紀人: v }))}
+                          options={[...new Set([...userNames, editMasterForm.經紀人].filter(Boolean))]}
+                        />
+                      ) : (
+                        <Field label="經紀人" value={selectedMaster.經紀人} />
+                      )}
                       <Field label="主管（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === (isEditingMaster ? editMasterForm.KOL名稱 : selectedMaster.KOL名稱))?.主管 ?? "—"} />
                       <Field label="KOL開發者（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === (isEditingMaster ? editMasterForm.KOL名稱 : selectedMaster.KOL名稱))?.KOL開發者 ?? "—"} />
                     </>

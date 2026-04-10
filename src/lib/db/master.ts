@@ -19,6 +19,8 @@ export interface MasterRow {
   專案成本: string | null;
   KOL費用未稅: string | null;
   KOL名稱: string | null;
+  /** 廣告業配（模式 B）：專案手填；分潤「經紀人」領取人以此為準 */
+  經紀人: string | null;
   專案費用類型: string | null;
   廠商名稱: string | null;
   /** 可編輯；同步至財務與分潤表「廠商預計付款日」 */
@@ -52,6 +54,7 @@ function rowToMaster(r: Record<string, unknown>): MasterRow {
     專案成本: (r.專案成本 as string) ?? null,
     KOL費用未稅: (r.KOL費用未稅 as string) ?? null,
     KOL名稱: (r.KOL名稱 as string) ?? null,
+    經紀人: (r.經紀人 as string) ?? null,
     專案費用類型: (r.專案費用類型 as string) ?? null,
     廠商名稱: (r.廠商名稱 as string) ?? null,
     廠商預計付款日: (r.廠商預計付款日 as string) ?? null,
@@ -104,6 +107,7 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     專案成本: payload.專案成本 ?? null,
     KOL費用未稅: payload.KOL費用未稅 ?? null,
     KOL名稱: payload.KOL名稱 ?? null,
+    經紀人: payload.經紀人 ?? null,
     專案費用類型: payload.專案費用類型 ?? null,
     廠商名稱: payload.廠商名稱 ?? null,
     廠商預計付款日: payload.廠商預計付款日 ?? null,
@@ -155,6 +159,7 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
     專案成本: payload.專案成本 ?? null,
     KOL費用未稅: payload.KOL費用未稅 ?? null,
     KOL名稱: payload.KOL名稱 ?? null,
+    經紀人: payload.經紀人 ?? null,
     專案費用類型: payload.專案費用類型 ?? null,
     廠商名稱: payload.廠商名稱 ?? null,
     廠商預計付款日: payload.廠商預計付款日 ?? null,

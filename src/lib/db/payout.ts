@@ -212,7 +212,7 @@ export async function syncPayoutForProject(
       ? partners.find((p) => (p.合作夥伴名稱 ?? "").trim() === (master.KOL名稱 ?? "").trim())
       : null;
     const roles: Array<{ key: keyof PayoutDefaults; 分潤類型: string; 領取人: string | null }> = [
-      { key: "經紀人分潤成數", 分潤類型: "經紀人", 領取人: kol?.經紀人 ?? null },
+      { key: "經紀人分潤成數", 分潤類型: "經紀人", 領取人: master.經紀人?.trim() || null },
       { key: "主管分潤成數", 分潤類型: "主管", 領取人: kol?.主管 ?? null },
       { key: "KOL開發者分潤成數", 分潤類型: "KOL開發者", 領取人: kol?.KOL開發者 ?? null },
     ];
