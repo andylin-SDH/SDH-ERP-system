@@ -4024,29 +4024,16 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-semibold text-stone-500">
-                      KOL開發者（來自 Users）{!canEditVisibility && "— 僅董事長／管理者可指定"}
+                      KOL開發者{!canEditVisibility && "— 僅董事長／管理者可指定"}
                     </label>
                     {canEditVisibility ? (
-                      <select
+                      <input
+                        type="text"
                         value={createPartnerForm.KOL開發者}
                         onChange={(e) => setCreatePartnerForm((f) => ({ ...f, KOL開發者: e.target.value }))}
+                        placeholder="可輸入內部或外部人員名稱"
                         className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
-                      >
-                        <option value="">— 請選擇 —</option>
-                        {createPartnerForm.KOL開發者 &&
-                          !(partnerFormOptions?.users ?? []).some(
-                            (u) => u.name === createPartnerForm.KOL開發者 || u.email === createPartnerForm.KOL開發者
-                          ) && (
-                            <option value={createPartnerForm.KOL開發者}>
-                              {createPartnerForm.KOL開發者}（目前值）
-                            </option>
-                          )}
-                        {(partnerFormOptions?.users ?? []).map((u) => (
-                          <option key={u.email} value={u.name}>
-                            {u.name} ({u.email})
-                          </option>
-                        ))}
-                      </select>
+                      />
                     ) : (
                       <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-500">
                         核准後由董事長指定
@@ -4356,27 +4343,16 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-semibold text-stone-500">
-                      KOL開發者（來自 Users）{!canEditVisibility && "— 僅董事長可改"}
+                      KOL開發者{!canEditVisibility && "— 僅董事長可改"}
                     </label>
                     {partnerFieldEditable("KOL開發者") ? (
-                      <select
+                      <input
+                        type="text"
                         value={editPartnerForm.KOL開發者}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, KOL開發者: e.target.value }))}
+                        placeholder="可輸入內部或外部人員名稱"
                         className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
-                      >
-                        <option value="">— 請選擇 —</option>
-                        {editPartnerForm.KOL開發者 &&
-                          !(partnerFormOptions?.users ?? []).some(
-                            (u) => u.name === editPartnerForm.KOL開發者 || u.email === editPartnerForm.KOL開發者
-                          ) && (
-                            <option value={editPartnerForm.KOL開發者}>{editPartnerForm.KOL開發者}（目前值）</option>
-                          )}
-                        {(partnerFormOptions?.users ?? []).map((u) => (
-                          <option key={u.email} value={u.name}>
-                            {u.name} ({u.email})
-                          </option>
-                        ))}
-                      </select>
+                      />
                     ) : (
                       <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.KOL開發者 || "—"}</p>
                     )}
