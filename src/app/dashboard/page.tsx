@@ -2199,9 +2199,6 @@ export default function DashboardPage() {
               <h1 className="text-2xl font-bold tracking-tight text-stone-900 sm:text-3xl">
                 {me?.name ?? "總覽"} Dashboard
               </h1>
-              <p className="mt-1.5 text-sm font-medium text-stone-500">
-                {me?.name}（{me?.role}）· 全公司使用者、專案、任務、合作夥伴
-              </p>
             </div>
             {me && visibleSections.includes("overview") && activeSection !== "overview" && (
               <button
