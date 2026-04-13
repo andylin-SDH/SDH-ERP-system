@@ -1729,66 +1729,128 @@ export default function DashboardPage() {
       ]
     ) => {
       const need = new Set(targets);
-      const reqs = [
-        need.has("users") ? fetch("/api/users", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
-        need.has("master") ? fetch("/api/master", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
-        need.has("tasks") ? fetch("/api/tasks", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
-        need.has("partners") ? fetch("/api/partners", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
-        need.has("myVisibility") ? fetch("/api/user-visibility/me", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
-        need.has("visibilityRules") ? fetch("/api/visibility-rules", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
-        need.has("systemConfig") ? fetch("/api/system-config", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
-        need.has("invoices") || need.has("finance")
-          ? fetch("/api/invoices", { cache: "no-store" }).then(safeResJson)
-          : Promise.resolve(null),
-        need.has("finance") ? fetch("/api/finance", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
-        need.has("payout") ? fetch("/api/payout", { cache: "no-store" }).then(safeResJson) : Promise.resolve(null),
-      ] as const;
-      const [u, m, t, pt, vis, rulesRes, cfgRes, invRes, finRes, payoutRes] = await Promise.allSettled(reqs);
-      if (u.status === "fulfilled" && u.value && (u.value as { ok?: boolean }).ok)
-        setUsers(((u.value as { users?: User[] }).users) ?? []);
-      if (m.status === "fulfilled" && m.value && (m.value as { ok?: boolean }).ok)
-        setMasterList(((m.value as { list?: MasterRow[] }).list) ?? []);
-      if (t.status === "fulfilled" && t.value && (t.value as { ok?: boolean }).ok)
-        setTasks(((t.value as { tasks?: TaskRow[] }).tasks) ?? []);
-      if (pt.status === "fulfilled" && pt.value && (pt.value as { ok?: boolean }).ok) {
-        const ptVal = pt.value as { partners?: PartnerRow[]; partnersError?: string };
-        setPartners(ptVal.partners ?? []);
-        setPartnersLoadError(ptVal.partnersError ?? null);
+      const reqs: Promise<unknown>[] = [];
+      if (need.has("users")) {
+        reqs.push(
+          fetch("/api/users", { cache: "no-store" })
+            .then(safeResJson)
+            .then((res) => {
+              if (!(res as { ok?: boolean }).ok) return;
+              setUsers(((res as { users?: User[] }).users) ?? []);
+            })
+        );
       }
-      if (vis.status === "fulfilled" && vis.value && (vis.value as { ok?: boolean }).ok) {
-        const v = vis.value as { tables?: string[]; columns?: Record<string, string[]>; overview_kpis?: string[] | null };
-        setMyVisibility({
-          tables: v.tables ?? [],
-          columns: v.columns ?? {},
-          overview_kpis: v.overview_kpis !== undefined ? v.overview_kpis : null,
-        });
+      if (need.has("master")) {
+        reqs.push(
+          fetch("/api/master", { cache: "no-store" })
+            .then(safeResJson)
+            .then((res) => {
+              if (!(res as { ok?: boolean }).ok) return;
+              setMasterList(((res as { list?: MasterRow[] }).list) ?? []);
+            })
+        );
       }
-      if (rulesRes.status === "fulfilled" && rulesRes.value && (rulesRes.value as { ok?: boolean }).ok) {
-        const r = rulesRes.value as { rules?: Record<string, string[]> };
-        setVisibilityRules(r.rules ?? {});
+      if (need.has("tasks")) {
+        reqs.push(
+          fetch("/api/tasks", { cache: "no-store" })
+            .then(safeResJson)
+            .then((res) => {
+              if (!(res as { ok?: boolean }).ok) return;
+              setTasks(((res as { tasks?: TaskRow[] }).tasks) ?? []);
+            })
+        );
       }
-      if (cfgRes.status === "fulfilled" && cfgRes.value && (cfgRes.value as { ok?: boolean }).ok) {
-        const c = (cfgRes.value as {
-          config?: {
-            master_payout_defaults: Record<string, string>;
-            project_types: string[];
-            project_status_options?: string[];
-            project_expense_type_options?: string[];
-            task_type_options?: string[];
-            role_visibility: Record<string, { sections: string[] }>;
-            roles?: string[];
-            payout_dedupe_rules?: PayoutDedupeRulesByMode;
-            overview_kpi_by_role?: Record<string, string[]>;
-          };
-        }).config;
-        if (c) setSystemConfig(c);
+      if (need.has("partners")) {
+        reqs.push(
+          fetch("/api/partners", { cache: "no-store" })
+            .then(safeResJson)
+            .then((res) => {
+              if (!(res as { ok?: boolean }).ok) return;
+              const ptVal = res as { partners?: PartnerRow[]; partnersError?: string };
+              setPartners(ptVal.partners ?? []);
+              setPartnersLoadError(ptVal.partnersError ?? null);
+            })
+        );
       }
-      if (invRes.status === "fulfilled" && invRes.value && (invRes.value as { ok?: boolean }).ok)
-        setInvoices(((invRes.value as { invoices?: InvoiceRow[] }).invoices) ?? []);
-      if (finRes.status === "fulfilled" && finRes.value && (finRes.value as { ok?: boolean }).ok)
-        setFinance(((finRes.value as { finance?: FinanceRow[] }).finance) ?? []);
-      if (payoutRes.status === "fulfilled" && payoutRes.value && (payoutRes.value as { ok?: boolean }).ok)
-        setPayoutList(((payoutRes.value as { list?: PayoutRow[] }).list) ?? []);
+      if (need.has("myVisibility")) {
+        reqs.push(
+          fetch("/api/user-visibility/me", { cache: "no-store" })
+            .then(safeResJson)
+            .then((res) => {
+              if (!(res as { ok?: boolean }).ok) return;
+              const v = res as { tables?: string[]; columns?: Record<string, string[]>; overview_kpis?: string[] | null };
+              setMyVisibility({
+                tables: v.tables ?? [],
+                columns: v.columns ?? {},
+                overview_kpis: v.overview_kpis !== undefined ? v.overview_kpis : null,
+              });
+            })
+        );
+      }
+      if (need.has("visibilityRules")) {
+        reqs.push(
+          fetch("/api/visibility-rules", { cache: "no-store" })
+            .then(safeResJson)
+            .then((res) => {
+              if (!(res as { ok?: boolean }).ok) return;
+              setVisibilityRules(((res as { rules?: Record<string, string[]> }).rules) ?? {});
+            })
+        );
+      }
+      if (need.has("systemConfig")) {
+        reqs.push(
+          fetch("/api/system-config", { cache: "no-store" })
+            .then(safeResJson)
+            .then((res) => {
+              if (!(res as { ok?: boolean }).ok) return;
+              const c = (res as {
+                config?: {
+                  master_payout_defaults: Record<string, string>;
+                  project_types: string[];
+                  project_status_options?: string[];
+                  project_expense_type_options?: string[];
+                  task_type_options?: string[];
+                  role_visibility: Record<string, { sections: string[] }>;
+                  roles?: string[];
+                  payout_dedupe_rules?: PayoutDedupeRulesByMode;
+                  overview_kpi_by_role?: Record<string, string[]>;
+                };
+              }).config;
+              if (c) setSystemConfig(c);
+            })
+        );
+      }
+      if (need.has("invoices") || need.has("finance")) {
+        reqs.push(
+          fetch("/api/invoices", { cache: "no-store" })
+            .then(safeResJson)
+            .then((res) => {
+              if (!(res as { ok?: boolean }).ok) return;
+              setInvoices(((res as { invoices?: InvoiceRow[] }).invoices) ?? []);
+            })
+        );
+      }
+      if (need.has("finance")) {
+        reqs.push(
+          fetch("/api/finance", { cache: "no-store" })
+            .then(safeResJson)
+            .then((res) => {
+              if (!(res as { ok?: boolean }).ok) return;
+              setFinance(((res as { finance?: FinanceRow[] }).finance) ?? []);
+            })
+        );
+      }
+      if (need.has("payout")) {
+        reqs.push(
+          fetch("/api/payout", { cache: "no-store" })
+            .then(safeResJson)
+            .then((res) => {
+              if (!(res as { ok?: boolean }).ok) return;
+              setPayoutList(((res as { list?: PayoutRow[] }).list) ?? []);
+            })
+        );
+      }
+      await Promise.allSettled(reqs);
     },
     []
   );
@@ -2011,7 +2073,8 @@ export default function DashboardPage() {
         }
         setMe(sess.user);
         setLoading(false);
-        await refreshDashboardData();
+        await refreshDashboardData(["users", "master", "tasks", "partners", "myVisibility", "systemConfig"]);
+        void refreshDashboardData(["visibilityRules", "invoices", "finance", "payout"]);
       })
       .catch(() => {
         setError("無法驗證登入狀態，請重新登入");

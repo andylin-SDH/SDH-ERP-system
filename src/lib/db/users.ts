@@ -181,36 +181,41 @@ export async function getUserByEmail(email: string): Promise<User | null> {
   const supabase = getSupabase();
   const { data: dataEn, error: errEn } = await supabase
     .from("users")
-    .select("email, name, role, dept, scope, active_flag");
-  let list: Array<Record<string, unknown>> = [];
-  let useAccount = false;
-  if (!errEn && dataEn?.length) {
-    list = (dataEn ?? []) as Array<Record<string, unknown>>;
-  } else {
-    const { data, error } = await supabase
-      .from("users")
-      // Supabase select parser 對中文欄位需加上雙引號
-      .select('"帳號","姓名","角色","部門","scope","active_flag"');
-    if (error) {
-      log("users.db", "getUserByEmail 查詢錯誤", { error: String(error?.message) });
-      throw error;
+    .select("email, name, role, dept, scope, active_flag")
+    .eq("email", raw)
+    .maybeSingle();
+  if (!errEn) {
+    if (!dataEn) {
+      log("users.db", "getUserByEmail 英文欄位未找到", { raw });
+      return null;
     }
-    list = (data ?? []) as Array<Record<string, unknown>>;
-    useAccount = true;
+    const foundRecord = dataEn as unknown as Record<string, unknown>;
+    log("users.db", "getUserByEmail 找到使用者（英文欄位）", {
+      email: foundRecord.email,
+      role: foundRecord.role,
+    });
+    return rowToUser(foundRecord);
   }
-  const emailKey = useAccount ? "帳號" : "email";
-  log("users.db", "getUserByEmail 查詢結果筆數", { count: list.length, useAccount });
-  const found = list.find((r) => normalizeEmail(String(r[emailKey] ?? "")) === raw);
-  if (!found) {
-    log("users.db", "getUserByEmail 未找到符合的使用者", { raw });
+  const { data: dataZh, error: errZh } = await supabase
+    .from("users")
+    // Supabase select parser 對中文欄位需加上雙引號
+    .select('"帳號","姓名","角色","部門","scope","active_flag"')
+    .eq("帳號", raw)
+    .maybeSingle();
+  if (errZh) {
+    log("users.db", "getUserByEmail 查詢錯誤", { error: String(errZh?.message) });
+    throw errZh;
+  }
+  if (!dataZh) {
+    log("users.db", "getUserByEmail 中文欄位未找到", { raw });
     return null;
   }
-  const foundRecord = found as unknown as Record<string, unknown>;
-  log("users.db", "getUserByEmail 找到使用者", {
-    email: foundRecord[emailKey],
-    role: (foundRecord["role"] as string | undefined) ?? (foundRecord["角色"] as string | undefined),
+  const foundRecord = dataZh as unknown as Record<string, unknown>;
+  log("users.db", "getUserByEmail 找到使用者（中文欄位）", {
+    email: foundRecord["帳號"],
+    role: foundRecord["角色"],
   });
-  return rowToUser(found);
+  return rowToUser(foundRecord);
 }
 
 export async function verifyCredentials(
