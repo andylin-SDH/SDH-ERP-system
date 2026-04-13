@@ -2262,6 +2262,34 @@ export default function DashboardPage() {
                   );
                 })}
               </nav>
+              <div className="shrink-0 space-y-2 border-t border-stone-700/80 px-2.5 py-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowChangePassword(true);
+                    setChangePasswordError(null);
+                    setChangePasswordMessage(null);
+                    setChangePasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+                    setMobileNavOpen(false);
+                  }}
+                  title={sidebarCollapsed ? "修改密碼" : undefined}
+                  className={`relative w-full overflow-hidden rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-stone-300 ring-1 ring-transparent transition-all duration-150 ease-out before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-1 before:rounded-r-full before:bg-transparent before:transition-all before:duration-150 before:content-[''] hover:bg-stone-800/70 hover:text-white hover:ring-stone-600/40 hover:before:bg-amber-400 ${
+                    sidebarCollapsed ? "md:px-1.5 md:text-center md:text-[10px] md:leading-tight" : ""
+                  }`}
+                >
+                  <span className={`block min-w-0 ${sidebarCollapsed ? "md:break-words" : "truncate"}`}>{sidebarCollapsed ? "密碼" : "修改密碼"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  title={sidebarCollapsed ? "登出" : undefined}
+                  className={`relative w-full overflow-hidden rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-stone-300 ring-1 ring-transparent transition-all duration-150 ease-out before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-1 before:rounded-r-full before:bg-transparent before:transition-all before:duration-150 before:content-[''] hover:bg-stone-800/70 hover:text-white hover:ring-stone-600/40 hover:before:bg-amber-400 ${
+                    sidebarCollapsed ? "md:px-1.5 md:text-center md:text-[10px] md:leading-tight" : ""
+                  }`}
+                >
+                  <span className={`block min-w-0 ${sidebarCollapsed ? "md:break-words" : "truncate"}`}>{sidebarCollapsed ? "登出" : "登出系統"}</span>
+                </button>
+              </div>
               <p className={`mt-auto shrink-0 border-t border-stone-700/80 px-3 py-3 text-[10px] leading-relaxed text-stone-500 ${sidebarCollapsed ? "md:hidden" : ""}`}>
                 拖曳項目可調整順序。目前：
                 <span className="font-semibold text-amber-400">{TABLE_LABELS[activeSection ?? ""] ?? activeSection ?? "—"}</span>
@@ -2306,27 +2334,6 @@ export default function DashboardPage() {
                 前往總覽
               </button>
             )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setShowChangePassword(true);
-                setChangePasswordError(null);
-                setChangePasswordMessage(null);
-                setChangePasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
-              }}
-              className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
-            >
-              修改密碼
-            </button>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-semibold text-stone-600 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
-            >
-              登出
-            </button>
           </div>
         </header>
 
