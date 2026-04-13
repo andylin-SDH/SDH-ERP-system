@@ -553,6 +553,11 @@ export default function DashboardPage() {
   const [remindingTaskId, setRemindingTaskId] = useState<string | null>(null);
   const [tasksSectionViewMode, setTasksSectionViewMode] = useState<"list" | "byAssignee">("list");
   const [workloadDrill, setWorkloadDrill] = useState<{ assigneeLabel: string; kind: WorkloadDrillKind } | null>(null);
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [changePasswordForm, setChangePasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
+  const [changePasswordMessage, setChangePasswordMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedUserForVisibility, setSelectedUserForVisibility] = useState<User | null>(null);
@@ -1692,7 +1697,12 @@ export default function DashboardPage() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (selectedTask) {
+      if (showChangePassword) {
+        setShowChangePassword(false);
+        setChangePasswordError(null);
+        setChangePasswordMessage(null);
+        setChangePasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      } else if (selectedTask) {
         setSelectedTask(null);
         setSaveTaskError(null);
       } else if (selectedMaster) {
@@ -1704,11 +1714,13 @@ export default function DashboardPage() {
         setIsEditingMaster(false);
         setSaveMasterError(null);
         setShowDeleteMasterConfirm(false);
+      } else if (workloadDrill) {
+        setWorkloadDrill(null);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedMaster, selectedTask, showDeleteMasterConfirm]);
+  }, [selectedMaster, selectedTask, showDeleteMasterConfirm, showChangePassword, workloadDrill]);
 
   const refreshDashboardData = useCallback(
     async (
@@ -2108,6 +2120,47 @@ export default function DashboardPage() {
     window.location.href = "/";
   }
 
+  async function handleChangeMyPassword(e: React.FormEvent) {
+    e.preventDefault();
+    setChangePasswordError(null);
+    setChangePasswordMessage(null);
+    const currentPassword = changePasswordForm.currentPassword.trim();
+    const newPassword = changePasswordForm.newPassword.trim();
+    const confirmPassword = changePasswordForm.confirmPassword.trim();
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setChangePasswordError("請完整填寫目前密碼、新密碼與確認密碼");
+      return;
+    }
+    if (newPassword.length < 6) {
+      setChangePasswordError("新密碼至少需要 6 個字元");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setChangePasswordError("新密碼與確認密碼不一致");
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      const res = await fetch("/api/users/password", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const data = (await safeResJson(res)) as { ok?: boolean; error?: string; message?: string };
+      if (!res.ok || !data.ok) {
+        setChangePasswordError(data.error ?? "修改密碼失敗");
+        setChangingPassword(false);
+        return;
+      }
+      setChangePasswordMessage(data.message ?? "密碼已更新");
+      setChangePasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    } catch (err) {
+      setChangePasswordError(err instanceof Error ? err.message : "修改密碼失敗");
+    }
+    setChangingPassword(false);
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-[#faf8f5]">
       {/* Logo 獨立頂列（不包在深色側欄內） */}
@@ -2254,13 +2307,27 @@ export default function DashboardPage() {
               </button>
             )}
           </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-semibold text-stone-600 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
-          >
-            登出
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowChangePassword(true);
+                setChangePasswordError(null);
+                setChangePasswordMessage(null);
+                setChangePasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+              }}
+              className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
+            >
+              修改密碼
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-semibold text-stone-600 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
+            >
+              登出
+            </button>
+          </div>
         </header>
 
         {me && tabSections.length > 0 && (
@@ -7707,6 +7774,57 @@ export default function DashboardPage() {
       )}
 
       {/* 任務 編輯抽屜 */}
+      {showChangePassword && (
+        <div className="fixed inset-0 z-[65] flex items-center justify-center bg-stone-900/45 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-stone-200/90 bg-white p-5 shadow-2xl ring-1 ring-stone-200/80 sm:p-6">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-stone-900">修改登入密碼</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowChangePassword(false);
+                  setChangePasswordError(null);
+                  setChangePasswordMessage(null);
+                  setChangePasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+                }}
+                className="rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-100"
+              >
+                關閉
+              </button>
+            </div>
+            <form className="space-y-3" onSubmit={handleChangeMyPassword}>
+              <InputField
+                label="目前密碼"
+                type="password"
+                value={changePasswordForm.currentPassword}
+                onChange={(v) => setChangePasswordForm((f) => ({ ...f, currentPassword: v }))}
+              />
+              <InputField
+                label="新密碼"
+                type="password"
+                value={changePasswordForm.newPassword}
+                onChange={(v) => setChangePasswordForm((f) => ({ ...f, newPassword: v }))}
+              />
+              <InputField
+                label="確認新密碼"
+                type="password"
+                value={changePasswordForm.confirmPassword}
+                onChange={(v) => setChangePasswordForm((f) => ({ ...f, confirmPassword: v }))}
+              />
+              {changePasswordError && <p className="rounded-lg bg-amber-100/90 px-3 py-2 text-sm text-amber-900">{changePasswordError}</p>}
+              {changePasswordMessage && <p className="rounded-lg bg-emerald-100/90 px-3 py-2 text-sm text-emerald-800">{changePasswordMessage}</p>}
+              <button
+                type="submit"
+                disabled={changingPassword}
+                className="w-full rounded-xl bg-amber-500 py-2.5 text-sm font-bold text-stone-900 shadow-md shadow-amber-200/40 transition hover:bg-amber-400 disabled:opacity-50"
+              >
+                {changingPassword ? "更新中..." : "更新密碼"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {selectedTask && (
         <div className="fixed inset-0 z-[60] flex items-start justify-end bg-stone-900/30 backdrop-blur-sm">
           <div className="flex h-full w-full max-w-md flex-col border-l border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
