@@ -145,7 +145,10 @@ export async function updateUserPassword(email: string, newPassword: string): Pr
   if (!raw || !p) return null;
 
   const supabase = getSupabase();
+  /** 同時寫入 password 與「密碼」，避免一欄為空字串時 verify 仍讀到舊值 */
   const attempts: Array<{ label: string; promise: PromiseLike<{ error: { message: string } | null }> }> = [
+    { label: "both+email", promise: supabase.from("users").update({ password: p, 密碼: p }).eq("email", raw) },
+    { label: "both+帳號", promise: supabase.from("users").update({ password: p, 密碼: p }).eq("帳號", raw) },
     { label: "password+email", promise: supabase.from("users").update({ password: p }).eq("email", raw) },
     { label: "密碼+帳號", promise: supabase.from("users").update({ 密碼: p }).eq("帳號", raw) },
     { label: "密碼+email", promise: supabase.from("users").update({ 密碼: p }).eq("email", raw) },
@@ -216,17 +219,18 @@ export async function getUserByEmail(email: string): Promise<User | null> {
     .select("email, name, role, dept, scope, active_flag")
     .eq("email", raw)
     .maybeSingle();
-  if (!errEn) {
-    if (!dataEn) {
-      log("users.db", "getUserByEmail 英文欄位未找到", { raw });
-      return null;
-    }
+  if (!errEn && dataEn) {
     const foundRecord = dataEn as unknown as Record<string, unknown>;
     log("users.db", "getUserByEmail 找到使用者（英文欄位）", {
       email: foundRecord.email,
       role: foundRecord.role,
     });
     return rowToUser(foundRecord);
+  }
+  if (errEn) {
+    log("users.db", "getUserByEmail 英文查詢錯誤（改試中文帳號）", { error: String(errEn?.message) });
+  } else {
+    log("users.db", "getUserByEmail 英文欄位無列，改試帳號", { raw });
   }
   const { data: dataZh, error: errZh } = await supabase
     .from("users")
@@ -290,7 +294,9 @@ export async function verifyCredentials(
     log("users.db", "verifyCredentials 未找到使用者", { rawEmail: rawEmail?.slice(0, 25) });
     return null;
   }
-  const storedPwd = String((data.password ?? data.密碼) ?? "").trim();
+  /** password 若為空字串，?? 不會改取「密碼」，須兩欄併用 */
+  const storedPwd =
+    String(data.password ?? "").trim() || String(data.密碼 ?? "").trim();
   if (storedPwd !== rawPassword) {
     log("users.db", "verifyCredentials 密碼不符", { rawEmail: rawEmail?.slice(0, 25) });
     return null;

@@ -2212,10 +2212,10 @@ export default function DashboardPage() {
       });
       const data = (await safeResJson(res)) as { ok?: boolean; error?: string; message?: string };
       if (!res.ok || !data.ok) {
-        const errText =
-          typeof data.error === "string" && data.error.trim()
-            ? data.error
-            : `修改密碼失敗（HTTP ${res.status}）`;
+        const fromApi = typeof data.error === "string" ? data.error.trim() : "";
+        const errText = fromApi
+          ? fromApi
+          : `修改密碼失敗（HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""}）`;
         setChangePasswordError(errText);
         setChangingPassword(false);
         return;
@@ -2223,7 +2223,9 @@ export default function DashboardPage() {
       setChangePasswordMessage(data.message ?? "密碼已更新");
       setChangePasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
     } catch (err) {
-      setChangePasswordError(err instanceof Error ? err.message : "修改密碼失敗");
+      setChangePasswordError(
+        err instanceof Error ? err.message : `請求失敗：${String(err)}`
+      );
     }
     setChangingPassword(false);
   }

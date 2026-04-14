@@ -33,8 +33,14 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ ok: true, message: "密碼修改成功" });
   } catch (error) {
     console.error("PATCH /api/users/password error:", error);
+    const msg =
+      error instanceof Error
+        ? error.message
+        : typeof error === "object" && error !== null && "message" in error
+          ? String((error as { message?: unknown }).message)
+          : String(error);
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "修改密碼失敗" },
+      { ok: false, error: msg.trim() || "伺服器處理密碼變更時發生錯誤" },
       { status: 500 }
     );
   }
