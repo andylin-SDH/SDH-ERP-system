@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/api";
-import { updateUser, verifyCredentials } from "@/modules/users";
+import { updateUserPassword, verifyCredentials } from "@/modules/users";
 
 export async function PATCH(request: NextRequest) {
   const auth = await requireAuth(request);
@@ -19,9 +19,16 @@ export async function PATCH(request: NextRequest) {
     if (!okUser) {
       return NextResponse.json({ ok: false, error: "目前密碼不正確" }, { status: 401 });
     }
-    const updated = await updateUser(auth.user.email, { password: newPassword });
+    const updated = await updateUserPassword(auth.user.email, newPassword);
     if (!updated) {
-      return NextResponse.json({ ok: false, error: "找不到目前使用者" }, { status: 404 });
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "密碼更新失敗：寫入或驗證未通過。若已重試仍失敗，請管理員檢查 Supabase users 表的 RLS 是否允許更新 password／密碼欄位。",
+        },
+        { status: 500 }
+      );
     }
     return NextResponse.json({ ok: true, message: "密碼修改成功" });
   } catch (error) {

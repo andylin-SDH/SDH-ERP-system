@@ -10,6 +10,7 @@ export {
   verifyCredentials,
   createUser,
   updateUser,
+  updateUserPassword,
   type CreateUserInput,
   type UpdateUserInput,
 } from "@/lib/db/users";

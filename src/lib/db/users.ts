@@ -135,6 +135,38 @@ export async function updateUser(email: string, payload: UpdateUserInput): Promi
   return rowToUser(dataZh as unknown as Record<string, unknown>);
 }
 
+/**
+ * 更新登入密碼：對 email／帳號 × password／密碼 盡量雙寫，避免只命中一種欄位組合時 UPDATE 0 列或只改一欄導致驗證／登入異常。
+ * 最後以 verifyCredentials 確認新密碼可登入。
+ */
+export async function updateUserPassword(email: string, newPassword: string): Promise<User | null> {
+  const raw = normalizeEmail(email);
+  const p = String(newPassword ?? "").trim();
+  if (!raw || !p) return null;
+
+  const supabase = getSupabase();
+  const attempts: Array<{ label: string; promise: PromiseLike<{ error: { message: string } | null }> }> = [
+    { label: "password+email", promise: supabase.from("users").update({ password: p }).eq("email", raw) },
+    { label: "密碼+帳號", promise: supabase.from("users").update({ 密碼: p }).eq("帳號", raw) },
+    { label: "密碼+email", promise: supabase.from("users").update({ 密碼: p }).eq("email", raw) },
+    { label: "password+帳號", promise: supabase.from("users").update({ password: p }).eq("帳號", raw) },
+  ];
+
+  for (const { label, promise } of attempts) {
+    const { error } = await promise;
+    if (error) {
+      log("users.db", `updateUserPassword ${label}`, { error: String(error.message) });
+    }
+  }
+
+  const ok = await verifyCredentials(raw, p);
+  if (!ok) {
+    log("users.db", "updateUserPassword 寫入後驗證失敗", { raw: raw.slice(0, 25) });
+    return null;
+  }
+  return getUserByEmail(raw);
+}
+
 export async function getUsers(): Promise<User[]> {
   const supabase = getSupabase();
   const { data: dataEn, error: errEn } = await supabase

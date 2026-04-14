@@ -2212,7 +2212,11 @@ export default function DashboardPage() {
       });
       const data = (await safeResJson(res)) as { ok?: boolean; error?: string; message?: string };
       if (!res.ok || !data.ok) {
-        setChangePasswordError(data.error ?? "修改密碼失敗");
+        const errText =
+          typeof data.error === "string" && data.error.trim()
+            ? data.error
+            : `修改密碼失敗（HTTP ${res.status}）`;
+        setChangePasswordError(errText);
         setChangingPassword(false);
         return;
       }
