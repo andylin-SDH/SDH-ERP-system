@@ -7863,23 +7863,23 @@ export default function DashboardPage() {
               </button>
             </div>
             <form className="space-y-3" onSubmit={handleChangeMyPassword}>
-              <InputField
+              <PasswordInputField
                 label="目前密碼"
-                type="password"
                 value={changePasswordForm.currentPassword}
                 onChange={(v) => setChangePasswordForm((f) => ({ ...f, currentPassword: v }))}
+                autoComplete="current-password"
               />
-              <InputField
+              <PasswordInputField
                 label="新密碼"
-                type="password"
                 value={changePasswordForm.newPassword}
                 onChange={(v) => setChangePasswordForm((f) => ({ ...f, newPassword: v }))}
+                autoComplete="new-password"
               />
-              <InputField
+              <PasswordInputField
                 label="確認新密碼"
-                type="password"
                 value={changePasswordForm.confirmPassword}
                 onChange={(v) => setChangePasswordForm((f) => ({ ...f, confirmPassword: v }))}
+                autoComplete="new-password"
               />
               {changePasswordError && <p className="rounded-lg bg-amber-100/90 px-3 py-2 text-sm text-amber-900">{changePasswordError}</p>}
               {changePasswordMessage && <p className="rounded-lg bg-emerald-100/90 px-3 py-2 text-sm text-emerald-800">{changePasswordMessage}</p>}
@@ -8071,6 +8071,41 @@ function InputField({ label, value, onChange, type = "text", className = "" }: I
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
+    </div>
+  );
+}
+
+interface PasswordInputFieldProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+  autoComplete?: string;
+}
+
+function PasswordInputField({ label, value, onChange, className = "", autoComplete }: PasswordInputFieldProps) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className={className}>
+      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</label>
+      <div className="relative">
+        <input
+          type={visible ? "text" : "password"}
+          autoComplete={autoComplete}
+          className="w-full rounded-xl border border-stone-300 bg-stone-50 py-2.5 pl-3 pr-[4.25rem] text-sm font-medium text-stone-900 placeholder:text-stone-500 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => setVisible((v) => !v)}
+          aria-label={visible ? "隱藏密碼" : "顯示密碼"}
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs font-semibold text-stone-600 transition hover:bg-stone-200/80 hover:text-stone-900"
+        >
+          {visible ? "隱藏" : "顯示"}
+        </button>
+      </div>
     </div>
   );
 }

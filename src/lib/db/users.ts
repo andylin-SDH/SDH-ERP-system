@@ -232,9 +232,10 @@ export async function verifyCredentials(
 
   const supabase = getSupabase();
   let data: Record<string, unknown> | null = null;
+  /** 須同時帶 password 與「密碼」：舊資料可能只寫入中文欄位，僅查 password 會比對失敗 */
   const { data: dataEn, error: errEn } = await supabase
     .from("users")
-    .select("email, name, role, dept, scope, password, active_flag")
+    .select('email, name, role, dept, scope, password, active_flag, "密碼"')
     .eq("email", rawEmail)
     .maybeSingle();
   if (!errEn && dataEn) {
@@ -243,8 +244,8 @@ export async function verifyCredentials(
   if (!data) {
     const { data: dataZh, error } = await supabase
       .from("users")
-      // Supabase select parser 對中文欄位需加上雙引號
-      .select('"帳號","姓名","角色","部門","scope","密碼","active_flag"')
+      // Supabase select parser 對中文欄位需加上雙引號；password 一併選出以相容雙欄位並存
+      .select('"帳號","姓名","角色","部門","scope","密碼","active_flag",password')
       .eq("帳號", rawEmail)
       .maybeSingle();
     if (error) {
@@ -257,8 +258,8 @@ export async function verifyCredentials(
     log("users.db", "verifyCredentials 未找到使用者", { rawEmail: rawEmail?.slice(0, 25) });
     return null;
   }
-  const pwd = (data.password ?? data.密碼) as string;
-  if (pwd !== rawPassword) {
+  const storedPwd = String((data.password ?? data.密碼) ?? "").trim();
+  if (storedPwd !== rawPassword) {
     log("users.db", "verifyCredentials 密碼不符", { rawEmail: rawEmail?.slice(0, 25) });
     return null;
   }

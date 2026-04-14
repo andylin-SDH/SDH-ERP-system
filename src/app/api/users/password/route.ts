@@ -7,7 +7,7 @@ export async function PATCH(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as { currentPassword?: string; newPassword?: string } | null;
-    const currentPassword = String(body?.currentPassword ?? "");
+    const currentPassword = String(body?.currentPassword ?? "").trim();
     const newPassword = String(body?.newPassword ?? "").trim();
     if (!currentPassword || !newPassword) {
       return NextResponse.json({ ok: false, error: "目前密碼與新密碼為必填" }, { status: 400 });
