@@ -280,8 +280,8 @@ export async function verifyCredentials(
   if (!data) {
     const { data: dataZh, error } = await supabase
       .from("users")
-      // Supabase select parser 對中文欄位需加上雙引號；password 一併選出以相容雙欄位並存
-      .select('"帳號","姓名","角色","部門","scope","密碼","active_flag",password')
+      // 中文欄位資料表可能沒有 password 欄位，避免 select 觸發「column users.password does not exist」
+      .select('"帳號","姓名","角色","部門","scope","密碼","active_flag"')
       .eq("帳號", rawEmail)
       .maybeSingle();
     if (error) {
