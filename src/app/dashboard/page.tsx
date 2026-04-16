@@ -12,7 +12,7 @@ import type { FinanceUpdateFields } from "@/lib/db/finance";
 import type { PayoutRow } from "@/lib/db/payout";
 import { applyDedupeRules } from "@/lib/payout-dedupe";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
-import { PROJECT_TYPES } from "@/config/project-types";
+import { PROJECT_TYPES, costFromTotalByProjectType } from "@/config/project-types";
 import { DEFAULT_PROJECT_STATUS_OPTIONS } from "@/config/project-status-defaults";
 import { DEFAULT_PROJECT_EXPENSE_TYPE_OPTIONS } from "@/config/project-expense-type-defaults";
 import { DEFAULT_TASK_TYPE_OPTIONS } from "@/config/task-type-defaults";
@@ -6979,7 +6979,23 @@ export default function DashboardPage() {
                       <p className="mt-1 text-xs font-medium text-stone-500">自動產生（SDH-日期時間-隨機碼）</p>
                     </div>
                     <InputField label="專案名稱" value={createForm.專案名稱} onChange={(v) => setCreateForm((f) => ({ ...f, 專案名稱: v }))} />
-                    <SelectField label="專案類型" value={createForm.專案類型} onChange={(v) => setCreateForm((f) => ({ ...f, 專案類型: v }))} options={projectTypesOptions} />
+                    <SelectField
+                      label="專案類型"
+                      value={createForm.專案類型}
+                      onChange={(v) =>
+                        setCreateForm((f) => {
+                          const autoCost = costFromTotalByProjectType(v, f.專案總金額未稅);
+                          const nextCost = autoCost != null ? autoCost : f.專案成本;
+                          return {
+                            ...f,
+                            專案類型: v,
+                            專案成本: nextCost,
+                            專案營收: calc專案營收(f.專案總金額未稅, nextCost, f.KOL費用未稅),
+                          };
+                        })
+                      }
+                      options={projectTypesOptions}
+                    />
                     <SelectField
                       label="專案狀態"
                       value={createForm.專案狀態}
@@ -7004,11 +7020,16 @@ export default function DashboardPage() {
                       label="專案總金額未稅"
                       value={createForm.專案總金額未稅}
                       onChange={(v) =>
-                        setCreateForm((f) => ({
-                          ...f,
-                          專案總金額未稅: v,
-                          專案營收: calc專案營收(v, f.專案成本, f.KOL費用未稅),
-                        }))
+                        setCreateForm((f) => {
+                          const autoCost = costFromTotalByProjectType(f.專案類型, v);
+                          const nextCost = autoCost != null ? autoCost : f.專案成本;
+                          return {
+                            ...f,
+                            專案總金額未稅: v,
+                            專案成本: nextCost,
+                            專案營收: calc專案營收(v, nextCost, f.KOL費用未稅),
+                          };
+                        })
                       }
                     />
                     <div>
@@ -7018,17 +7039,22 @@ export default function DashboardPage() {
                       </div>
                       <p className="mt-1 text-xs text-stone-500">自動計算：專案總金額未稅 − 專案成本 − KOL費用未稅</p>
                     </div>
-                    <NumberField
-                      label="專案成本"
-                      value={createForm.專案成本}
-                      onChange={(v) =>
-                        setCreateForm((f) => ({
-                          ...f,
-                          專案成本: v,
-                          專案營收: calc專案營收(f.專案總金額未稅, v, f.KOL費用未稅),
-                        }))
-                      }
-                    />
+                    <div>
+                      <NumberField
+                        label="專案成本"
+                        value={createForm.專案成本}
+                        onChange={(v) =>
+                          setCreateForm((f) => ({
+                            ...f,
+                            專案成本: v,
+                            專案營收: calc專案營收(f.專案總金額未稅, v, f.KOL費用未稅),
+                          }))
+                        }
+                      />
+                      {costFromTotalByProjectType(createForm.專案類型, createForm.專案總金額未稅) != null ? (
+                        <p className="mt-1 text-xs text-stone-500">此專案類型：專案成本 = 專案總金額未稅 × 70%（可手動修改）</p>
+                      ) : null}
+                    </div>
                     <NumberField
                       label="KOL費用未稅"
                       value={createForm.KOL費用未稅}
@@ -7557,7 +7583,18 @@ export default function DashboardPage() {
                     <SelectField
                       label="專案類型"
                       value={editMasterForm.專案類型}
-                      onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案類型: v }))}
+                      onChange={(v) =>
+                        setEditMasterForm((f) => {
+                          const autoCost = costFromTotalByProjectType(v, f.專案總金額未稅);
+                          const nextCost = autoCost != null ? autoCost : f.專案成本;
+                          return {
+                            ...f,
+                            專案類型: v,
+                            專案成本: nextCost,
+                            專案營收: calc專案營收(f.專案總金額未稅, nextCost, f.KOL費用未稅),
+                          };
+                        })
+                      }
                       options={[...new Set([...projectTypesOptions, editMasterForm.專案類型].filter(Boolean))]}
                     />
                   ) : (
@@ -7610,11 +7647,16 @@ export default function DashboardPage() {
                       label="專案總金額未稅"
                       value={editMasterForm.專案總金額未稅}
                       onChange={(v) =>
-                        setEditMasterForm((f) => ({
-                          ...f,
-                          專案總金額未稅: v,
-                          專案營收: calc專案營收(v, f.專案成本, f.KOL費用未稅),
-                        }))
+                        setEditMasterForm((f) => {
+                          const autoCost = costFromTotalByProjectType(f.專案類型, v);
+                          const nextCost = autoCost != null ? autoCost : f.專案成本;
+                          return {
+                            ...f,
+                            專案總金額未稅: v,
+                            專案成本: nextCost,
+                            專案營收: calc專案營收(v, nextCost, f.KOL費用未稅),
+                          };
+                        })
                       }
                     />
                   ) : (
@@ -7632,17 +7674,22 @@ export default function DashboardPage() {
                   )}
 
                   {isEditingMaster ? (
-                    <NumberField
-                      label="專案成本"
-                      value={editMasterForm.專案成本}
-                      onChange={(v) =>
-                        setEditMasterForm((f) => ({
-                          ...f,
-                          專案成本: v,
-                          專案營收: calc專案營收(f.專案總金額未稅, v, f.KOL費用未稅),
-                        }))
-                      }
-                    />
+                    <div>
+                      <NumberField
+                        label="專案成本"
+                        value={editMasterForm.專案成本}
+                        onChange={(v) =>
+                          setEditMasterForm((f) => ({
+                            ...f,
+                            專案成本: v,
+                            專案營收: calc專案營收(f.專案總金額未稅, v, f.KOL費用未稅),
+                          }))
+                        }
+                      />
+                      {costFromTotalByProjectType(editMasterForm.專案類型, editMasterForm.專案總金額未稅) != null ? (
+                        <p className="mt-1 text-xs text-stone-500">此專案類型：專案成本 = 專案總金額未稅 × 70%（可手動修改）</p>
+                      ) : null}
+                    </div>
                   ) : (
                     <Field label="專案成本" value={formatAmount(selectedMaster.專案成本)} />
                   )}
