@@ -2950,7 +2950,7 @@ export default function DashboardPage() {
               </div>
               {masterFilteredListHasBothPayoutModes && masterSubTab === "全部" && filteredMasterList.length > 0 && (
                 <p className="mt-2 max-w-3xl text-xs text-stone-500">
-                  「全部」分頁若同時含製作/活動與廣告業配專案，會顯示兩組分潤角色欄；切到單一專案類型分頁即可只顯示對應欄位。
+                  「全部」分頁若同時含製作/活動與廣告業配／團購專案，會顯示兩組分潤角色欄；切到單一專案類型分頁即可只顯示對應欄位。
                 </p>
               )}
             </div>
@@ -3527,7 +3527,7 @@ export default function DashboardPage() {
                   },
                   {
                     mode: "mode_b" as const,
-                    label: "模式 B（廣告業配）",
+                    label: "模式 B（廣告業配、團購）",
                     roles: ["專案開發人", "經紀人", "主管", "KOL開發者"] as const,
                   },
                 ].map(({ mode, label, roles }) => (

@@ -18,8 +18,8 @@ export const MASTER_PAYOUT_DEFAULTS = {
   主管分潤成數: "2.5%",
 } as const;
 
-/** 分潤模式 B 的專案類型（經紀人於專案手填；主管／KOL開發者由合作夥伴帶出） */
-export const PAYOUT_MODE_B_PROJECT_TYPES = ["廣告業配"] as const;
+/** 分潤模式 B 的專案類型（與廣告業配相同：經紀人於專案手填；主管／KOL開發者由合作夥伴帶出） */
+export const PAYOUT_MODE_B_PROJECT_TYPES = ["廣告業配", "團購"] as const;
 
 export function isPayoutModeB(projectType: string): boolean {
   const t = String(projectType ?? "")
