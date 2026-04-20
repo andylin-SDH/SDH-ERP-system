@@ -7860,7 +7860,7 @@ export default function DashboardPage() {
         </div>
 
         {showDeleteMasterConfirm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-sm">
             <div
               className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl ring-1 ring-stone-200/80"
               role="dialog"
