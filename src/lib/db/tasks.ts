@@ -26,6 +26,7 @@ function rowToTask(r: Record<string, unknown>): TaskRow {
     完成時間: 完成 != null && String(完成).trim() !== "" ? String(完成) : undefined,
     任務完成: Boolean(r.任務完成),
     到期日: 到期日Str,
+    備註: (r.備註 as string) ?? undefined,
   };
 }
 
@@ -45,6 +46,7 @@ export type NewTaskInput = {
   任務名稱: string;
   任務類型?: string | null;
   負責人?: string | null;
+  備註?: string | null;
   /** YYYY-MM-DD */
   到期日?: string | null;
 };
@@ -62,6 +64,10 @@ export async function createTask(payload: NewTaskInput): Promise<TaskRow> {
     負責人: payload.負責人?.trim() ?? null,
     開始時間: nowIso,
   };
+  if (payload.備註 !== undefined) {
+    const n = payload.備註?.trim() ?? "";
+    insertData.備註 = n === "" ? null : n;
+  }
   if (payload.到期日 !== undefined && payload.到期日 !== null && String(payload.到期日).trim() !== "") {
     const d = String(payload.到期日).trim().slice(0, 10);
     insertData.到期日 = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
@@ -85,6 +91,7 @@ export type UpdateTaskInput = {
   任務名稱?: string | null;
   任務類型?: string | null;
   負責人?: string | null;
+  備註?: string | null;
   任務完成?: boolean;
   /** YYYY-MM-DD；傳 null 可清空 */
   到期日?: string | null;
@@ -124,6 +131,10 @@ export async function updateTask(payload: UpdateTaskInput): Promise<TaskRow> {
     const next = payload.負責人?.trim() ?? null;
     updateData.負責人 = next;
     if (next !== prev負責人) updateData.到期提醒寄送於 = null;
+  }
+  if (payload.備註 !== undefined) {
+    const n = payload.備註?.trim() ?? "";
+    updateData.備註 = n === "" ? null : n;
   }
   if (payload.到期日 !== undefined) {
     const raw = payload.到期日;

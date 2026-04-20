@@ -543,11 +543,11 @@ export default function DashboardPage() {
   const [partnersLoadError, setPartnersLoadError] = useState<string | null>(null);
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const [addingTaskFor, setAddingTaskFor] = useState<string | null>(null);
-  const [newTaskForm, setNewTaskForm] = useState({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "" });
+  const [newTaskForm, setNewTaskForm] = useState({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
   const [addingTask, setAddingTask] = useState(false);
   const [addTaskError, setAddTaskError] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskRow | null>(null);
-  const [editTaskForm, setEditTaskForm] = useState({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 任務完成: false });
+  const [editTaskForm, setEditTaskForm] = useState({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 任務完成: false, 備註: "" });
   const [savingTask, setSavingTask] = useState(false);
   const [saveTaskError, setSaveTaskError] = useState<string | null>(null);
   const [remindingTaskId, setRemindingTaskId] = useState<string | null>(null);
@@ -1687,6 +1687,7 @@ export default function DashboardPage() {
       任務負責人: selectedTask.任務負責人 ?? "",
       到期日: selectedTask.到期日?.trim() ? selectedTask.到期日.trim().slice(0, 10) : "",
       任務完成: Boolean(selectedTask.任務完成),
+      備註: selectedTask.備註 ?? "",
     });
   }, [selectedTask]);
 
@@ -3015,7 +3016,8 @@ export default function DashboardPage() {
                     visibleMasterRows.map((row) => {
                       const pid = row.專案ID ?? "";
                       const isExpanded = expandedProjectId === pid;
-                      const projectTasks = filteredTasks.filter((t) => (t.專案ID ?? "").trim().toLowerCase() === pid.trim().toLowerCase());
+                      // 大總表展開列：該專案任務全顯（不套用任務②可見規則）；側邊「任務」分頁仍為 filteredTasks
+                      const projectTasks = tasks.filter((t) => (t.專案ID ?? "").trim().toLowerCase() === pid.trim().toLowerCase());
                       return (
                         <Fragment key={row.id ?? pid}>
                           <tr
@@ -3045,7 +3047,7 @@ export default function DashboardPage() {
                                         setExpandedProjectId((prev) => (prev === pid ? null : pid));
                                         setAddingTaskFor(null);
                                         setAddTaskError(null);
-                                        setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "" });
+                                        setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
                                       }}
                                       className="mr-2 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-stone-50 text-stone-500 transition hover:bg-amber-100/90 hover:border-amber-300 hover:text-amber-800"
                                       title={isExpanded ? "收合任務" : "展開任務"}
@@ -3113,6 +3115,9 @@ export default function DashboardPage() {
                                           <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">
                                             任務負責人
                                           </th>
+                                          <th className="max-w-[10rem] px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">
+                                            備註
+                                          </th>
                                           <th className="whitespace-nowrap px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">
                                             到期日
                                           </th>
@@ -3130,7 +3135,7 @@ export default function DashboardPage() {
                                       <tbody className="divide-y divide-stone-200 bg-white/90">
                                         {projectTasks.length === 0 ? (
                                           <tr>
-                                            <td colSpan={7} className="px-3 py-4 text-center text-sm text-stone-500">
+                                            <td colSpan={8} className="px-3 py-4 text-center text-sm text-stone-500">
                                               尚無任務，請點「新增任務」新增
                                             </td>
                                           </tr>
@@ -3181,6 +3186,11 @@ export default function DashboardPage() {
                                                       )}
                                                     </button>
                                                   )}
+                                                </span>
+                                              </td>
+                                              <td className="max-w-[10rem] px-3 py-2.5 text-xs text-stone-600 align-top">
+                                                <span className="line-clamp-3 break-words" title={t.備註 ? String(t.備註) : undefined}>
+                                                  {t.備註?.trim() ? t.備註 : "—"}
                                                 </span>
                                               </td>
                                               <td
@@ -3292,6 +3302,7 @@ export default function DashboardPage() {
                                               任務名稱: newTaskForm.任務名稱.trim(),
                                               任務類型: newTaskForm.任務類型.trim() || null,
                                               負責人: newTaskForm.任務負責人.trim() || null,
+                                              備註: newTaskForm.備註.trim() || null,
                                               到期日: newTaskForm.到期日.trim() || null,
                                             }),
                                           });
@@ -3302,7 +3313,7 @@ export default function DashboardPage() {
                                             return;
                                           }
                                           setTasks((prev) => [data.task!, ...prev]);
-                                          setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "" });
+                                          setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
                                           setAddingTaskFor(null);
                                         } catch (err: unknown) {
                                           setAddTaskError(err instanceof Error ? err.message : "新增失敗");
@@ -3360,6 +3371,16 @@ export default function DashboardPage() {
                                           className="w-44 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
                                         />
                                       </div>
+                                      <div className="w-full basis-full">
+                                        <label className="mb-1 block text-xs font-semibold text-stone-500">備註</label>
+                                        <textarea
+                                          value={newTaskForm.備註}
+                                          onChange={(e) => setNewTaskForm((f) => ({ ...f, 備註: e.target.value }))}
+                                          rows={2}
+                                          className="w-full min-w-[min(100%,20rem)] rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                                          placeholder="選填"
+                                        />
+                                      </div>
                                       <div className="flex gap-2">
                                         <button
                                           type="submit"
@@ -3373,7 +3394,7 @@ export default function DashboardPage() {
                                           onClick={() => {
                                             setAddingTaskFor(null);
                                             setAddTaskError(null);
-                                            setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "" });
+                                            setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
                                           }}
                                           className="rounded-lg border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-100"
                                         >
@@ -3387,7 +3408,7 @@ export default function DashboardPage() {
                                       onClick={() => {
                                         setAddingTaskFor(pid);
                                         setAddTaskError(null);
-                                        setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "" });
+                                        setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
                                       }}
                                       className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100/90"
                                     >
@@ -6043,6 +6064,14 @@ export default function DashboardPage() {
                             </td>
                           );
                         }
+                        if (k === "備註") {
+                          const note = String(t.備註 ?? "").trim();
+                          return (
+                            <td key={k} className="max-w-[200px] px-4 py-3.5 text-sm text-stone-600" title={note || undefined}>
+                              <span className="line-clamp-2 break-words">{note || "—"}</span>
+                            </td>
+                          );
+                        }
                         if (k === "任務完成") {
                           return (
                             <td key={k} className="px-4 py-3.5 text-center">
@@ -7977,6 +8006,7 @@ export default function DashboardPage() {
                       任務名稱: editTaskForm.任務名稱.trim() || null,
                       任務類型: editTaskForm.任務類型.trim() || null,
                       負責人: editTaskForm.任務負責人.trim() || null,
+                      備註: editTaskForm.備註.trim() || null,
                       到期日: editTaskForm.到期日.trim() || null,
                       任務完成: editTaskForm.任務完成,
                     }),
@@ -7996,6 +8026,7 @@ export default function DashboardPage() {
                     任務負責人: data.task.任務負責人 ?? "",
                     到期日: data.task.到期日?.trim() ? data.task.到期日.trim().slice(0, 10) : "",
                     任務完成: Boolean(data.task.任務完成),
+                    備註: data.task.備註 ?? "",
                   });
                 } catch (err: unknown) {
                   setSaveTaskError(err instanceof Error ? err.message : "更新失敗");
@@ -8064,6 +8095,16 @@ export default function DashboardPage() {
                     className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
                   />
                   <p className="mt-1 text-[11px] text-stone-500">系統每日寄送「即將到期／逾期」通知給負責人（需設定 RESEND 與 CRON_SECRET）。</p>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">備註</label>
+                  <textarea
+                    value={editTaskForm.備註}
+                    onChange={(e) => setEditTaskForm((f) => ({ ...f, 備註: e.target.value }))}
+                    rows={4}
+                    className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                    placeholder="選填"
+                  />
                 </div>
                 <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-stone-300 bg-stone-50 px-4 py-3 transition hover:bg-stone-100">
                   <input

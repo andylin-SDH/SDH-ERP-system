@@ -29,6 +29,7 @@ export async function POST(request: NextRequest) {
       任務名稱?: string;
       任務類型?: string;
       負責人?: string;
+      備註?: string | null;
       到期日?: string | null;
     } | null;
     const 專案ID = String(body?.專案ID ?? "").trim();
@@ -46,6 +47,7 @@ export async function POST(request: NextRequest) {
       任務名稱,
       任務類型: body?.任務類型 ?? null,
       負責人: body?.負責人 ?? null,
+      備註: body?.備註 !== undefined ? (body.備註 === null || body.備註 === "" ? null : String(body.備註)) : undefined,
       到期日: body?.到期日 !== undefined ? (body.到期日 === null || body.到期日 === "" ? null : String(body.到期日)) : undefined,
     });
     // 若有指定負責人，非同步寄送指派通知（失敗不影響 API 回應）
@@ -81,6 +83,7 @@ export async function PATCH(request: NextRequest) {
       任務名稱?: string;
       任務類型?: string;
       負責人?: string;
+      備註?: string | null;
       任務完成?: boolean;
       到期日?: string | null;
     } | null;
@@ -93,6 +96,7 @@ export async function PATCH(request: NextRequest) {
       任務名稱: body?.任務名稱,
       任務類型: body?.任務類型,
       負責人: body?.負責人,
+      備註: body?.備註 !== undefined ? (body.備註 === null || body.備註 === "" ? null : String(body.備註)) : undefined,
       任務完成: body?.任務完成,
       到期日: body?.到期日 !== undefined ? (body.到期日 === null || body.到期日 === "" ? null : String(body.到期日)) : undefined,
     });

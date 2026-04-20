@@ -17,4 +17,6 @@ export interface TaskRow {
   任務完成?: boolean;
   /** 使用者設定之預定完成日（YYYY-MM-DD） */
   到期日?: string;
+  /** 任務備註 */
+  備註?: string;
 }
