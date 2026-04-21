@@ -751,6 +751,17 @@ export default function DashboardPage() {
   const [masterSearch, setMasterSearch] = useState("");
   /** 大總表：依專案類型子分頁（「全部」= 不篩類型） */
   const [masterSubTab, setMasterSubTab] = useState("全部");
+  /** 大總表：進行中 vs 已結案（依 isProjectInProgress 與專案狀態） */
+  const [masterLifecycleTab, setMasterLifecycleTab] = useState<"in_progress" | "closed">(() => {
+    if (typeof window === "undefined") return "in_progress";
+    try {
+      const v = localStorage.getItem("sdh-master-lifecycle-tab");
+      if (v === "closed" || v === "in_progress") return v;
+    } catch {
+      /* ignore */
+    }
+    return "in_progress";
+  });
   /** 行動版：側欄抽屜；桌面：側欄收合為窄欄 */
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -1155,11 +1166,30 @@ export default function DashboardPage() {
     [masterList, filterRowsByVisibility]
   );
 
-  /** 大總表：依子分頁「專案類型」篩選後的列表（再套用關鍵字搜尋） */
+  /** 大總表頂部「進行中／已結案」數量（② 可見範圍內） */
+  const masterLifecycleCounts = useMemo(() => {
+    let active = 0;
+    let closed = 0;
+    for (const row of filteredMasterList) {
+      if (isProjectInProgress(row.專案狀態)) active += 1;
+      else closed += 1;
+    }
+    return { active, closed };
+  }, [filteredMasterList]);
+
+  /** 大總表：先依「進行中／已結案」篩選 */
+  const masterLifecycleFilteredList = useMemo(() => {
+    if (masterLifecycleTab === "in_progress") {
+      return filteredMasterList.filter((row) => isProjectInProgress(row.專案狀態));
+    }
+    return filteredMasterList.filter((row) => !isProjectInProgress(row.專案狀態));
+  }, [filteredMasterList, masterLifecycleTab]);
+
+  /** 大總表：再依子分頁「專案類型」篩選後的列表（再套用關鍵字搜尋） */
   const masterTabFilteredList = useMemo(() => {
-    if (masterSubTab === "全部") return filteredMasterList;
-    return filteredMasterList.filter((row) => String(row.專案類型 ?? "").trim() === masterSubTab);
-  }, [filteredMasterList, masterSubTab]);
+    if (masterSubTab === "全部") return masterLifecycleFilteredList;
+    return masterLifecycleFilteredList.filter((row) => String(row.專案類型 ?? "").trim() === masterSubTab);
+  }, [masterLifecycleFilteredList, masterSubTab]);
 
   /** 合作夥伴 / KOL：與其他表相同，依 ② match_fields 篩列（未勾選 = 不篩；勾選欄位 = 該欄等於登入者姓名或帳號） */
   const filteredPartners = useMemo(
@@ -1305,7 +1335,7 @@ export default function DashboardPage() {
     [partnersVisibleCols]
   );
 
-  /** 套用關鍵字搜尋後的各 Table 資料（大總表：先子分頁再搜尋；模式 B 欄由合作夥伴帶出） */
+  /** 套用關鍵字搜尋後的各 Table 資料（大總表：先進行中/已結案 → 專案類型 → 搜尋；模式 B 欄由合作夥伴帶出） */
   const searchedMasterList = useMemo(() => {
     const q = deferredMasterSearch.trim().toLowerCase();
     if (!q) return masterTabFilteredList;
@@ -2108,6 +2138,14 @@ export default function DashboardPage() {
       /* ignore */
     }
   }, [masterSubTab]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("sdh-master-lifecycle-tab", masterLifecycleTab);
+    } catch {
+      /* ignore */
+    }
+  }, [masterLifecycleTab]);
 
   useEffect(() => {
     try {
@@ -2932,6 +2970,60 @@ export default function DashboardPage() {
                 </button>
               </div>
               </div>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <span className="text-xs font-semibold text-stone-500">專案狀態</span>
+                <div
+                  className="inline-flex rounded-xl border border-stone-200/90 bg-stone-100/80 p-1 shadow-inner"
+                  role="tablist"
+                  aria-label="依專案狀態篩選"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={masterLifecycleTab === "in_progress"}
+                    onClick={() => setMasterLifecycleTab("in_progress")}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      masterLifecycleTab === "in_progress"
+                        ? "bg-amber-500 text-slate-900 shadow-sm ring-1 ring-amber-400/80"
+                        : "text-stone-600 hover:bg-stone-200/70"
+                    }`}
+                  >
+                    進行中
+                    <span
+                      className={`ml-1.5 tabular-nums ${
+                        masterLifecycleTab === "in_progress" ? "text-slate-800" : "text-stone-500"
+                      }`}
+                    >
+                      {masterLifecycleCounts.active}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={masterLifecycleTab === "closed"}
+                    onClick={() => setMasterLifecycleTab("closed")}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      masterLifecycleTab === "closed"
+                        ? "bg-amber-500 text-slate-900 shadow-sm ring-1 ring-amber-400/80"
+                        : "text-stone-600 hover:bg-stone-200/70"
+                    }`}
+                  >
+                    已結案
+                    <span
+                      className={`ml-1.5 tabular-nums ${
+                        masterLifecycleTab === "closed" ? "text-slate-800" : "text-stone-500"
+                      }`}
+                    >
+                      {masterLifecycleCounts.closed}
+                    </span>
+                  </button>
+                </div>
+              </div>
+              {masterLifecycleTab === "closed" && (
+                <p className="mt-2 max-w-3xl text-xs text-stone-500">
+                  以下為已結案專案，僅供查詢與歷史紀錄；若要處理進行中工作請切換「進行中」。
+                </p>
+              )}
               <div className="mt-3 flex flex-wrap gap-2 border-b border-stone-200/80 pb-3" role="tablist" aria-label="依專案類型篩選">
                 {masterSubTabOptions.map((tab) => (
                   <button
@@ -2950,7 +3042,7 @@ export default function DashboardPage() {
                   </button>
                 ))}
               </div>
-              {masterFilteredListHasBothPayoutModes && masterSubTab === "全部" && filteredMasterList.length > 0 && (
+              {masterFilteredListHasBothPayoutModes && masterSubTab === "全部" && masterTabFilteredList.length > 0 && (
                 <p className="mt-2 max-w-3xl text-xs text-stone-500">
                   「全部」分頁若同時含製作/活動與廣告業配／團購專案，會顯示兩組分潤角色欄；切到單一專案類型分頁即可只顯示對應欄位。
                 </p>
@@ -2994,17 +3086,31 @@ export default function DashboardPage() {
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-stone-200 bg-amber-50/40">
+                <tbody
+                  className={
+                    masterLifecycleTab === "closed"
+                      ? "divide-y divide-stone-200 bg-stone-50/50"
+                      : "divide-y divide-stone-200 bg-amber-50/40"
+                  }
+                >
                   {filteredMasterList.length === 0 ? (
                     <tr>
                       <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                         尚無大總表資料，請點「新增專案」建立第一筆
                       </td>
                     </tr>
+                  ) : masterLifecycleFilteredList.length === 0 ? (
+                    <tr>
+                      <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                        {masterLifecycleTab === "in_progress"
+                          ? "目前沒有進行中的專案。將專案狀態改為結案／完成等狀態後，該筆會出現在「已結案」。"
+                          : "目前沒有已結案的專案。"}
+                      </td>
+                    </tr>
                   ) : masterTabFilteredList.length === 0 ? (
                     <tr>
                       <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
-                        此專案類型尚無資料，請切換上方分頁或新增專案
+                        此專案類型在目前區間尚無資料，請切換上方「專案類型」或新增專案
                       </td>
                     </tr>
                   ) : searchedMasterList.length === 0 ? (
@@ -3023,7 +3129,9 @@ export default function DashboardPage() {
                         <Fragment key={row.id ?? pid}>
                           <tr
                             key={row.id ?? pid}
-                            className="cursor-pointer transition hover:bg-amber-50/80"
+                            className={`cursor-pointer transition ${
+                              masterLifecycleTab === "closed" ? "hover:bg-stone-100/85" : "hover:bg-amber-50/80"
+                            }`}
                             onClick={() => {
                               setSelectedMaster(row);
                               setIsEditingMaster(false);
