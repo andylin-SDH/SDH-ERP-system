@@ -13,6 +13,7 @@ import { getPartners } from "@/lib/db/partners";
 import { DEFAULT_PAYOUT_DEDUPE_RULES, type PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
 import { getSystemConfig } from "@/lib/db/system-config";
 import { applyDedupeRules } from "@/lib/payout-dedupe";
+import { normalizeDecimalString } from "@/lib/number-normalize";
 
 export interface PayoutRow {
   id?: string;
@@ -42,14 +43,14 @@ function rowToPayout(r: Record<string, unknown>): PayoutRow {
     id: r.id as string | undefined,
     專案ID: (r.專案ID ?? r.project_id) as string | undefined,
     專案名稱: (r.專案名稱 ?? r.project_name) as string | undefined,
-    專案總金額未稅: (r.專案總金額未稅 ?? r.total_amount) as string | undefined,
-     專案營收: (r.專案營收 ?? r.project_revenue) as string | undefined,
+    專案總金額未稅: normalizeDecimalString(r.專案總金額未稅 ?? r.total_amount, 2),
+    專案營收: normalizeDecimalString(r.專案營收 ?? r.project_revenue, 2),
     廠商預計付款日: 廠商預計,
     廠商付款日期: 廠商實付,
     分潤匯款日期: (r.分潤匯款日期 ?? r.payout_remit_date) as string | undefined,
     分潤類型: (r.分潤類型 ?? r.角色 ?? r.payout_type) as string | undefined,
-    分潤成數: (r.分潤成數 ?? r.payout_rate) as string | undefined,
-    分潤金額: (r.分潤金額 ?? r.payout_amount) as string | undefined,
+    分潤成數: normalizeDecimalString(r.分潤成數 ?? r.payout_rate, 4),
+    分潤金額: normalizeDecimalString(r.分潤金額 ?? r.payout_amount, 2),
     領取人: (r.領取人 ?? r.recipient) as string | undefined,
     created_at: r.created_at as string | undefined,
   };

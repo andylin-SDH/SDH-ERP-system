@@ -5,6 +5,7 @@
 
 import { getSupabase } from "@/lib/supabase/server";
 import { log } from "@/lib/log";
+import { normalizeDecimalString } from "@/lib/number-normalize";
 
 export interface MasterRow {
   id: string;
@@ -45,6 +46,7 @@ export interface MasterRow {
 }
 
 function rowToMaster(r: Record<string, unknown>): MasterRow {
+  const money = (v: unknown) => normalizeDecimalString(v, 2) ?? null;
   return {
     id: String(r.id ?? ""),
     專案ID: String(r.專案ID ?? ""),
@@ -53,10 +55,10 @@ function rowToMaster(r: Record<string, unknown>): MasterRow {
     專案狀態: (r.專案狀態 as string) ?? null,
     狀態確認日期: (r.狀態確認日期 as string) ?? null,
     開案日期: (r.開案日期 as string) ?? null,
-    專案總金額未稅: (r.專案總金額未稅 as string) ?? null,
-    專案營收: (r.專案營收 as string) ?? null,
-    專案成本: (r.專案成本 as string) ?? null,
-    KOL費用未稅: (r.KOL費用未稅 as string) ?? null,
+    專案總金額未稅: money(r.專案總金額未稅),
+    專案營收: money(r.專案營收),
+    專案成本: money(r.專案成本),
+    KOL費用未稅: money(r.KOL費用未稅),
     KOL名稱: (r.KOL名稱 as string) ?? null,
     經紀人: (r.經紀人 as string) ?? null,
     專案費用類型: (r.專案費用類型 as string) ?? null,
@@ -78,6 +80,14 @@ function rowToMaster(r: Record<string, unknown>): MasterRow {
     created_at: r.created_at as string | undefined,
     updated_at: r.updated_at as string | undefined,
   };
+}
+
+function normalizeMoneyOrNull(v: string | null | undefined): string | null {
+  if (v == null) return null;
+  const normalized = normalizeDecimalString(v, 2);
+  if (normalized == null) return null;
+  const t = String(normalized).trim();
+  return t === "" ? null : t;
 }
 
 export async function getMasterList(): Promise<MasterRow[]> {
@@ -108,10 +118,10 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     專案狀態: payload.專案狀態 ?? null,
     狀態確認日期: payload.狀態確認日期 ?? null,
     開案日期: payload.開案日期 ?? null,
-    專案總金額未稅: payload.專案總金額未稅 ?? null,
-    專案營收: payload.專案營收 ?? null,
-    專案成本: payload.專案成本 ?? null,
-    KOL費用未稅: payload.KOL費用未稅 ?? null,
+    專案總金額未稅: normalizeMoneyOrNull(payload.專案總金額未稅),
+    專案營收: normalizeMoneyOrNull(payload.專案營收),
+    專案成本: normalizeMoneyOrNull(payload.專案成本),
+    KOL費用未稅: normalizeMoneyOrNull(payload.KOL費用未稅),
     KOL名稱: payload.KOL名稱 ?? null,
     經紀人: payload.經紀人 ?? null,
     專案費用類型: payload.專案費用類型 ?? null,
@@ -162,10 +172,10 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
     專案狀態: payload.專案狀態 ?? null,
     狀態確認日期: payload.狀態確認日期 ?? null,
     開案日期: payload.開案日期 ?? null,
-    專案總金額未稅: payload.專案總金額未稅 ?? null,
-    專案營收: payload.專案營收 ?? null,
-    專案成本: payload.專案成本 ?? null,
-    KOL費用未稅: payload.KOL費用未稅 ?? null,
+    專案總金額未稅: normalizeMoneyOrNull(payload.專案總金額未稅),
+    專案營收: normalizeMoneyOrNull(payload.專案營收),
+    專案成本: normalizeMoneyOrNull(payload.專案成本),
+    KOL費用未稅: normalizeMoneyOrNull(payload.KOL費用未稅),
     KOL名稱: payload.KOL名稱 ?? null,
     經紀人: payload.經紀人 ?? null,
     專案費用類型: payload.專案費用類型 ?? null,

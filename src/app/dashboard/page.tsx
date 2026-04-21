@@ -27,6 +27,7 @@ import {
 } from "@/config/overview-kpi";
 import { SocialLinkIcons } from "@/components/SocialLinkIcons";
 import { PARTNER_STATUS, isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
+import { normalizeDecimalString } from "@/lib/number-normalize";
 import { TASK_DUE_SOON_DAYS } from "@/config/task-due";
 import {
   aggregateTasksByAssignee,
@@ -77,7 +78,7 @@ function calc專案營收(總金額: string, 成本: string, kol費用: string):
   const a = Number(總金額) || 0;
   const b = Number(成本) || 0;
   const c = Number(kol費用) || 0;
-  return String(a - b - c);
+  return normalizeDecimalString(a - b - c, 2) ?? "0";
 }
 
 /** 分潤表欄位顯示順序（所有人一致）：分潤金額 → 分潤成數、專案名稱 → 其餘 */
@@ -8223,6 +8224,10 @@ function NumberField({ label, value, onChange, className = "" }: NumberFieldProp
         className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 tabular-nums placeholder:text-stone-500 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={(e) => {
+          const normalized = normalizeDecimalString(e.target.value, 2);
+          if (normalized != null && normalized !== e.target.value) onChange(normalized);
+        }}
       />
     </div>
   );

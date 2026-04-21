@@ -4,6 +4,11 @@
 
 import { getSupabase } from "@/lib/supabase/server";
 import type { FinanceRow, InvoiceRow } from "@/modules/finance/types";
+import { normalizeDecimalString } from "@/lib/number-normalize";
+
+function normalizeMoneyString(raw: unknown): string | undefined {
+  return normalizeDecimalString(raw, 2);
+}
 
 /** 新增發票（單筆／批次共用欄位） */
 export type InvoiceInsertInput = {
@@ -27,11 +32,11 @@ function mapInvoiceRecord(r: Record<string, unknown>): InvoiceRow {
       r.專案ID != null && String(r.專案ID).trim() !== "" ? String(r.專案ID) : undefined,
     發票號碼: r.發票號碼 != null ? String(r.發票號碼) : undefined,
     發票日期: r.發票日期 != null ? String(r.發票日期) : undefined,
-    發票金額未稅: r.發票金額未稅 != null ? String(r.發票金額未稅) : undefined,
-    發票金額含稅: r.發票金額含稅 != null ? String(r.發票金額含稅) : undefined,
-    發票稅金: r.發票稅金 != null ? String(r.發票稅金) : undefined,
+    發票金額未稅: normalizeMoneyString(r.發票金額未稅),
+    發票金額含稅: normalizeMoneyString(r.發票金額含稅),
+    發票稅金: normalizeMoneyString(r.發票稅金),
     廠商預計付款日: r.廠商預計付款日 != null ? String(r.廠商預計付款日) : undefined,
-    廠商實付金額: r.廠商實付金額 != null ? String(r.廠商實付金額) : undefined,
+    廠商實付金額: normalizeMoneyString(r.廠商實付金額),
     廠商付款狀態: r.廠商付款狀態 != null ? String(r.廠商付款狀態) : undefined,
     廠商付款日期: r.廠商付款日期 != null ? String(r.廠商付款日期) : undefined,
     備註: r.備註 != null ? String(r.備註) : undefined,
@@ -106,12 +111,12 @@ function mapFinanceDbRow(r: Record<string, unknown>, 專案名稱: string | unde
   return {
     專案ID: r.專案ID != null ? String(r.專案ID) : undefined,
     專案名稱,
-    專案總金額未稅: r.專案總金額未稅 != null ? String(r.專案總金額未稅) : undefined,
-    專案成本: r.專案成本 != null ? String(r.專案成本) : undefined,
-    專案實際成本: r.專案實際成本 != null ? String(r.專案實際成本) : undefined,
-    專案分潤: r.專案分潤 != null ? String(r.專案分潤) : undefined,
-    專案利潤: r.專案利潤 != null ? String(r.專案利潤) : undefined,
-    專案利潤比: r.專案利潤比 != null ? String(r.專案利潤比) : undefined,
+    專案總金額未稅: normalizeMoneyString(r.專案總金額未稅),
+    專案成本: normalizeMoneyString(r.專案成本),
+    專案實際成本: normalizeMoneyString(r.專案實際成本),
+    專案分潤: normalizeMoneyString(r.專案分潤),
+    專案利潤: normalizeMoneyString(r.專案利潤),
+    專案利潤比: normalizeMoneyString(r.專案利潤比),
     發票號碼: r.發票號碼 != null ? String(r.發票號碼) : undefined,
     廠商預計付款日: r.廠商預計付款日 != null ? String(r.廠商預計付款日) : undefined,
     廠商付款日期:
@@ -194,6 +199,14 @@ function trimOrNull(v: string | null | undefined): string | null {
   return t === "" ? null : t;
 }
 
+function normalizeMoneyOrNull(v: string | null | undefined): string | null {
+  if (v == null) return null;
+  const normalized = normalizeMoneyString(v);
+  if (normalized == null) return null;
+  const t = String(normalized).trim();
+  return t === "" ? null : t;
+}
+
 /**
  * 批次新增發票（至少一筆須填發票號碼；專案ID 可空）
  */
@@ -203,11 +216,11 @@ export async function createInvoicesBatch(rows: InvoiceInsertInput[]): Promise<I
       專案ID: trimOrNull(row.專案ID ?? undefined),
       發票號碼: trimOrNull(row.發票號碼 ?? undefined),
       發票日期: trimOrNull(row.發票日期 ?? undefined),
-      發票金額未稅: trimOrNull(row.發票金額未稅 ?? undefined),
-      發票金額含稅: trimOrNull(row.發票金額含稅 ?? undefined),
-      發票稅金: trimOrNull(row.發票稅金 ?? undefined),
+      發票金額未稅: normalizeMoneyOrNull(row.發票金額未稅 ?? undefined),
+      發票金額含稅: normalizeMoneyOrNull(row.發票金額含稅 ?? undefined),
+      發票稅金: normalizeMoneyOrNull(row.發票稅金 ?? undefined),
       廠商預計付款日: trimOrNull(row.廠商預計付款日 ?? undefined),
-      廠商實付金額: trimOrNull(row.廠商實付金額 ?? undefined),
+      廠商實付金額: normalizeMoneyOrNull(row.廠商實付金額 ?? undefined),
       廠商付款狀態: trimOrNull(row.廠商付款狀態 ?? undefined),
       廠商付款日期: trimOrNull(row.廠商付款日期 ?? undefined),
       備註: trimOrNull(row.備註 ?? undefined),
@@ -237,11 +250,11 @@ export async function updateInvoiceById(id: string, row: InvoiceInsertInput): Pr
     專案ID: trimOrNull(row.專案ID ?? undefined),
     發票號碼,
     發票日期: trimOrNull(row.發票日期 ?? undefined),
-    發票金額未稅: trimOrNull(row.發票金額未稅 ?? undefined),
-    發票金額含稅: trimOrNull(row.發票金額含稅 ?? undefined),
-    發票稅金: trimOrNull(row.發票稅金 ?? undefined),
+    發票金額未稅: normalizeMoneyOrNull(row.發票金額未稅 ?? undefined),
+    發票金額含稅: normalizeMoneyOrNull(row.發票金額含稅 ?? undefined),
+    發票稅金: normalizeMoneyOrNull(row.發票稅金 ?? undefined),
     廠商預計付款日: trimOrNull(row.廠商預計付款日 ?? undefined),
-    廠商實付金額: trimOrNull(row.廠商實付金額 ?? undefined),
+    廠商實付金額: normalizeMoneyOrNull(row.廠商實付金額 ?? undefined),
     廠商付款狀態: trimOrNull(row.廠商付款狀態 ?? undefined),
     廠商付款日期: trimOrNull(row.廠商付款日期 ?? undefined),
     備註: trimOrNull(row.備註 ?? undefined),
