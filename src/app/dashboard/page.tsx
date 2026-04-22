@@ -509,6 +509,8 @@ export default function DashboardPage() {
   const [deletingMaster, setDeletingMaster] = useState(false);
   const [savingMaster, setSavingMaster] = useState(false);
   const [saveMasterError, setSaveMasterError] = useState<string | null>(null);
+  const [inlineStatusSavingId, setInlineStatusSavingId] = useState<string | null>(null);
+  const [inlineStatusError, setInlineStatusError] = useState<string | null>(null);
   const [editMasterForm, setEditMasterForm] = useState(() => ({
     專案名稱: "",
     專案類型: "",
@@ -898,6 +900,10 @@ export default function DashboardPage() {
 
   /** 董事長／管理者可為使用者設定可見範圍、調整系統設定 */
   const canEditVisibility = me && ["董事長", "管理者"].includes(me.role);
+  const canUpdateMaster = useMemo(
+    () => Boolean(me?.role && rolePermissions.master.update.includes(me.role)),
+    [me?.role, rolePermissions]
+  );
 
   const fetchPartnerFormOptions = useCallback(async () => {
     try {
@@ -1517,6 +1523,66 @@ export default function DashboardPage() {
     () => searchedInvoices.slice(0, invoicesRenderCount),
     [searchedInvoices, invoicesRenderCount]
   );
+
+  async function updateProjectStatusInline(row: MasterRow, nextStatus: string) {
+    const id = String(row.id ?? "").trim();
+    if (!id || inlineStatusSavingId) return;
+    const currentStatus = String(row.專案狀態 ?? "").trim();
+    if (nextStatus.trim() === currentStatus) return;
+    setInlineStatusError(null);
+    setInlineStatusSavingId(id);
+    try {
+      const res = await fetch("/api/master", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          id,
+          專案名稱: row.專案名稱 ?? "",
+          專案類型: row.專案類型 ?? "",
+          專案狀態: nextStatus,
+          狀態確認日期: normalizeDateForInput(row.狀態確認日期),
+          開案日期: normalizeDateForInput(row.開案日期),
+          廠商預計付款日: normalizeDateForInput(row.廠商預計付款日),
+          專案資料夾: row.專案資料夾 ?? "",
+          專案總金額未稅: row.專案總金額未稅 ?? "",
+          專案成本: row.專案成本 ?? "",
+          KOL費用未稅: row.KOL費用未稅 ?? "",
+          專案營收: calc專案營收(
+            row.專案總金額未稅 ?? "",
+            row.專案成本 ?? "",
+            row.KOL費用未稅 ?? ""
+          ),
+          專案費用類型: row.專案費用類型 ?? "",
+          KOL名稱: row.KOL名稱 ?? "",
+          經紀人: row.經紀人 ?? "",
+          廠商名稱: row.廠商名稱 ?? "",
+          專案BDPM: row.專案BDPM ?? "",
+          專案引薦人: row.專案引薦人 ?? "",
+          專案開發人: row.專案開發人 ?? "",
+          專案管理員: row.專案管理員 ?? "",
+          執行管理員: row.執行管理員 ?? "",
+          專案內容: row.專案內容 ?? "",
+          備註: row.備註 ?? "",
+        }),
+      });
+      const data = (await safeResJson(res)) as { ok?: boolean; error?: string; master?: MasterRow };
+      if (!res.ok || !data.ok || !data.master) {
+        setInlineStatusError(data.error ?? "更新專案狀態失敗");
+        return;
+      }
+      setMasterList((prev) => prev.map((r) => (r.id === data.master!.id ? data.master! : r)));
+      setSelectedMaster((prev) => {
+        if (!prev || prev.id !== data.master!.id) return prev;
+        return data.master!;
+      });
+      await refreshDashboardData(["master", "payout", "finance"]);
+    } catch (err) {
+      setInlineStatusError(err instanceof Error ? err.message : "更新專案狀態失敗");
+    } finally {
+      setInlineStatusSavingId(null);
+    }
+  }
 
   useEffect(() => {
     if (activeSection !== "master") return;
@@ -3047,6 +3113,9 @@ export default function DashboardPage() {
                   「全部」分頁若同時含製作/活動與廣告業配／團購專案，會顯示兩組分潤角色欄；切到單一專案類型分頁即可只顯示對應欄位。
                 </p>
               )}
+              {inlineStatusError && (
+                <p className="mt-2 rounded-lg bg-amber-100/90 px-3 py-2 text-xs font-medium text-amber-800">{inlineStatusError}</p>
+              )}
             </div>
             <div className="overflow-x-auto rounded-xl border border-stone-200/90 ring-1 ring-amber-100/60">
               <table className="min-w-full table-fixed divide-y divide-stone-200">
@@ -3188,6 +3257,42 @@ export default function DashboardPage() {
                                     >
                                       {short}
                                     </span>
+                                  </td>
+                                );
+                              }
+                              if (k === "專案狀態") {
+                                const rowId = String(row.id ?? "").trim();
+                                const current = String(row.專案狀態 ?? "");
+                                const statusOptions = [...new Set([...projectStatusOptions, current].filter(Boolean))];
+                                if (!canUpdateMaster) {
+                                  return (
+                                    <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm font-medium text-stone-600">
+                                      {current || "—"}
+                                    </td>
+                                  );
+                                }
+                                return (
+                                  <td
+                                    key={k}
+                                    className="whitespace-nowrap px-4 py-2.5 text-sm font-medium text-stone-600"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <select
+                                      value={current}
+                                      disabled={inlineStatusSavingId === rowId}
+                                      onChange={(e) => {
+                                        void updateProjectStatusInline(row, e.target.value);
+                                      }}
+                                      className="w-full min-w-[7rem] rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-sm text-stone-700 focus:border-amber-500/60 focus:outline-none disabled:opacity-60"
+                                      title={current || "未設定"}
+                                    >
+                                      <option value="">未設定</option>
+                                      {statusOptions.map((s) => (
+                                        <option key={s} value={s}>
+                                          {s}
+                                        </option>
+                                      ))}
+                                    </select>
                                   </td>
                                 );
                               }
