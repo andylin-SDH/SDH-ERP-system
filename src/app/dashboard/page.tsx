@@ -773,6 +773,16 @@ export default function DashboardPage() {
   const [payoutWorkflowTab, setPayoutWorkflowTab] = useState<PayoutWorkflowTabKey>("pending_vendor");
   const [financeSearch, setFinanceSearch] = useState("");
   const [invoicesSearch, setInvoicesSearch] = useState("");
+  const [tasksLifecycleTab, setTasksLifecycleTab] = useState<"in_progress" | "completed">(() => {
+    if (typeof window === "undefined") return "in_progress";
+    try {
+      const v = localStorage.getItem("sdh-tasks-lifecycle-tab");
+      if (v === "in_progress" || v === "completed") return v;
+    } catch {
+      /* ignore */
+    }
+    return "in_progress";
+  });
   /** 財務分頁內：依專案列 vs 發票清冊（發票已併入財務） */
   const [financeSubTab, setFinanceSubTab] = useState<"byProject" | "invoices">("byProject");
   const [showInvoiceCreateModal, setShowInvoiceCreateModal] = useState(false);
@@ -1206,6 +1216,22 @@ export default function DashboardPage() {
     () => filterRowsByVisibility(tasks as unknown as Record<string, unknown>[], "tasks") as unknown as TaskRow[],
     [tasks, filterRowsByVisibility]
   );
+  const tasksLifecycleCounts = useMemo(() => {
+    let inProgress = 0;
+    let completed = 0;
+    for (const t of filteredTasks) {
+      if (t.任務完成) completed += 1;
+      else inProgress += 1;
+    }
+    return { inProgress, completed };
+  }, [filteredTasks]);
+  const tasksLifecycleFilteredList = useMemo(
+    () =>
+      filteredTasks.filter((t) =>
+        tasksLifecycleTab === "completed" ? Boolean(t.任務完成) : !Boolean(t.任務完成)
+      ),
+    [filteredTasks, tasksLifecycleTab]
+  );
 
   const overviewDirectorCompanyView = Boolean(me?.role === "董事長" && overviewScope === "company");
 
@@ -1387,8 +1413,8 @@ export default function DashboardPage() {
   );
   const searchedTasks = useMemo(
     () =>
-      filterRowsBySearch(filteredTasks as unknown as Record<string, unknown>[], tasksVisibleCols, deferredTasksSearch) as unknown as TaskRow[],
-    [filteredTasks, tasksVisibleCols, deferredTasksSearch, filterRowsBySearch]
+      filterRowsBySearch(tasksLifecycleFilteredList as unknown as Record<string, unknown>[], tasksVisibleCols, deferredTasksSearch) as unknown as TaskRow[],
+    [tasksLifecycleFilteredList, tasksVisibleCols, deferredTasksSearch, filterRowsBySearch]
   );
 
   const canManageTaskWorkloadView = useMemo(
@@ -1791,6 +1817,12 @@ export default function DashboardPage() {
   useEffect(() => {
     if (tasksSectionViewMode !== "byAssignee") setWorkloadDrill(null);
   }, [tasksSectionViewMode]);
+
+  useEffect(() => {
+    if (tasksLifecycleTab === "completed" && tasksSectionViewMode === "byAssignee") {
+      setTasksSectionViewMode("list");
+    }
+  }, [tasksLifecycleTab, tasksSectionViewMode]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -2212,6 +2244,14 @@ export default function DashboardPage() {
       /* ignore */
     }
   }, [masterLifecycleTab]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("sdh-tasks-lifecycle-tab", tasksLifecycleTab);
+    } catch {
+      /* ignore */
+    }
+  }, [tasksLifecycleTab]);
 
   useEffect(() => {
     try {
@@ -5803,6 +5843,28 @@ export default function DashboardPage() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-xl font-bold tracking-tight text-stone-900">任務</h2>
             <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+              <div className="flex shrink-0 rounded-lg border border-amber-200 bg-amber-50/90 p-0.5 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setTasksLifecycleTab("in_progress")}
+                  className={`rounded-md px-3 py-1.5 transition ${
+                    tasksLifecycleTab === "in_progress" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:text-stone-900"
+                  }`}
+                >
+                  進行中
+                  <span className="ml-1 tabular-nums text-[10px] opacity-80">({tasksLifecycleCounts.inProgress})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTasksLifecycleTab("completed")}
+                  className={`rounded-md px-3 py-1.5 transition ${
+                    tasksLifecycleTab === "completed" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:text-stone-900"
+                  }`}
+                >
+                  已完成
+                  <span className="ml-1 tabular-nums text-[10px] opacity-80">({tasksLifecycleCounts.completed})</span>
+                </button>
+              </div>
               {canManageTaskWorkloadView && (
                 <div className="flex shrink-0 rounded-lg border border-amber-200 bg-amber-50/90 p-0.5 text-xs font-semibold">
                   <button
@@ -5815,6 +5877,7 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => setTasksSectionViewMode("byAssignee")}
+                    disabled={tasksLifecycleTab !== "in_progress"}
                     className={`rounded-md px-3 py-1.5 transition ${tasksSectionViewMode === "byAssignee" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:text-stone-900"}`}
                   >
                     依員工
@@ -5830,7 +5893,7 @@ export default function DashboardPage() {
               />
             </div>
           </div>
-          {canManageTaskWorkloadView && tasksSectionViewMode === "byAssignee" ? (
+          {canManageTaskWorkloadView && tasksSectionViewMode === "byAssignee" && tasksLifecycleTab === "in_progress" ? (
             <div className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-4">
               <p className="mb-3 text-xs leading-relaxed text-stone-600">
                 依「② 資料可見規則」與上方搜尋結果，彙總每位負責人<strong>未完成</strong>任務數。
@@ -6018,6 +6081,10 @@ export default function DashboardPage() {
           <div className="space-y-3 md:hidden">
             {filteredTasks.length === 0 ? (
               <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">尚無任務資料（請在大總表展開專案後新增任務）</p>
+            ) : tasksLifecycleFilteredList.length === 0 ? (
+              <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">
+                {tasksLifecycleTab === "in_progress" ? "目前沒有進行中任務" : "目前沒有已完成任務"}
+              </p>
             ) : searchedTasks.length === 0 ? (
               <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">沒有符合搜尋結果</p>
             ) : (
@@ -6147,6 +6214,12 @@ export default function DashboardPage() {
                   <tr>
                     <td colSpan={tasksVisibleCols.length || 6} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                       尚無任務資料（請在大總表展開專案後新增任務）
+                    </td>
+                  </tr>
+                ) : tasksLifecycleFilteredList.length === 0 ? (
+                  <tr>
+                    <td colSpan={tasksVisibleCols.length || 6} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                      {tasksLifecycleTab === "in_progress" ? "目前沒有進行中任務" : "目前沒有已完成任務"}
                     </td>
                   </tr>
                 ) : searchedTasks.length === 0 ? (
