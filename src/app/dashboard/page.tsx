@@ -478,6 +478,7 @@ export default function DashboardPage() {
     專案名稱: "",
     專案類型: "",
     專案狀態: "",
+    長期案: false,
     狀態確認日期: "",
     開案日期: "",
     廠商預計付款日: "",
@@ -515,6 +516,7 @@ export default function DashboardPage() {
     專案名稱: "",
     專案類型: "",
     專案狀態: "",
+    長期案: false,
     狀態確認日期: "",
     開案日期: "",
     廠商預計付款日: "",
@@ -753,7 +755,7 @@ export default function DashboardPage() {
   const [masterSearch, setMasterSearch] = useState("");
   /** 大總表：依專案類型子分頁（「全部」= 不篩類型） */
   const [masterSubTab, setMasterSubTab] = useState("全部");
-  /** 大總表：進行中 vs 已結案（依 isProjectInProgress 與專案狀態） */
+  /** 大總表：進行中 / 已結案（生命週期） */
   const [masterLifecycleTab, setMasterLifecycleTab] = useState<"in_progress" | "closed">(() => {
     if (typeof window === "undefined") return "in_progress";
     try {
@@ -763,6 +765,17 @@ export default function DashboardPage() {
       /* ignore */
     }
     return "in_progress";
+  });
+  /** 大總表：專案屬性篩選（長期案） */
+  const [masterLongTermFilter, setMasterLongTermFilter] = useState<"all" | "long_term_only">(() => {
+    if (typeof window === "undefined") return "all";
+    try {
+      const v = localStorage.getItem("sdh-master-long-term-filter");
+      if (v === "all" || v === "long_term_only") return v;
+    } catch {
+      /* ignore */
+    }
+    return "all";
   });
   /** 行動版：側欄抽屜；桌面：側欄收合為窄欄 */
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -1187,25 +1200,40 @@ export default function DashboardPage() {
     let active = 0;
     let closed = 0;
     for (const row of filteredMasterList) {
-      if (isProjectInProgress(row.專案狀態)) active += 1;
-      else closed += 1;
+      if (!isProjectInProgress(row.專案狀態)) {
+        closed += 1;
+      } else {
+        active += 1;
+      }
     }
     return { active, closed };
   }, [filteredMasterList]);
 
   /** 大總表：先依「進行中／已結案」篩選 */
-  const masterLifecycleFilteredList = useMemo(() => {
+  const masterLifecycleBaseList = useMemo(() => {
     if (masterLifecycleTab === "in_progress") {
       return filteredMasterList.filter((row) => isProjectInProgress(row.專案狀態));
     }
     return filteredMasterList.filter((row) => !isProjectInProgress(row.專案狀態));
   }, [filteredMasterList, masterLifecycleTab]);
 
+  /** 大總表：生命週期內再依「全部／僅長期案」篩選 */
+  const masterLongTermFilteredList = useMemo(() => {
+    if (masterLongTermFilter === "all") return masterLifecycleBaseList;
+    return masterLifecycleBaseList.filter((row) => Boolean(row.長期案));
+  }, [masterLifecycleBaseList, masterLongTermFilter]);
+
+  const masterLongTermCounts = useMemo(() => {
+    const all = masterLifecycleBaseList.length;
+    const longTermOnly = masterLifecycleBaseList.filter((row) => Boolean(row.長期案)).length;
+    return { all, longTermOnly };
+  }, [masterLifecycleBaseList]);
+
   /** 大總表：再依子分頁「專案類型」篩選後的列表（再套用關鍵字搜尋） */
   const masterTabFilteredList = useMemo(() => {
-    if (masterSubTab === "全部") return masterLifecycleFilteredList;
-    return masterLifecycleFilteredList.filter((row) => String(row.專案類型 ?? "").trim() === masterSubTab);
-  }, [masterLifecycleFilteredList, masterSubTab]);
+    if (masterSubTab === "全部") return masterLongTermFilteredList;
+    return masterLongTermFilteredList.filter((row) => String(row.專案類型 ?? "").trim() === masterSubTab);
+  }, [masterLongTermFilteredList, masterSubTab]);
 
   /** 合作夥伴 / KOL：與其他表相同，依 ② match_fields 篩列（未勾選 = 不篩；勾選欄位 = 該欄等於登入者姓名或帳號） */
   const filteredPartners = useMemo(
@@ -1567,6 +1595,7 @@ export default function DashboardPage() {
           專案名稱: row.專案名稱 ?? "",
           專案類型: row.專案類型 ?? "",
           專案狀態: nextStatus,
+          長期案: Boolean(row.長期案),
           狀態確認日期: normalizeDateForInput(row.狀態確認日期),
           開案日期: normalizeDateForInput(row.開案日期),
           廠商預計付款日: normalizeDateForInput(row.廠商預計付款日),
@@ -1719,6 +1748,7 @@ export default function DashboardPage() {
       專案名稱: selectedMaster.專案名稱 ?? "",
       專案類型: selectedMaster.專案類型 ?? "",
       專案狀態: selectedMaster.專案狀態 ?? "",
+      長期案: Boolean(selectedMaster.長期案),
       狀態確認日期: normalizeDateForInput(selectedMaster.狀態確認日期),
       開案日期: normalizeDateForInput(selectedMaster.開案日期),
       廠商預計付款日: normalizeDateForInput(selectedMaster.廠商預計付款日),
@@ -2244,6 +2274,14 @@ export default function DashboardPage() {
       /* ignore */
     }
   }, [masterLifecycleTab]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("sdh-master-long-term-filter", masterLongTermFilter);
+    } catch {
+      /* ignore */
+    }
+  }, [masterLongTermFilter]);
 
   useEffect(() => {
     try {
@@ -3042,6 +3080,7 @@ export default function DashboardPage() {
                       專案名稱: "",
                       專案類型: masterSubTab !== "全部" ? masterSubTab : "",
                       專案狀態: "",
+                      長期案: false,
                       狀態確認日期: "",
                       開案日期: today,
                       廠商預計付款日: "",
@@ -3076,58 +3115,64 @@ export default function DashboardPage() {
                 </button>
               </div>
               </div>
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                <span className="text-xs font-semibold text-stone-500">專案狀態</span>
-                <div
-                  className="inline-flex rounded-xl border border-stone-200/90 bg-stone-100/80 p-1 shadow-inner"
-                  role="tablist"
-                  aria-label="依專案狀態篩選"
-                >
+              <div className="mt-4 rounded-2xl border border-stone-200/90 bg-gradient-to-br from-stone-50 to-white p-3">
+                <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    role="tab"
-                    aria-selected={masterLifecycleTab === "in_progress"}
                     onClick={() => setMasterLifecycleTab("in_progress")}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    className={`group min-w-[7rem] rounded-xl border px-3 py-2 text-left text-xs transition cursor-pointer ${
                       masterLifecycleTab === "in_progress"
-                        ? "bg-amber-500 text-slate-900 shadow-sm ring-1 ring-amber-400/80"
-                        : "text-stone-600 hover:bg-stone-200/70"
+                        ? "border-amber-300 bg-amber-50 shadow-sm ring-2 ring-amber-200/70"
+                        : "border-stone-200 bg-white hover:-translate-y-0.5 hover:border-amber-200 hover:shadow-sm"
                     }`}
                   >
-                    進行中
-                    <span
-                      className={`ml-1.5 tabular-nums ${
-                        masterLifecycleTab === "in_progress" ? "text-slate-800" : "text-stone-500"
-                      }`}
-                    >
-                      {masterLifecycleCounts.active}
-                    </span>
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold text-stone-700">進行中</div>
+                      <span className="text-[10px] text-stone-400 group-hover:text-amber-600">點選</span>
+                    </div>
+                    <div className="mt-0.5 text-lg font-bold tabular-nums text-stone-900">{masterLifecycleCounts.active}</div>
                   </button>
                   <button
                     type="button"
-                    role="tab"
-                    aria-selected={masterLifecycleTab === "closed"}
                     onClick={() => setMasterLifecycleTab("closed")}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    className={`group min-w-[7rem] rounded-xl border px-3 py-2 text-left text-xs transition cursor-pointer ${
                       masterLifecycleTab === "closed"
-                        ? "bg-amber-500 text-slate-900 shadow-sm ring-1 ring-amber-400/80"
-                        : "text-stone-600 hover:bg-stone-200/70"
+                        ? "border-amber-300 bg-amber-50 shadow-sm ring-2 ring-amber-200/70"
+                        : "border-stone-200 bg-white hover:-translate-y-0.5 hover:border-amber-200 hover:shadow-sm"
                     }`}
                   >
-                    已結案
-                    <span
-                      className={`ml-1.5 tabular-nums ${
-                        masterLifecycleTab === "closed" ? "text-slate-800" : "text-stone-500"
-                      }`}
-                    >
-                      {masterLifecycleCounts.closed}
-                    </span>
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold text-stone-700">已結案</div>
+                      <span className="text-[10px] text-stone-400 group-hover:text-amber-600">點選</span>
+                    </div>
+                    <div className="mt-0.5 text-lg font-bold tabular-nums text-stone-900">{masterLifecycleCounts.closed}</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMasterLongTermFilter((prev) => (prev === "long_term_only" ? "all" : "long_term_only"))}
+                    className={`group min-w-[7rem] rounded-xl border px-3 py-2 text-left text-xs transition cursor-pointer ${
+                      masterLongTermFilter === "long_term_only"
+                        ? "border-amber-300 bg-amber-50 shadow-sm ring-2 ring-amber-200/70"
+                        : "border-stone-200 bg-white hover:-translate-y-0.5 hover:border-amber-200 hover:shadow-sm"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold text-stone-700">僅長期案</div>
+                      <span className="text-[10px] text-stone-400 group-hover:text-amber-600">切換</span>
+                    </div>
+                    <div className="mt-0.5 text-lg font-bold tabular-nums text-stone-900">{masterLongTermCounts.longTermOnly}</div>
                   </button>
                 </div>
+                <p className="mt-2 text-[11px] text-stone-500">點選卡片可切換狀態；「僅長期案」為開關式篩選。</p>
               </div>
               {masterLifecycleTab === "closed" && (
                 <p className="mt-2 max-w-3xl text-xs text-stone-500">
                   以下為已結案專案，僅供查詢與歷史紀錄；若要處理進行中工作請切換「進行中」。
+                </p>
+              )}
+              {masterLongTermFilter === "long_term_only" && (
+                <p className="mt-2 max-w-3xl text-xs text-stone-500">
+                  以下為目前分頁中已標記為長期案的專案，適合定期請款追蹤。
                 </p>
               )}
               <div className="mt-3 flex flex-wrap gap-2 border-b border-stone-200/80 pb-3" role="tablist" aria-label="依專案類型篩選">
@@ -3208,12 +3253,18 @@ export default function DashboardPage() {
                         尚無大總表資料，請點「新增專案」建立第一筆
                       </td>
                     </tr>
-                  ) : masterLifecycleFilteredList.length === 0 ? (
+                  ) : masterLifecycleBaseList.length === 0 ? (
                     <tr>
                       <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                         {masterLifecycleTab === "in_progress"
                           ? "目前沒有進行中的專案。將專案狀態改為結案／完成等狀態後，該筆會出現在「已結案」。"
                           : "目前沒有已結案的專案。"}
+                      </td>
+                    </tr>
+                  ) : masterLongTermFilteredList.length === 0 ? (
+                    <tr>
+                      <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                        目前分頁沒有符合「僅長期案」的專案，請切回「全部」或到專案詳情勾選「長期案」。
                       </td>
                     </tr>
                   ) : masterTabFilteredList.length === 0 ? (
@@ -7318,6 +7369,17 @@ export default function DashboardPage() {
                       onChange={(v) => setCreateForm((f) => ({ ...f, 專案狀態: v }))}
                       options={[...new Set([...projectStatusOptions, createForm.專案狀態].filter(Boolean))]}
                     />
+                    <div className="rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5">
+                      <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-medium text-stone-700">
+                        <input
+                          type="checkbox"
+                          checked={createForm.長期案}
+                          onChange={(e) => setCreateForm((f) => ({ ...f, 長期案: e.target.checked }))}
+                          className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-500/40"
+                        />
+                        長期案（定期請款）
+                      </label>
+                    </div>
                     <DateField label="開案日期" value={createForm.開案日期} onChange={(v) => setCreateForm((f) => ({ ...f, 開案日期: v }))} />
                     <DateField label="狀態確認日期" value={createForm.狀態確認日期} onChange={(v) => setCreateForm((f) => ({ ...f, 狀態確認日期: v }))} />
                     <DateField
@@ -7783,6 +7845,7 @@ export default function DashboardPage() {
                       專案名稱: selectedMaster.專案名稱 ?? "",
                       專案類型: selectedMaster.專案類型 ?? "",
                       專案狀態: selectedMaster.專案狀態 ?? "",
+                      長期案: Boolean(selectedMaster.長期案),
                       狀態確認日期: normalizeDateForInput(selectedMaster.狀態確認日期),
                       開案日期: normalizeDateForInput(selectedMaster.開案日期),
                       廠商預計付款日: normalizeDateForInput(selectedMaster.廠商預計付款日),
@@ -7925,6 +7988,21 @@ export default function DashboardPage() {
                     />
                   ) : (
                     <Field label="專案狀態" value={selectedMaster.專案狀態} />
+                  )}
+                  {isEditingMaster ? (
+                    <div className="rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5">
+                      <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-medium text-stone-700">
+                        <input
+                          type="checkbox"
+                          checked={editMasterForm.長期案}
+                          onChange={(e) => setEditMasterForm((f) => ({ ...f, 長期案: e.target.checked }))}
+                          className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-500/40"
+                        />
+                        長期案（定期請款）
+                      </label>
+                    </div>
+                  ) : (
+                    <Field label="長期案" value={selectedMaster.長期案 ? "是" : "否"} />
                   )}
                   {isEditingMaster ? (
                     <DateField label="開案日期" value={editMasterForm.開案日期} onChange={(v) => setEditMasterForm((f) => ({ ...f, 開案日期: v }))} />

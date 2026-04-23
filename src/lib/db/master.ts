@@ -13,6 +13,7 @@ export interface MasterRow {
   專案名稱: string | null;
   專案類型: string | null;
   專案狀態: string | null;
+  長期案: boolean;
   狀態確認日期: string | null;
   開案日期: string | null;
   專案總金額未稅: string | null;
@@ -53,6 +54,7 @@ function rowToMaster(r: Record<string, unknown>): MasterRow {
     專案名稱: (r.專案名稱 as string) ?? null,
     專案類型: (r.專案類型 as string) ?? null,
     專案狀態: (r.專案狀態 as string) ?? null,
+    長期案: Boolean(r.長期案),
     狀態確認日期: (r.狀態確認日期 as string) ?? null,
     開案日期: (r.開案日期 as string) ?? null,
     專案總金額未稅: money(r.專案總金額未稅),
@@ -116,6 +118,7 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     專案名稱: payload.專案名稱 ?? null,
     專案類型: payload.專案類型 ?? null,
     專案狀態: payload.專案狀態 ?? null,
+    長期案: Boolean(payload.長期案),
     狀態確認日期: payload.狀態確認日期 ?? null,
     開案日期: payload.開案日期 ?? null,
     專案總金額未稅: normalizeMoneyOrNull(payload.專案總金額未稅),
@@ -170,6 +173,7 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
     專案名稱: payload.專案名稱 ?? null,
     專案類型: payload.專案類型 ?? null,
     專案狀態: payload.專案狀態 ?? null,
+    長期案: Boolean(payload.長期案),
     狀態確認日期: payload.狀態確認日期 ?? null,
     開案日期: payload.開案日期 ?? null,
     專案總金額未稅: normalizeMoneyOrNull(payload.專案總金額未稅),
