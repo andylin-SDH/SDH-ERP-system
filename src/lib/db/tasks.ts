@@ -47,6 +47,8 @@ export type NewTaskInput = {
   任務類型?: string | null;
   負責人?: string | null;
   備註?: string | null;
+  來源模板ID?: number | null;
+  排程鍵?: string | null;
   /** YYYY-MM-DD */
   到期日?: string | null;
 };
@@ -67,6 +69,14 @@ export async function createTask(payload: NewTaskInput): Promise<TaskRow> {
   if (payload.備註 !== undefined) {
     const n = payload.備註?.trim() ?? "";
     insertData.備註 = n === "" ? null : n;
+  }
+  if (payload.來源模板ID !== undefined) {
+    const templateId = Number(payload.來源模板ID);
+    insertData.來源模板ID = Number.isFinite(templateId) && templateId > 0 ? templateId : null;
+  }
+  if (payload.排程鍵 !== undefined) {
+    const scheduleKey = String(payload.排程鍵 ?? "").trim();
+    insertData.排程鍵 = scheduleKey || null;
   }
   if (payload.到期日 !== undefined && payload.到期日 !== null && String(payload.到期日).trim() !== "") {
     const d = String(payload.到期日).trim().slice(0, 10);

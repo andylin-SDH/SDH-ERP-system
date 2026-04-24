@@ -466,6 +466,45 @@ function taskAssigneeIsUser(t: TaskRow, userName: string, userEmail: string): bo
   return a === userName || a === userEmail;
 }
 
+type MasterTaskTemplate = {
+  id: number;
+  專案ID: string;
+  任務名稱: string;
+  任務類型?: string | null;
+  負責人?: string | null;
+  備註?: string | null;
+  每月幾號: number;
+  提前天數: number;
+  啟用: boolean;
+  最後觸發鍵?: string | null;
+};
+
+type MasterTaskTemplateDraft = {
+  任務名稱: string;
+  負責人: string;
+  備註: string;
+  每月幾號: string;
+  提前天數: string;
+  啟用: boolean;
+};
+
+function computeNextTemplateTriggerDateText(dayOfMonth: number, leadDays: number): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const buildTrigger = (year: number, month0: number) => {
+    const dueDay = Math.min(Math.max(1, dayOfMonth), new Date(year, month0 + 1, 0).getDate());
+    const dueDate = new Date(year, month0, dueDay);
+    const trigger = new Date(dueDate);
+    trigger.setDate(trigger.getDate() - Math.max(0, leadDays));
+    return trigger;
+  };
+  let next = buildTrigger(y, m);
+  const today = new Date(y, m, now.getDate());
+  if (next < today) next = buildTrigger(y, m + 1);
+  return next.toLocaleDateString("zh-TW", { year: "numeric", month: "2-digit", day: "2-digit" });
+}
+
 export default function DashboardPage() {
   const [me, setMe] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -510,6 +549,22 @@ export default function DashboardPage() {
   const [deletingMaster, setDeletingMaster] = useState(false);
   const [savingMaster, setSavingMaster] = useState(false);
   const [saveMasterError, setSaveMasterError] = useState<string | null>(null);
+  const [masterTaskTemplates, setMasterTaskTemplates] = useState<MasterTaskTemplate[]>([]);
+  const [masterTaskTemplatesLoading, setMasterTaskTemplatesLoading] = useState(false);
+  const [masterTaskTemplatesSaving, setMasterTaskTemplatesSaving] = useState(false);
+  const [masterTaskTemplatesError, setMasterTaskTemplatesError] = useState<string | null>(null);
+  const [deletingMasterTaskTemplateId, setDeletingMasterTaskTemplateId] = useState<number | null>(null);
+  const [pendingDeleteMasterTaskTemplate, setPendingDeleteMasterTaskTemplate] = useState<MasterTaskTemplate | null>(null);
+  const [masterTaskTemplateDrafts, setMasterTaskTemplateDrafts] = useState<Record<number, MasterTaskTemplateDraft>>({});
+  const [showCreateMasterTaskTemplateForm, setShowCreateMasterTaskTemplateForm] = useState(false);
+  const [editingMasterTaskTemplateId, setEditingMasterTaskTemplateId] = useState<number | null>(null);
+  const [newMasterTaskTemplateForm, setNewMasterTaskTemplateForm] = useState({
+    任務名稱: "",
+    負責人: "",
+    備註: "",
+    每月幾號: "1",
+    提前天數: "0",
+  });
   const [inlineStatusSavingId, setInlineStatusSavingId] = useState<string | null>(null);
   const [inlineStatusError, setInlineStatusError] = useState<string | null>(null);
   const [editMasterForm, setEditMasterForm] = useState(() => ({
@@ -927,6 +982,168 @@ export default function DashboardPage() {
     () => Boolean(me?.role && rolePermissions.master.update.includes(me.role)),
     [me?.role, rolePermissions]
   );
+
+  const loadMasterTaskTemplates = useCallback(async (projectId: string) => {
+    const pid = String(projectId ?? "").trim();
+    if (!pid) return;
+    setMasterTaskTemplatesLoading(true);
+    setMasterTaskTemplatesError(null);
+    try {
+      const res = await fetch(`/api/master/task-templates?projectId=${encodeURIComponent(pid)}`, { cache: "no-store" });
+      const data = (await safeResJson(res)) as {
+        ok?: boolean;
+        error?: string;
+        templates?: MasterTaskTemplate[];
+      };
+      if (!res.ok || !data.ok) {
+        setMasterTaskTemplatesError(data.error ?? "讀取排程模板失敗");
+        return;
+      }
+      setMasterTaskTemplates(Array.isArray(data.templates) ? data.templates : []);
+    } catch (e) {
+      setMasterTaskTemplatesError(e instanceof Error ? e.message : "讀取排程模板失敗");
+    } finally {
+      setMasterTaskTemplatesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedMaster?.專案ID || !selectedMaster.長期案) {
+      setMasterTaskTemplates([]);
+      setMasterTaskTemplateDrafts({});
+      setMasterTaskTemplatesError(null);
+      return;
+    }
+    void loadMasterTaskTemplates(selectedMaster.專案ID);
+  }, [selectedMaster?.專案ID, selectedMaster?.長期案, loadMasterTaskTemplates]);
+
+  useEffect(() => {
+    const nextDrafts: Record<number, MasterTaskTemplateDraft> = {};
+    for (const tpl of masterTaskTemplates) {
+      nextDrafts[tpl.id] = {
+        任務名稱: String(tpl.任務名稱 ?? ""),
+        負責人: String(tpl.負責人 ?? ""),
+        備註: String(tpl.備註 ?? ""),
+        每月幾號: String(tpl.每月幾號 ?? 1),
+        提前天數: String(tpl.提前天數 ?? 0),
+        啟用: Boolean(tpl.啟用),
+      };
+    }
+    setMasterTaskTemplateDrafts(nextDrafts);
+  }, [masterTaskTemplates]);
+
+  const createMasterTaskTemplateRow = useCallback(async () => {
+    const pid = String(selectedMaster?.專案ID ?? "").trim();
+    if (!pid) return;
+    setMasterTaskTemplatesSaving(true);
+    setMasterTaskTemplatesError(null);
+    try {
+      const res = await fetch("/api/master/task-templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          專案ID: pid,
+          任務名稱: newMasterTaskTemplateForm.任務名稱,
+          負責人: newMasterTaskTemplateForm.負責人 || null,
+          備註: newMasterTaskTemplateForm.備註 || null,
+          每月幾號: Number(newMasterTaskTemplateForm.每月幾號),
+          提前天數: Number(newMasterTaskTemplateForm.提前天數),
+          啟用: true,
+        }),
+      });
+      const data = (await safeResJson(res)) as { ok?: boolean; error?: string; template?: MasterTaskTemplate };
+      if (!res.ok || !data.ok || !data.template) {
+        setMasterTaskTemplatesError(data.error ?? "新增排程模板失敗");
+        return;
+      }
+      setMasterTaskTemplates((prev) => [data.template as MasterTaskTemplate, ...prev]);
+      setNewMasterTaskTemplateForm({ 任務名稱: "", 負責人: "", 備註: "", 每月幾號: "1", 提前天數: "0" });
+      setShowCreateMasterTaskTemplateForm(false);
+    } catch (e) {
+      setMasterTaskTemplatesError(e instanceof Error ? e.message : "新增排程模板失敗");
+    } finally {
+      setMasterTaskTemplatesSaving(false);
+    }
+  }, [newMasterTaskTemplateForm, selectedMaster?.專案ID]);
+
+  const toggleMasterTaskTemplateEnabled = useCallback(async (tpl: MasterTaskTemplate) => {
+    setMasterTaskTemplatesError(null);
+    try {
+      const res = await fetch("/api/master/task-templates", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ id: tpl.id, 啟用: !tpl.啟用 }),
+      });
+      const data = (await safeResJson(res)) as { ok?: boolean; error?: string; template?: MasterTaskTemplate };
+      if (!res.ok || !data.ok || !data.template) {
+        setMasterTaskTemplatesError(data.error ?? "更新模板失敗");
+        return;
+      }
+      setMasterTaskTemplates((prev) => prev.map((r) => (r.id === tpl.id ? (data.template as MasterTaskTemplate) : r)));
+    } catch (e) {
+      setMasterTaskTemplatesError(e instanceof Error ? e.message : "更新模板失敗");
+    }
+  }, []);
+
+  const deleteMasterTaskTemplateRow = useCallback(async (id: number) => {
+    setMasterTaskTemplatesError(null);
+    setDeletingMasterTaskTemplateId(id);
+    try {
+      const res = await fetch("/api/master/task-templates", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ id }),
+      });
+      const data = (await safeResJson(res)) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        setMasterTaskTemplatesError(data.error ?? "刪除模板失敗");
+        return;
+      }
+      setMasterTaskTemplates((prev) => prev.filter((r) => r.id !== id));
+      setPendingDeleteMasterTaskTemplate(null);
+    } catch (e) {
+      setMasterTaskTemplatesError(e instanceof Error ? e.message : "刪除模板失敗");
+    } finally {
+      setDeletingMasterTaskTemplateId(null);
+    }
+  }, []);
+
+  const saveMasterTaskTemplateRow = useCallback(async (id: number) => {
+    const draft = masterTaskTemplateDrafts[id];
+    if (!draft) return;
+    setMasterTaskTemplatesSaving(true);
+    setMasterTaskTemplatesError(null);
+    try {
+      const res = await fetch("/api/master/task-templates", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          id,
+          任務名稱: draft.任務名稱,
+          負責人: draft.負責人 || null,
+          備註: draft.備註 || null,
+          每月幾號: Number(draft.每月幾號),
+          提前天數: Number(draft.提前天數),
+          啟用: draft.啟用,
+        }),
+      });
+      const data = (await safeResJson(res)) as { ok?: boolean; error?: string; template?: MasterTaskTemplate };
+      if (!res.ok || !data.ok || !data.template) {
+        setMasterTaskTemplatesError(data.error ?? "儲存模板失敗");
+        return;
+      }
+      setMasterTaskTemplates((prev) => prev.map((r) => (r.id === id ? (data.template as MasterTaskTemplate) : r)));
+      setEditingMasterTaskTemplateId(null);
+    } catch (e) {
+      setMasterTaskTemplatesError(e instanceof Error ? e.message : "儲存模板失敗");
+    } finally {
+      setMasterTaskTemplatesSaving(false);
+    }
+  }, [masterTaskTemplateDrafts]);
 
   const fetchPartnerFormOptions = useCallback(async () => {
     try {
@@ -7887,6 +8104,7 @@ export default function DashboardPage() {
                     setIsEditingMaster(false);
                     setSaveMasterError(null);
                     setShowDeleteMasterConfirm(false);
+                    setPendingDeleteMasterTaskTemplate(null);
                   }}
                   className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
                 >
@@ -8032,6 +8250,193 @@ export default function DashboardPage() {
                   )}
                 </div>
               </section>
+
+              {(selectedMaster.長期案 || isEditingMaster) && (
+                <section>
+                  <h3 className="mb-3 text-base font-bold text-amber-800">長期案排程任務（MVP）</h3>
+                  {!selectedMaster.長期案 && (
+                    <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">請先將此專案儲存為「長期案」，再設定固定排程任務。</p>
+                  )}
+                  {masterTaskTemplatesError && (
+                    <p className="mb-3 rounded-lg bg-amber-100/90 px-3 py-2 text-sm font-medium text-amber-800">{masterTaskTemplatesError}</p>
+                  )}
+                  {selectedMaster.長期案 && (
+                    <div className="space-y-3">
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setShowCreateMasterTaskTemplateForm((v) => !v)}
+                          className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-800 transition hover:bg-amber-100"
+                        >
+                          {showCreateMasterTaskTemplateForm ? "收合新增區" : "新增排程模板"}
+                        </button>
+                      </div>
+                      {showCreateMasterTaskTemplateForm && (
+                        <div className="grid grid-cols-2 gap-3 rounded-xl border border-stone-200 bg-stone-50 p-3">
+                          <InputField
+                            label="任務名稱"
+                            value={newMasterTaskTemplateForm.任務名稱}
+                            onChange={(v) => setNewMasterTaskTemplateForm((f) => ({ ...f, 任務名稱: v }))}
+                          />
+                          <SelectField
+                            label="負責人（可選）"
+                            value={newMasterTaskTemplateForm.負責人}
+                            onChange={(v) => setNewMasterTaskTemplateForm((f) => ({ ...f, 負責人: v }))}
+                            options={[...new Set(["", ...userNames])]}
+                          />
+                          <div className="grid grid-cols-2 gap-2">
+                            <NumberField
+                              label="每月幾號"
+                              value={newMasterTaskTemplateForm.每月幾號}
+                              onChange={(v) => setNewMasterTaskTemplateForm((f) => ({ ...f, 每月幾號: v || "1" }))}
+                            />
+                            <NumberField
+                              label="提前天數"
+                              value={newMasterTaskTemplateForm.提前天數}
+                              onChange={(v) => setNewMasterTaskTemplateForm((f) => ({ ...f, 提前天數: v || "0" }))}
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <TextAreaField
+                              label="備註（建立任務時帶入）"
+                              value={newMasterTaskTemplateForm.備註}
+                              onChange={(v) => setNewMasterTaskTemplateForm((f) => ({ ...f, 備註: v }))}
+                            />
+                          </div>
+                          <div className="col-span-2 flex justify-end">
+                            <button
+                              type="button"
+                              disabled={masterTaskTemplatesSaving || !newMasterTaskTemplateForm.任務名稱.trim()}
+                              onClick={() => void createMasterTaskTemplateRow()}
+                              className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 transition hover:bg-amber-400 disabled:opacity-60"
+                            >
+                              {masterTaskTemplatesSaving ? "新增中..." : "建立模板"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        {masterTaskTemplatesLoading ? (
+                          <p className="text-sm text-stone-500">讀取中...</p>
+                        ) : masterTaskTemplates.length === 0 ? (
+                          <p className="text-sm text-stone-500">尚未設定模板。每日 cron 會依模板自動建立任務。</p>
+                        ) : (
+                          masterTaskTemplates.map((tpl) => (
+                            <div key={tpl.id} className="rounded-xl border border-stone-200 bg-white px-3 py-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-sm font-semibold text-stone-800">
+                                  {tpl.任務名稱} · 每月 {tpl.每月幾號} 號（提前 {tpl.提前天數} 天）
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingMasterTaskTemplateId((prev) => (prev === tpl.id ? null : tpl.id))}
+                                    className="rounded-lg bg-stone-200 px-3 py-1 text-xs font-semibold text-stone-700"
+                                  >
+                                    {editingMasterTaskTemplateId === tpl.id ? "收合" : "編輯"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void toggleMasterTaskTemplateEnabled(tpl)}
+                                    className={`rounded-lg px-3 py-1 text-xs font-semibold ${
+                                      tpl.啟用 ? "bg-emerald-100 text-emerald-800" : "bg-stone-200 text-stone-700"
+                                    }`}
+                                  >
+                                    {tpl.啟用 ? "啟用中" : "已停用"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setPendingDeleteMasterTaskTemplate(tpl)}
+                                    className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-200"
+                                  >
+                                    刪除
+                                  </button>
+                                </div>
+                              </div>
+                              <p className="mt-1 text-xs text-stone-500">
+                                負責人：{tpl.負責人 || "—"}
+                              </p>
+                              <p className="mt-1 text-xs text-stone-500">
+                                下次觸發：{computeNextTemplateTriggerDateText(tpl.每月幾號, tpl.提前天數)} ｜上次建立月份：{tpl.最後觸發鍵 || "尚未建立"}
+                              </p>
+                              {editingMasterTaskTemplateId === tpl.id && (
+                                <div className="mt-2 grid grid-cols-2 gap-2 rounded-lg border border-stone-100 bg-stone-50 p-2">
+                                <InputField
+                                  label="任務名稱"
+                                  value={masterTaskTemplateDrafts[tpl.id]?.任務名稱 ?? ""}
+                                  onChange={(v) =>
+                                    setMasterTaskTemplateDrafts((prev) => ({
+                                      ...prev,
+                                      [tpl.id]: { ...(prev[tpl.id] ?? masterTaskTemplateDrafts[tpl.id]), 任務名稱: v },
+                                    }))
+                                  }
+                                />
+                                <SelectField
+                                  label="負責人"
+                                  value={masterTaskTemplateDrafts[tpl.id]?.負責人 ?? ""}
+                                  onChange={(v) =>
+                                    setMasterTaskTemplateDrafts((prev) => ({
+                                      ...prev,
+                                      [tpl.id]: { ...(prev[tpl.id] ?? masterTaskTemplateDrafts[tpl.id]), 負責人: v },
+                                    }))
+                                  }
+                                  options={[...new Set(["", ...userNames])]}
+                                />
+                                <div className="grid grid-cols-2 gap-2">
+                                  <NumberField
+                                    label="每月幾號"
+                                    value={masterTaskTemplateDrafts[tpl.id]?.每月幾號 ?? "1"}
+                                    onChange={(v) =>
+                                      setMasterTaskTemplateDrafts((prev) => ({
+                                        ...prev,
+                                        [tpl.id]: { ...(prev[tpl.id] ?? masterTaskTemplateDrafts[tpl.id]), 每月幾號: v || "1" },
+                                      }))
+                                    }
+                                  />
+                                  <NumberField
+                                    label="提前天數"
+                                    value={masterTaskTemplateDrafts[tpl.id]?.提前天數 ?? "0"}
+                                    onChange={(v) =>
+                                      setMasterTaskTemplateDrafts((prev) => ({
+                                        ...prev,
+                                        [tpl.id]: { ...(prev[tpl.id] ?? masterTaskTemplateDrafts[tpl.id]), 提前天數: v || "0" },
+                                      }))
+                                    }
+                                  />
+                                </div>
+                                <div className="col-span-2">
+                                  <TextAreaField
+                                    label="備註"
+                                    value={masterTaskTemplateDrafts[tpl.id]?.備註 ?? ""}
+                                    onChange={(v) =>
+                                      setMasterTaskTemplateDrafts((prev) => ({
+                                        ...prev,
+                                        [tpl.id]: { ...(prev[tpl.id] ?? masterTaskTemplateDrafts[tpl.id]), 備註: v },
+                                      }))
+                                    }
+                                  />
+                                </div>
+                                <div className="col-span-2 flex justify-end">
+                                  <button
+                                    type="button"
+                                    disabled={masterTaskTemplatesSaving || !(masterTaskTemplateDrafts[tpl.id]?.任務名稱 ?? "").trim()}
+                                    onClick={() => void saveMasterTaskTemplateRow(tpl.id)}
+                                    className="rounded-lg bg-stone-800 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-stone-700 disabled:opacity-60"
+                                  >
+                                    儲存模板
+                                  </button>
+                                </div>
+                                </div>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )}
 
               <section>
                 <h3 className="mb-3 text-base font-bold text-amber-800">金額與成本</h3>
@@ -8282,6 +8687,38 @@ export default function DashboardPage() {
                   className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white shadow transition hover:bg-red-500 disabled:opacity-50"
                 >
                   {deletingMaster ? "刪除中…" : "確認刪除"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pendingDeleteMasterTaskTemplate && (
+          <div className="fixed inset-0 z-[72] flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl ring-1 ring-stone-200/80" role="dialog" aria-modal="true">
+              <h3 className="text-lg font-bold text-stone-900">確認刪除模板？</h3>
+              <p className="mt-2 text-sm leading-relaxed text-stone-600">
+                將永久刪除此排程模板，未來不會再自動建立該任務。此操作無法復原。
+              </p>
+              <p className="mt-2 text-xs font-medium text-stone-500">
+                模板：{pendingDeleteMasterTaskTemplate.任務名稱}（每月 {pendingDeleteMasterTaskTemplate.每月幾號} 號）
+              </p>
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={deletingMasterTaskTemplateId === pendingDeleteMasterTaskTemplate.id}
+                  onClick={() => setPendingDeleteMasterTaskTemplate(null)}
+                  className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-100 disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={deletingMasterTaskTemplateId === pendingDeleteMasterTaskTemplate.id}
+                  onClick={() => void deleteMasterTaskTemplateRow(pendingDeleteMasterTaskTemplate.id)}
+                  className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white shadow transition hover:bg-red-500 disabled:opacity-50"
+                >
+                  {deletingMasterTaskTemplateId === pendingDeleteMasterTaskTemplate.id ? "刪除中…" : "確認刪除"}
                 </button>
               </div>
             </div>
