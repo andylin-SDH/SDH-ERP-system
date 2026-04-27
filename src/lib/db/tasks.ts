@@ -22,6 +22,7 @@ function rowToTask(r: Record<string, unknown>): TaskRow {
     任務: (r.任務名稱 as string) ?? undefined,
     任務類型: ((r.任務類型 ?? r.任務狀態) as string) ?? undefined,
     任務負責人: (r.負責人 as string) ?? undefined,
+    建立者: (r.建立者 as string) ?? undefined,
     開始時間: 開始 != null && String(開始).trim() !== "" ? String(開始) : undefined,
     完成時間: 完成 != null && String(完成).trim() !== "" ? String(完成) : undefined,
     任務完成: Boolean(r.任務完成),
@@ -46,6 +47,7 @@ export type NewTaskInput = {
   任務名稱: string;
   任務類型?: string | null;
   負責人?: string | null;
+  建立者?: string | null;
   備註?: string | null;
   來源模板ID?: number | null;
   排程鍵?: string | null;
@@ -64,6 +66,7 @@ export async function createTask(payload: NewTaskInput): Promise<TaskRow> {
     任務名稱: payload.任務名稱?.trim() ?? null,
     任務類型: payload.任務類型?.trim() ?? null,
     負責人: payload.負責人?.trim() ?? null,
+    建立者: payload.建立者?.trim() ?? null,
     開始時間: nowIso,
   };
   if (payload.備註 !== undefined) {
@@ -85,11 +88,22 @@ export async function createTask(payload: NewTaskInput): Promise<TaskRow> {
     insertData.到期日 = null;
   }
 
-  const { data, error } = await getSupabase()
+  let { data, error } = await getSupabase()
     .from("任務")
     .insert(insertData)
     .select("*")
     .maybeSingle();
+
+  if (error && (error.code === "42703" || error.code === "PGRST204") && "建立者" in insertData) {
+    delete insertData.建立者;
+    const retry = await getSupabase()
+      .from("任務")
+      .insert(insertData)
+      .select("*")
+      .maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) throw error;
   if (!data) throw new Error("新增任務失敗，未取得資料");

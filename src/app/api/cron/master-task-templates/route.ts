@@ -78,6 +78,7 @@ export async function GET(request: NextRequest) {
           任務名稱: tpl.任務名稱,
           任務類型: tpl.任務類型 ?? undefined,
           負責人: tpl.負責人 ?? undefined,
+          建立者: "系統排程",
           備註: tpl.備註 ?? undefined,
           到期日: toDateString(dueDate),
           來源模板ID: tpl.id,
@@ -93,6 +94,7 @@ export async function GET(request: NextRequest) {
               taskName: tpl.任務名稱,
               projectId: tpl.專案ID,
               projectName: master.專案名稱 ?? undefined,
+              creator: "系統排程",
               note: tpl.備註 ?? undefined,
             });
             if (mailRes.ok) mailed++;

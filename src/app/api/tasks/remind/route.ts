@@ -15,6 +15,7 @@ function rowToTask(r: Record<string, unknown>) {
     專案名稱: (r["專案名稱"] as string) ?? undefined,
     任務: (r["任務名稱"] as string) ?? undefined,
     負責人: (r["負責人"] as string) ?? undefined,
+    建立者: (r["建立者"] as string) ?? undefined,
     備註: (r["備註"] as string) ?? undefined,
   };
 }
@@ -31,8 +32,7 @@ export async function POST(request: NextRequest) {
 
     const { data, error } = await getSupabase()
       .from("任務")
-      // Supabase select parser 對中文欄位需加上雙引號
-      .select('"專案ID","專案名稱","任務名稱","負責人","備註"')
+      .select("*")
       .eq("任務ID", 任務ID)
       .maybeSingle();
 
@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
       taskName: task.任務 ?? "",
       projectId: task.專案ID ?? "",
       projectName: task.專案名稱,
+      creator: task.建立者,
       note: task.備註,
     });
 

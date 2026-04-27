@@ -21,6 +21,7 @@ export async function sendTaskAssignedEmail(params: {
   taskName: string;
   projectId: string;
   projectName?: string;
+  creator?: string;
   note?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   if (!resend) {
@@ -28,12 +29,13 @@ export async function sendTaskAssignedEmail(params: {
     return { ok: false, error: "RESEND_API_KEY 未設定" };
   }
   try {
-    const { to, taskName, projectId, projectName, note } = params;
+    const { to, taskName, projectId, projectName, creator, note } = params;
     const appUrl =
       process.env.NEXT_PUBLIC_APP_URL ??
       (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
     const loginUrl = `${appUrl}/`;
     const taskTitle = taskName || "未命名任務";
+    const trimmedCreator = String(creator ?? "").trim();
     const trimmedNote = String(note ?? "").trim();
     const { error } = await resend.emails.send({
       from: FROM_EMAIL,
@@ -77,6 +79,12 @@ export async function sendTaskAssignedEmail(params: {
                       <tr>
                         <td style="padding:8px 0;color:#64748b;font-size:13px;">專案名稱</td>
                         <td style="padding:8px 0;color:#475569;font-size:14px;">${escapeHtml(projectName)}</td>
+                      </tr>
+                      ` : ""}
+                      ${trimmedCreator ? `
+                      <tr>
+                        <td style="padding:8px 0;color:#64748b;font-size:13px;">建立者</td>
+                        <td style="padding:8px 0;color:#475569;font-size:14px;">${escapeHtml(trimmedCreator)}</td>
                       </tr>
                       ` : ""}
                       ${trimmedNote ? `
@@ -128,6 +136,7 @@ export async function sendTaskDueSoonEmail(params: {
   taskName: string;
   projectId: string;
   projectName?: string;
+  creator?: string;
   note?: string;
   dueDate: string;
   /** 已逾期為 true，否則為即將到期（含當天起算 N 天內） */
@@ -138,12 +147,13 @@ export async function sendTaskDueSoonEmail(params: {
     return { ok: false, error: "RESEND_API_KEY 未設定" };
   }
   try {
-    const { to, taskName, projectId, projectName, note, dueDate, isOverdue } = params;
+    const { to, taskName, projectId, projectName, creator, note, dueDate, isOverdue } = params;
     const appUrl =
       process.env.NEXT_PUBLIC_APP_URL ??
       (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
     const loginUrl = `${appUrl}/`;
     const taskTitle = taskName || "未命名任務";
+    const trimmedCreator = String(creator ?? "").trim();
     const trimmedNote = String(note ?? "").trim();
     const subject = isOverdue
       ? `【SDH ERP】任務已逾期：${taskTitle}`
@@ -184,6 +194,8 @@ export async function sendTaskDueSoonEmail(params: {
                       <td style="padding:8px 0;color:#475569;font-size:14px;font-family:monospace;">${escapeHtml(projectId || "—")}</td></tr>
                   ${projectName ? `<tr><td style="padding:8px 0;color:#64748b;font-size:13px;">專案名稱</td>
                       <td style="padding:8px 0;color:#475569;font-size:14px;">${escapeHtml(projectName)}</td></tr>` : ""}
+                  ${trimmedCreator ? `<tr><td style="padding:8px 0;color:#64748b;font-size:13px;">建立者</td>
+                      <td style="padding:8px 0;color:#475569;font-size:14px;">${escapeHtml(trimmedCreator)}</td></tr>` : ""}
                   ${trimmedNote ? `<tr><td style="padding:8px 0;color:#64748b;font-size:13px;vertical-align:top;">備註</td>
                       <td style="padding:8px 0;color:#475569;font-size:14px;white-space:pre-wrap;">${escapeHtml(trimmedNote)}</td></tr>` : ""}
                 </table>

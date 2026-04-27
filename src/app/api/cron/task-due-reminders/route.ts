@@ -52,6 +52,7 @@ export async function GET(request: NextRequest) {
         taskName: t.任務 ?? "",
         projectId: t.專案ID ?? "",
         projectName: t.專案名稱,
+        creator: t.建立者,
         note: t.備註,
         dueDate: t.到期日 ?? "",
         isOverdue,

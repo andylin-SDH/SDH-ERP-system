@@ -1347,7 +1347,7 @@ export default function DashboardPage() {
       /** 任務表：系統時間欄位併入可見清單（舊 ③ 設定未勾選時仍顯示） */
       if (tableKey === "tasks") {
         const merged = [...normalized];
-        for (const sys of ["開始時間", "完成時間"] as const) {
+        for (const sys of ["建立者", "開始時間", "完成時間"] as const) {
           if (allKeys.includes(sys) && !merged.includes(sys)) merged.push(sys);
         }
         return merged.filter((k) => allKeys.includes(k));
@@ -8900,6 +8900,9 @@ export default function DashboardPage() {
               <div className="mb-4 space-y-1">
                 <p className="text-xs font-medium text-stone-500">專案ID：{selectedTask.專案ID ?? "—"}</p>
                 <p className="text-sm font-semibold text-amber-800">{selectedTask.專案名稱 ?? "—"}</p>
+                <p className="text-xs text-stone-500">
+                  建立者：<span className="font-medium text-stone-700">{selectedTask.建立者 ?? "—"}</span>
+                </p>
                 <p className="text-xs text-stone-500">
                   開始時間（系統）：<span className="font-medium text-stone-700">{formatTaskDisplayTime(selectedTask.開始時間)}</span>
                 </p>

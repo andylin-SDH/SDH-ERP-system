@@ -4,6 +4,10 @@ import { getEmailByNameOrEmail } from "@/modules/users";
 import { sendTaskAssignedEmail } from "@/lib/email";
 import { requireAuth } from "@/lib/auth/api";
 
+function taskCreatorLabel(user: { name?: string | null; email?: string | null }): string {
+  return String(user.name ?? "").trim() || String(user.email ?? "").trim();
+}
+
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
@@ -41,12 +45,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "任務名稱 為必填" }, { status: 400 });
     }
     const 專案名稱 = (body?.專案名稱 ?? "").toString().trim() || null;
+    const 建立者 = taskCreatorLabel(auth.user);
     const task = await createTask({
       專案ID,
       專案名稱: 專案名稱 ?? null,
       任務名稱,
       任務類型: body?.任務類型 ?? null,
       負責人: body?.負責人 ?? null,
+      建立者,
       備註: body?.備註 !== undefined ? (body.備註 === null || body.備註 === "" ? null : String(body.備註)) : undefined,
       到期日: body?.到期日 !== undefined ? (body.到期日 === null || body.到期日 === "" ? null : String(body.到期日)) : undefined,
     });
@@ -60,6 +66,7 @@ export async function POST(request: NextRequest) {
             taskName: 任務名稱,
             projectId: 專案ID,
             projectName: 專案名稱 || undefined,
+            creator: 建立者 || undefined,
             note: body?.備註 ?? undefined,
           }).catch((e) => console.error("POST /api/tasks 寄送通知失敗", e));
         }
@@ -111,6 +118,7 @@ export async function PATCH(request: NextRequest) {
             taskName: task.任務 ?? "",
             projectId: task.專案ID ?? "",
             projectName: task.專案名稱 ?? undefined,
+            creator: task.建立者 ?? undefined,
             note: task.備註 ?? undefined,
           }).catch((e) => console.error("PATCH /api/tasks 寄送通知失敗", e));
         }
