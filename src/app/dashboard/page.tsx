@@ -115,6 +115,7 @@ function sortPayoutColumnsForDisplay(cols: string[]): string[] {
 }
 
 const RENDER_CHUNK_SIZE = 120;
+type MasterCreatedSortDirection = "desc" | "asc";
 
 /** 金額顯示用（數字型態，千分位） */
 function formatAmount(v: string | null | undefined): string {
@@ -138,6 +139,17 @@ function formatTaskDisplayTime(iso: string | null | undefined): string {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
+  });
+}
+
+function sortMasterRowsByCreatedAt(rows: MasterRow[], direction: MasterCreatedSortDirection): MasterRow[] {
+  return [...rows].sort((a, b) => {
+    const ta = Date.parse(a.created_at ?? "") || 0;
+    const tb = Date.parse(b.created_at ?? "") || 0;
+    if (ta !== tb) return direction === "desc" ? tb - ta : ta - tb;
+    return direction === "desc"
+      ? String(b.專案ID ?? "").localeCompare(String(a.專案ID ?? ""), "zh-TW")
+      : String(a.專案ID ?? "").localeCompare(String(b.專案ID ?? ""), "zh-TW");
   });
 }
 
@@ -832,6 +844,16 @@ export default function DashboardPage() {
     }
     return "all";
   });
+  const [masterCreatedSortDirection, setMasterCreatedSortDirection] = useState<MasterCreatedSortDirection>(() => {
+    if (typeof window === "undefined") return "desc";
+    try {
+      const v = localStorage.getItem("sdh-master-created-sort-direction");
+      if (v === "asc" || v === "desc") return v;
+    } catch {
+      /* ignore */
+    }
+    return "desc";
+  });
   /** 行動版：側欄抽屜；桌面：側欄收合為窄欄 */
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -1407,9 +1429,14 @@ export default function DashboardPage() {
     [me, visibilityRules, partnerByKolName]
   );
 
+  const masterListByCreatedAt = useMemo(
+    () => sortMasterRowsByCreatedAt(masterList, masterCreatedSortDirection),
+    [masterList, masterCreatedSortDirection]
+  );
+
   const filteredMasterList = useMemo(
-    () => filterRowsByVisibility(masterList as unknown as Record<string, unknown>[], "master") as unknown as MasterRow[],
-    [masterList, filterRowsByVisibility]
+    () => filterRowsByVisibility(masterListByCreatedAt as unknown as Record<string, unknown>[], "master") as unknown as MasterRow[],
+    [masterListByCreatedAt, filterRowsByVisibility]
   );
 
   /** 大總表頂部「進行中／已結案」數量（② 可見範圍內） */
@@ -2502,6 +2529,14 @@ export default function DashboardPage() {
 
   useEffect(() => {
     try {
+      localStorage.setItem("sdh-master-created-sort-direction", masterCreatedSortDirection);
+    } catch {
+      /* ignore */
+    }
+  }, [masterCreatedSortDirection]);
+
+  useEffect(() => {
+    try {
       localStorage.setItem("sdh-tasks-lifecycle-tab", tasksLifecycleTab);
     } catch {
       /* ignore */
@@ -3378,6 +3413,31 @@ export default function DashboardPage() {
                       <span className="text-[10px] text-stone-400 group-hover:text-amber-600">切換</span>
                     </div>
                     <div className="mt-0.5 text-lg font-bold tabular-nums text-stone-900">{masterLongTermCounts.longTermOnly}</div>
+                  </button>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-stone-200/80 pt-3">
+                  <span className="text-[11px] font-semibold text-stone-500">建立時間排序</span>
+                  <button
+                    type="button"
+                    onClick={() => setMasterCreatedSortDirection("desc")}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                      masterCreatedSortDirection === "desc"
+                        ? "bg-amber-500 text-slate-900 shadow-sm ring-1 ring-amber-400/80"
+                        : "border border-stone-200 bg-white text-stone-600 hover:bg-amber-50"
+                    }`}
+                  >
+                    新到舊
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMasterCreatedSortDirection("asc")}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                      masterCreatedSortDirection === "asc"
+                        ? "bg-amber-500 text-slate-900 shadow-sm ring-1 ring-amber-400/80"
+                        : "border border-stone-200 bg-white text-stone-600 hover:bg-amber-50"
+                    }`}
+                  >
+                    舊到新
                   </button>
                 </div>
                 <p className="mt-2 text-[11px] text-stone-500">點選卡片可切換狀態；「僅長期案」為開關式篩選。</p>
