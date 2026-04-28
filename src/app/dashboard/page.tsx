@@ -280,10 +280,8 @@ const PARTNER_EXPAND_SECTION_KEYS: { title: string; keys: string[] }[] = [
   { title: "夥伴類型與其他", keys: ["分級", "是否有經營 私域群", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴"] },
 ];
 
-function masterRowRevenue(row: MasterRow): number {
-  const r = row.專案營收;
-  if (r != null && String(r).trim() !== "") return parseNumericField(r);
-  return parseNumericField(calc專案營收(row.專案總金額未稅 ?? "", row.專案成本 ?? "", row.KOL費用未稅 ?? ""));
+function masterRowUntaxedTotal(row: MasterRow): number {
+  return parseNumericField(row.專案總金額未稅);
 }
 
 function masterRowCostSum(row: MasterRow): number {
@@ -1585,14 +1583,14 @@ export default function DashboardPage() {
     const pendingTasks = filteredTasks.filter(
       (t) => !t.任務完成 && taskAssigneeIsUser(t, uName, uEmail)
     ).length;
-    let totalRev = 0;
+    let totalUntaxedAmount = 0;
     let totalCost = 0;
     for (const row of masterRowsForOverviewKpis) {
-      totalRev += masterRowRevenue(row);
+      totalUntaxedAmount += masterRowUntaxedTotal(row);
       totalCost += masterRowCostSum(row);
     }
-    const grossMarginPct = totalRev > 0 ? ((totalRev - totalCost) / totalRev) * 100 : null;
-    return { projectCount, pendingTasks, totalRevenue: totalRev, totalCost, grossMarginPct };
+    const grossMarginPct = totalUntaxedAmount > 0 ? ((totalUntaxedAmount - totalCost) / totalUntaxedAmount) * 100 : null;
+    return { projectCount, pendingTasks, totalRevenue: totalUntaxedAmount, totalCost, grossMarginPct };
   }, [me, filteredMasterList, filteredTasks, overviewDirectorCompanyView, overviewMyTaskProjectIds, masterRowsForOverviewKpis, partnerByKolName]);
 
   const masterVisibleCols = useMemo(() => getVisibleColumnKeys("master"), [getVisibleColumnKeys]);

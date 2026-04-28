@@ -15,7 +15,7 @@ export type OverviewKpiKey = (typeof OVERVIEW_KPI_KEYS)[number];
 export const OVERVIEW_KPI_LABELS: Record<OverviewKpiKey, string> = {
   projectCount: "總專案數",
   pendingTasks: "待處理任務",
-  totalRevenue: "總專案營收",
+  totalRevenue: "總金額未稅",
   grossMargin: "毛利率",
   totalCost: "總成本",
 };
