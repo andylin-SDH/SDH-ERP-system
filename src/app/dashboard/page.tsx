@@ -189,6 +189,108 @@ function emptyInvoiceDraftRow(): Record<string, string> {
   return Object.fromEntries(INVOICE_DRAFT_KEYS.map((k) => [k, ""])) as Record<string, string>;
 }
 
+type InvoiceProjectOption = {
+  id: string;
+  name: string;
+  searchText: string;
+};
+
+function invoiceProjectDisplayName(option: InvoiceProjectOption | undefined, fallbackId: string): string {
+  if (!option) return fallbackId;
+  return option.name || option.id;
+}
+
+function InvoiceProjectSearchSelect({
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  options: InvoiceProjectOption[];
+  disabled?: boolean;
+  onChange: (projectId: string) => void;
+}) {
+  const normalizedValue = String(value ?? "").trim();
+  const selected = options.find((opt) => opt.id === normalizedValue);
+  const [query, setQuery] = useState(() => invoiceProjectDisplayName(selected, normalizedValue));
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    setQuery(invoiceProjectDisplayName(selected, normalizedValue));
+  }, [normalizedValue, selected]);
+
+  const filteredOptions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const rows = q
+      ? options.filter((opt) => opt.searchText.toLowerCase().includes(q))
+      : options;
+    return rows.slice(0, 30);
+  }, [options, query]);
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={query}
+        disabled={disabled}
+        placeholder="搜尋專案名稱"
+        onFocus={() => setOpen(true)}
+        onChange={(e) => {
+          const next = e.target.value;
+          setQuery(next);
+          setOpen(true);
+          if (next.trim() === "") onChange("");
+        }}
+        onBlur={() => {
+          window.setTimeout(() => {
+            setOpen(false);
+            const current = options.find((opt) => opt.id === String(value ?? "").trim());
+            setQuery(invoiceProjectDisplayName(current, String(value ?? "").trim()));
+          }, 120);
+        }}
+        className="w-full min-w-[10rem] rounded border border-stone-200 bg-white px-2 py-1.5 text-xs font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none disabled:opacity-60"
+      />
+      {open && !disabled && (
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-72 overflow-auto rounded-lg border border-stone-200 bg-white py-1 text-xs shadow-xl">
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onChange("");
+              setQuery("");
+              setOpen(false);
+            }}
+            className="block w-full px-3 py-2 text-left text-stone-500 hover:bg-amber-50 hover:text-stone-900"
+          >
+            不綁定專案
+          </button>
+          {filteredOptions.length === 0 ? (
+            <div className="px-3 py-2 text-stone-400">沒有符合的專案</div>
+          ) : (
+            filteredOptions.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onChange(opt.id);
+                  setQuery(invoiceProjectDisplayName(opt, opt.id));
+                  setOpen(false);
+                }}
+                className="block w-full px-3 py-2 text-left hover:bg-amber-50"
+              >
+                <span className="block truncate font-medium text-stone-900">{opt.name || opt.id}</span>
+                <span className="block truncate text-[10px] text-stone-500">{opt.id}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function invoiceRowToInsertInput(row: InvoiceRow): InvoiceInsertInput {
   return {
     專案ID: row.專案ID ?? "",
@@ -924,14 +1026,24 @@ export default function DashboardPage() {
     const names = partners.map((p) => String(p.合作夥伴名稱 ?? "").trim()).filter(Boolean);
     return [...new Set(names)].sort((a, b) => a.localeCompare(b, "zh-Hant"));
   }, [partners]);
-  /** 發票新增：專案ID 下拉／datalist 選項 */
-  const invoiceProjectIdOptions = useMemo(
-    () =>
-      [...new Set(masterList.map((m) => String(m.專案ID ?? "").trim()).filter(Boolean))].sort((a, b) =>
-        a.localeCompare(b, "zh-TW")
-      ),
-    [masterList]
-  );
+  /** 發票：用專案名稱搜尋，選到後仍寫入專案ID */
+  const invoiceProjectOptions = useMemo<InvoiceProjectOption[]>(() => {
+    const byId = new Map<string, InvoiceProjectOption>();
+    for (const m of masterList) {
+      const id = String(m.專案ID ?? "").trim();
+      if (!id || byId.has(id)) continue;
+      const name = String(m.專案名稱 ?? "").trim();
+      byId.set(id, {
+        id,
+        name,
+        searchText: `${name} ${id}`.trim(),
+      });
+    }
+    return [...byId.values()].sort((a, b) => {
+      const byName = invoiceProjectDisplayName(a, a.id).localeCompare(invoiceProjectDisplayName(b, b.id), "zh-TW");
+      return byName || a.id.localeCompare(b.id, "zh-TW");
+    });
+  }, [masterList]);
   /** 刪除專案確認視窗：連動筆數（任務、分潤列） */
   const masterDeleteRelatedCounts = useMemo(() => {
     if (!selectedMaster) return { tasks: 0, payouts: 0 };
@@ -7220,6 +7332,24 @@ export default function DashboardPage() {
                                 const val = v == null ? "" : String(v);
                                 const inputCls =
                                   "w-full min-w-[4rem] rounded border border-stone-200 bg-white px-2 py-1 text-xs text-stone-800 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none disabled:opacity-60";
+                                if (k === "專案ID") {
+                                  return (
+                                    <td key={k} className="min-w-[11rem] max-w-[18rem] px-2 py-2 align-middle">
+                                      <InvoiceProjectSearchSelect
+                                        value={val}
+                                        options={invoiceProjectOptions}
+                                        disabled={saving}
+                                        onChange={(projectId) => {
+                                          setInvoiceEditError(null);
+                                          setInvoices((prev) =>
+                                            prev.map((r) => (r.id === rowId ? { ...r, 專案ID: projectId } : r))
+                                          );
+                                          schedulePersistInvoiceRow(rowId);
+                                        }}
+                                      />
+                                    </td>
+                                  );
+                                }
                                 if (k === "備註") {
                                   return (
                                     <td key={k} className="max-w-[14rem] px-2 py-2 align-top">
@@ -7242,7 +7372,7 @@ export default function DashboardPage() {
                                     </td>
                                   );
                                 }
-                                const wide = k === "發票號碼" || k === "專案ID";
+                                const wide = k === "發票號碼";
                                 return (
                                   <td key={k} className={`px-2 py-2 align-middle ${wide ? "min-w-[7rem] max-w-[11rem]" : "min-w-[4.5rem] max-w-[8rem]"}`}>
                                     <input
@@ -7259,7 +7389,7 @@ export default function DashboardPage() {
                                       onBlur={() => {
                                         flushPersistInvoiceRow(rowId);
                                       }}
-                                      className={`${inputCls} ${k === "專案ID" ? "font-medium" : ""}`}
+                                      className={inputCls}
                                     />
                                   </td>
                                 );
@@ -7453,20 +7583,33 @@ export default function DashboardPage() {
                       <tr key={rowIdx} className="bg-white">
                         {INVOICE_DRAFT_KEYS.map((k) => (
                           <td key={k} className="border-b border-stone-100 p-1 align-top">
-                            <input
-                              type="text"
-                              value={row[k] ?? ""}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setInvoiceDraftRows((prev) => {
-                                  const next = [...prev];
-                                  next[rowIdx] = { ...next[rowIdx], [k]: v };
-                                  return next;
-                                });
-                              }}
-                              list={k === "專案ID" ? "invoice-draft-project-ids" : undefined}
-                              className="w-full min-w-[5rem] rounded border border-stone-200 bg-stone-50 px-1.5 py-1.5 text-stone-900 focus:border-amber-400/70 focus:outline-none"
-                            />
+                            {k === "專案ID" ? (
+                              <InvoiceProjectSearchSelect
+                                value={row[k] ?? ""}
+                                options={invoiceProjectOptions}
+                                onChange={(projectId) => {
+                                  setInvoiceDraftRows((prev) => {
+                                    const next = [...prev];
+                                    next[rowIdx] = { ...next[rowIdx], [k]: projectId };
+                                    return next;
+                                  });
+                                }}
+                              />
+                            ) : (
+                              <input
+                                type="text"
+                                value={row[k] ?? ""}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setInvoiceDraftRows((prev) => {
+                                    const next = [...prev];
+                                    next[rowIdx] = { ...next[rowIdx], [k]: v };
+                                    return next;
+                                  });
+                                }}
+                                className="w-full min-w-[5rem] rounded border border-stone-200 bg-stone-50 px-1.5 py-1.5 text-stone-900 focus:border-amber-400/70 focus:outline-none"
+                              />
+                            )}
                           </td>
                         ))}
                         <td className="border-b border-stone-100 p-1 text-center align-top">
@@ -7484,11 +7627,6 @@ export default function DashboardPage() {
                   </tbody>
                 </table>
               </div>
-              <datalist id="invoice-draft-project-ids">
-                {invoiceProjectIdOptions.map((id) => (
-                  <option key={id} value={id} />
-                ))}
-              </datalist>
               <button
                 type="button"
                 onClick={() => setInvoiceDraftRows((prev) => [...prev, emptyInvoiceDraftRow()])}

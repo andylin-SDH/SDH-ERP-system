@@ -119,7 +119,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "員工分潤日期", label: "員工分潤日期" },
   ],
   invoices: [
-    { key: "專案ID", label: "專案ID（可空白）" },
+    { key: "專案ID", label: "對應專案（可空白）" },
     { key: "發票號碼", label: "發票號碼" },
     { key: "發票日期", label: "發票日期" },
     { key: "發票金額未稅", label: "發票金額未稅" },
