@@ -7,7 +7,7 @@ import type { User } from "@/lib/types";
 import type { TaskRow } from "@/modules/tasks";
 import type { PartnerRow } from "@/modules/partners";
 import type { MasterRow } from "@/lib/db/master";
-import type { InvoiceRow, InvoiceInsertInput, FinanceRow } from "@/modules/finance";
+import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, PaymentRecordRow } from "@/modules/finance";
 import type { FinanceUpdateFields } from "@/lib/db/finance";
 import type { PayoutRow } from "@/lib/db/payout";
 import { applyDedupeRules } from "@/lib/payout-dedupe";
@@ -189,6 +189,12 @@ function emptyInvoiceDraftRow(): Record<string, string> {
   return Object.fromEntries(INVOICE_DRAFT_KEYS.map((k) => [k, ""])) as Record<string, string>;
 }
 
+const PAYMENT_RECORD_KEYS = ["發票號碼", "付款日期", "付款專案", "付款對象", "付款金額", "備註"] as const;
+
+function emptyPaymentRecordDraftRow(): Record<string, string> {
+  return Object.fromEntries(PAYMENT_RECORD_KEYS.map((k) => [k, ""])) as Record<string, string>;
+}
+
 type InvoiceProjectOption = {
   id: string;
   name: string;
@@ -347,6 +353,17 @@ function invoiceRowToInsertInput(row: InvoiceRow): InvoiceInsertInput {
     廠商實付金額: row.廠商實付金額 ?? "",
     廠商付款狀態: row.廠商付款狀態 ?? "",
     廠商付款日期: row.廠商付款日期 ?? "",
+    備註: row.備註 ?? "",
+  };
+}
+
+function paymentRecordRowToInput(row: PaymentRecordRow): PaymentRecordInput {
+  return {
+    發票號碼: row.發票號碼 ?? "",
+    付款日期: row.付款日期 ?? "",
+    付款專案: row.付款專案 ?? "",
+    付款對象: row.付款對象 ?? "",
+    付款金額: row.付款金額 ?? "",
     備註: row.備註 ?? "",
   };
 }
@@ -954,6 +971,13 @@ export default function DashboardPage() {
   const invoiceSaveInflightRef = useRef<Set<string>>(new Set());
   const invoiceSavePendingRef = useRef<Set<string>>(new Set());
   const invoiceSaveDebounceRef = useRef<Map<string, number>>(new Map());
+  const [paymentRecords, setPaymentRecords] = useState<PaymentRecordRow[]>([]);
+  const [paymentEditSavingId, setPaymentEditSavingId] = useState<string | null>(null);
+  const [paymentEditError, setPaymentEditError] = useState<string | null>(null);
+  const paymentRecordsRef = useRef<PaymentRecordRow[]>([]);
+  const paymentSaveInflightRef = useRef<Set<string>>(new Set());
+  const paymentSavePendingRef = useRef<Set<string>>(new Set());
+  const paymentSaveDebounceRef = useRef<Map<string, number>>(new Map());
   const [finance, setFinance] = useState<FinanceRow[]>([]);
   const [financeEditSaving專案ID, setFinanceEditSaving專案ID] = useState<string | null>(null);
   const [financeEditError, setFinanceEditError] = useState<string | null>(null);
@@ -1007,6 +1031,7 @@ export default function DashboardPage() {
   const [payoutWorkflowTab, setPayoutWorkflowTab] = useState<PayoutWorkflowTabKey>("pending_vendor");
   const [financeSearch, setFinanceSearch] = useState("");
   const [invoicesSearch, setInvoicesSearch] = useState("");
+  const [paymentRecordsSearch, setPaymentRecordsSearch] = useState("");
   const [tasksLifecycleTab, setTasksLifecycleTab] = useState<"in_progress" | "completed">(() => {
     if (typeof window === "undefined") return "in_progress";
     try {
@@ -1017,12 +1042,16 @@ export default function DashboardPage() {
     }
     return "in_progress";
   });
-  /** 財務分頁內：依專案列 vs 發票清冊（發票已併入財務） */
-  const [financeSubTab, setFinanceSubTab] = useState<"byProject" | "invoices">("byProject");
+  /** 財務分頁內：依專案列 vs 發票清冊 vs 付款記錄 */
+  const [financeSubTab, setFinanceSubTab] = useState<"byProject" | "invoices" | "payments">("byProject");
   const [showInvoiceCreateModal, setShowInvoiceCreateModal] = useState(false);
   const [invoiceDraftRows, setInvoiceDraftRows] = useState<Array<Record<string, string>>>([]);
   const [savingInvoices, setSavingInvoices] = useState(false);
   const [invoiceCreateError, setInvoiceCreateError] = useState<string | null>(null);
+  const [showPaymentCreateModal, setShowPaymentCreateModal] = useState(false);
+  const [paymentDraftRows, setPaymentDraftRows] = useState<Array<Record<string, string>>>([]);
+  const [savingPayments, setSavingPayments] = useState(false);
+  const [paymentCreateError, setPaymentCreateError] = useState<string | null>(null);
   /** 連號精靈：前綴、起始數字、筆數、數字補零位數（空＝不補） */
   const [invoiceSeqPrefix, setInvoiceSeqPrefix] = useState("");
   const [invoiceSeqStart, setInvoiceSeqStart] = useState("1");
@@ -1035,6 +1064,7 @@ export default function DashboardPage() {
   const [tasksRenderCount, setTasksRenderCount] = useState(RENDER_CHUNK_SIZE);
   const [financeRenderCount, setFinanceRenderCount] = useState(RENDER_CHUNK_SIZE);
   const [invoicesRenderCount, setInvoicesRenderCount] = useState(RENDER_CHUNK_SIZE);
+  const [paymentRecordsRenderCount, setPaymentRecordsRenderCount] = useState(RENDER_CHUNK_SIZE);
   /** 讓輸入先回應，再延後套用篩選，降低卡頓 */
   const deferredMasterSearch = useDeferredValue(masterSearch);
   const deferredPartnersSearch = useDeferredValue(partnersSearch);
@@ -1042,6 +1072,7 @@ export default function DashboardPage() {
   const deferredPayoutSearch = useDeferredValue(payoutSearch);
   const deferredFinanceSearch = useDeferredValue(financeSearch);
   const deferredInvoicesSearch = useDeferredValue(invoicesSearch);
+  const deferredPaymentRecordsSearch = useDeferredValue(paymentRecordsSearch);
 
   const payoutDefaults = useMemo(
     () => systemConfig?.master_payout_defaults ?? MASTER_PAYOUT_DEFAULTS,
@@ -1556,6 +1587,14 @@ export default function DashboardPage() {
     }
     return m;
   }, [partners]);
+  const createMasterSelectedPartner = useMemo(
+    () => partnerByKolName.get(String(createForm.KOL名稱 ?? "").trim()),
+    [partnerByKolName, createForm.KOL名稱]
+  );
+  const selectedMasterPartner = useMemo(() => {
+    const kolName = isEditingMaster ? editMasterForm.KOL名稱 : selectedMaster?.KOL名稱;
+    return partnerByKolName.get(String(kolName ?? "").trim());
+  }, [partnerByKolName, isEditingMaster, editMasterForm.KOL名稱, selectedMaster?.KOL名稱]);
 
   /** 列過濾：依 ② 資料可見規則，非 fullAccess 時只顯示 match_fields 符合登入者姓名/Email 的列；空字串視同未勾選 */
   const filterRowsByVisibility = useCallback(
@@ -1769,6 +1808,7 @@ export default function DashboardPage() {
   }, [payoutColsForDisplay, payoutWorkflowTab]);
   const financeVisibleCols = useMemo(() => getVisibleColumnKeys("finance"), [getVisibleColumnKeys]);
   const invoicesVisibleCols = useMemo(() => getVisibleColumnKeys("invoices"), [getVisibleColumnKeys]);
+  const paymentRecordsVisibleCols = useMemo(() => getVisibleColumnKeys("paymentRecords"), [getVisibleColumnKeys]);
 
   const financeByProjectId = useMemo(() => {
     const m = new Map<string, FinanceRow>();
@@ -1960,6 +2000,15 @@ export default function DashboardPage() {
     () => filterRowsBySearch(invoices as unknown as Record<string, unknown>[], invoicesVisibleCols, deferredInvoicesSearch),
     [invoices, invoicesVisibleCols, deferredInvoicesSearch, filterRowsBySearch]
   );
+  const searchedPaymentRecords = useMemo(
+    () =>
+      filterRowsBySearch(
+        paymentRecords as unknown as Record<string, unknown>[],
+        paymentRecordsVisibleCols,
+        deferredPaymentRecordsSearch
+      ) as unknown as PaymentRecordRow[],
+    [paymentRecords, paymentRecordsVisibleCols, deferredPaymentRecordsSearch, filterRowsBySearch]
+  );
   const visibleMasterRows = useMemo(
     () => searchedMasterList.slice(0, masterRenderCount),
     [searchedMasterList, masterRenderCount]
@@ -1983,6 +2032,10 @@ export default function DashboardPage() {
   const visibleInvoicesRows = useMemo(
     () => searchedInvoices.slice(0, invoicesRenderCount),
     [searchedInvoices, invoicesRenderCount]
+  );
+  const visiblePaymentRecordsRows = useMemo(
+    () => searchedPaymentRecords.slice(0, paymentRecordsRenderCount),
+    [searchedPaymentRecords, paymentRecordsRenderCount]
   );
 
   async function updateProjectStatusInline(row: MasterRow, nextStatus: string) {
@@ -2143,6 +2196,22 @@ export default function DashboardPage() {
   }, [activeSection, financeSubTab, searchedInvoices.length]);
 
   useEffect(() => {
+    if (activeSection !== "finance" || financeSubTab !== "payments") return;
+    setPaymentRecordsRenderCount(RENDER_CHUNK_SIZE);
+    if (searchedPaymentRecords.length <= RENDER_CHUNK_SIZE) return;
+    let timer: number | undefined;
+    const tick = () => {
+      setPaymentRecordsRenderCount((prev) => {
+        const next = Math.min(prev + RENDER_CHUNK_SIZE, searchedPaymentRecords.length);
+        if (next < searchedPaymentRecords.length) timer = window.setTimeout(tick, 0);
+        return next;
+      });
+    };
+    timer = window.setTimeout(tick, 0);
+    return () => { if (timer) window.clearTimeout(timer); };
+  }, [activeSection, financeSubTab, searchedPaymentRecords.length]);
+
+  useEffect(() => {
     // 切換選取專案時，重置編輯狀態並同步表單
     if (!selectedMaster) {
       setIsEditingMaster(false);
@@ -2291,8 +2360,8 @@ export default function DashboardPage() {
 
   const refreshDashboardData = useCallback(
     async (
-      targets: Array<"users" | "master" | "tasks" | "partners" | "myVisibility" | "visibilityRules" | "systemConfig" | "invoices" | "finance" | "payout"> = [
-        "users", "master", "tasks", "partners", "myVisibility", "visibilityRules", "systemConfig", "invoices", "finance", "payout",
+      targets: Array<"users" | "master" | "tasks" | "partners" | "myVisibility" | "visibilityRules" | "systemConfig" | "invoices" | "finance" | "payout" | "payments"> = [
+        "users", "master", "tasks", "partners", "myVisibility", "visibilityRules", "systemConfig", "invoices", "finance", "payout", "payments",
       ]
     ) => {
       const need = new Set(targets);
@@ -2407,6 +2476,16 @@ export default function DashboardPage() {
             })
         );
       }
+      if (need.has("payments") || need.has("finance")) {
+        reqs.push(
+          fetch("/api/finance-payments", { cache: "no-store" })
+            .then(safeResJson)
+            .then((res) => {
+              if (!(res as { ok?: boolean }).ok) return;
+              setPaymentRecords(((res as { payments?: PaymentRecordRow[] }).payments) ?? []);
+            })
+        );
+      }
       if (need.has("payout")) {
         reqs.push(
           fetch("/api/payout", { cache: "no-store" })
@@ -2499,6 +2578,86 @@ export default function DashboardPage() {
     return () => {
       for (const t of invoiceSaveDebounceRef.current.values()) window.clearTimeout(t);
       invoiceSaveDebounceRef.current.clear();
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    paymentRecordsRef.current = paymentRecords;
+  }, [paymentRecords]);
+
+  /** 付款記錄：整列可編輯，延遲寫回 DB */
+  const persistPaymentRecordById = useCallback(
+    async (id: string) => {
+      if (!id) return;
+      if (paymentSaveInflightRef.current.has(id)) {
+        paymentSavePendingRef.current.add(id);
+        return;
+      }
+      const row = paymentRecordsRef.current.find((r) => r.id === id);
+      if (!row?.id) return;
+      paymentSaveInflightRef.current.add(id);
+      setPaymentEditSavingId(id);
+      setPaymentEditError(null);
+      try {
+        const res = await fetch("/api/finance-payments", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: row.id, ...paymentRecordRowToInput(row) }),
+        });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string; payment?: PaymentRecordRow };
+        if (!res.ok || data.ok === false) {
+          setPaymentEditError(String(data.error ?? "儲存失敗"));
+          return;
+        }
+        if (data.payment) {
+          setPaymentRecords((prev) => prev.map((r) => (r.id === id ? { ...r, ...data.payment } : r)));
+        }
+      } catch (e) {
+        setPaymentEditError(e instanceof Error ? e.message : "儲存失敗");
+      } finally {
+        paymentSaveInflightRef.current.delete(id);
+        setPaymentEditSavingId((cur) => (cur === id ? null : cur));
+        if (paymentSavePendingRef.current.has(id)) {
+          paymentSavePendingRef.current.delete(id);
+          queueMicrotask(() => {
+            void persistPaymentRecordById(id);
+          });
+        }
+      }
+    },
+    []
+  );
+
+  const schedulePersistPaymentRecord = useCallback(
+    (id: string) => {
+      const existing = paymentSaveDebounceRef.current.get(id);
+      if (existing) window.clearTimeout(existing);
+      const t = window.setTimeout(() => {
+        paymentSaveDebounceRef.current.delete(id);
+        void persistPaymentRecordById(id);
+      }, 650);
+      paymentSaveDebounceRef.current.set(id, t);
+    },
+    [persistPaymentRecordById]
+  );
+
+  const flushPersistPaymentRecord = useCallback(
+    (id: string) => {
+      const existing = paymentSaveDebounceRef.current.get(id);
+      if (existing) {
+        window.clearTimeout(existing);
+        paymentSaveDebounceRef.current.delete(id);
+      }
+      void persistPaymentRecordById(id);
+    },
+    [persistPaymentRecordById]
+  );
+
+  useEffect(() => {
+    const timers = paymentSaveDebounceRef.current;
+    return () => {
+      for (const t of timers.values()) window.clearTimeout(t);
+      timers.clear();
     };
   }, []);
 
@@ -2709,7 +2868,7 @@ export default function DashboardPage() {
   useEffect(() => {
     try {
       const v = localStorage.getItem("sdh-finance-subtab");
-      if (v === "invoices" || v === "byProject") setFinanceSubTab(v);
+      if (v === "invoices" || v === "byProject" || v === "payments") setFinanceSubTab(v);
     } catch {
       /* ignore */
     }
@@ -5090,20 +5249,20 @@ export default function DashboardPage() {
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">自來件分潤</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">自來件分潤%數</label>
                     <input
                       type="text"
-                      placeholder="例：成數或備註"
+                      placeholder="例：20%"
                       value={createPartnerForm.自來件分潤}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 自來件分潤: e.target.value }))}
                       className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">SDH開發分件分潤</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">SDH開發件分潤%數</label>
                     <input
                       type="text"
-                      placeholder="例：成數或備註"
+                      placeholder="例：20%"
                       value={createPartnerForm["SDH開發分件分潤"]}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, "SDH開發分件分潤": e.target.value }))}
                       className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
@@ -5429,11 +5588,11 @@ export default function DashboardPage() {
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">自來件分潤</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">自來件分潤%數</label>
                     {partnerFieldEditable("自來件分潤") ? (
                       <input
                         type="text"
-                        placeholder="例：成數或備註"
+                        placeholder="例：20%"
                         value={editPartnerForm.自來件分潤}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 自來件分潤: e.target.value }))}
                         className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
@@ -5443,11 +5602,11 @@ export default function DashboardPage() {
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-stone-500">SDH開發分件分潤</label>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">SDH開發件分潤%數</label>
                     {partnerFieldEditable("SDH開發分件分潤") ? (
                       <input
                         type="text"
-                        placeholder="例：成數或備註"
+                        placeholder="例：20%"
                         value={editPartnerForm["SDH開發分件分潤"]}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, "SDH開發分件分潤": e.target.value }))}
                         className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
@@ -7159,7 +7318,7 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-xl font-bold tracking-tight text-stone-900">財務</h2>
               <p className="mt-1 text-xs text-stone-500">
-                依專案：金額與指標由大總表同步帶入；僅「廠商付款日期」「員工分潤日期」可於此編輯。發票清冊為全部開立憑證（可不綁專案）。
+                依專案：金額與指標由大總表同步帶入；發票清冊記錄收款憑證；付款記錄用來管理對外付款與支出。
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-stone-200 bg-amber-50/90 p-1">
@@ -7180,6 +7339,15 @@ export default function DashboardPage() {
                 }`}
               >
                 發票清冊
+              </button>
+              <button
+                type="button"
+                onClick={() => setFinanceSubTab("payments")}
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  financeSubTab === "payments" ? "bg-amber-500 text-slate-900 shadow shadow-amber-200/40" : "text-stone-500 hover:text-stone-900"
+                }`}
+              >
+                付款記錄
               </button>
             </div>
           </div>
@@ -7473,6 +7641,130 @@ export default function DashboardPage() {
               )}
             </>
           )}
+
+          {financeSubTab === "payments" && (
+            <>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaymentCreateError(null);
+                    setPaymentDraftRows([emptyPaymentRecordDraftRow()]);
+                    setShowPaymentCreateModal(true);
+                  }}
+                  className="rounded-xl border border-emerald-500/70 bg-emerald-500 px-4 py-2 text-xs font-bold text-white shadow-sm shadow-emerald-200/40 transition hover:bg-emerald-400"
+                >
+                  新增付款
+                </button>
+                <input
+                  type="text"
+                  value={paymentRecordsSearch}
+                  onChange={(e) => setPaymentRecordsSearch(e.target.value)}
+                  placeholder="搜尋發票號碼、付款專案、付款對象…"
+                  className="w-full min-w-0 max-w-72 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
+                />
+              </div>
+              {paymentEditError && (
+                <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{paymentEditError}</p>
+              )}
+              {paymentRecords.length > 0 && (
+                <p className="mb-2 text-[11px] text-stone-500">
+                  各欄可直接編輯；約 0.65 秒無變更或離開欄位時會儲存。欄位比照付款表：發票號碼、付款日期、付款專案、付款對象、付款金額。
+                </p>
+              )}
+              <div className="overflow-x-auto rounded-xl border border-stone-200/90">
+                {paymentRecords.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-stone-500">尚無付款記錄</p>
+                ) : (
+                  <table className="min-w-full divide-y divide-stone-200">
+                    <thead className="bg-emerald-800">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-white">No.</th>
+                        {paymentRecordsVisibleCols.map((k) => (
+                          <th key={k} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-white">
+                            {tableColumnLabels.paymentRecords?.[k] ?? k}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-200 bg-white">
+                      {searchedPaymentRecords.length === 0 ? (
+                        <tr>
+                          <td colSpan={(paymentRecordsVisibleCols.length || 6) + 1} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                            沒有符合搜尋結果
+                          </td>
+                        </tr>
+                      ) : (
+                        visiblePaymentRecordsRows.map((payment, i) => {
+                          const rowId = typeof payment.id === "string" && payment.id ? payment.id : null;
+                          const saving = rowId != null && paymentEditSavingId === rowId;
+                          return (
+                            <tr key={rowId ?? `payment-row-${i}`} className="odd:bg-white even:bg-stone-50 hover:bg-emerald-50/70">
+                              <td className="whitespace-nowrap px-3 py-2 text-xs font-medium text-stone-500">{i + 1}</td>
+                              {paymentRecordsVisibleCols.map((k) => {
+                                const v = (payment as unknown as Record<string, unknown>)[k];
+                                const val = v == null ? "" : String(v);
+                                if (!rowId) {
+                                  return (
+                                    <td key={k} className="whitespace-nowrap px-4 py-3 text-sm text-stone-600">
+                                      {val || "—"}
+                                    </td>
+                                  );
+                                }
+                                const inputCls =
+                                  "w-full min-w-[7rem] rounded border border-stone-200 bg-white px-2 py-1 text-xs text-stone-800 placeholder:text-stone-400 focus:border-emerald-500/60 focus:outline-none disabled:opacity-60";
+                                if (k === "備註") {
+                                  return (
+                                    <td key={k} className="min-w-[12rem] max-w-[18rem] px-2 py-2 align-top">
+                                      <textarea
+                                        value={val}
+                                        disabled={saving}
+                                        rows={2}
+                                        onChange={(e) => {
+                                          setPaymentEditError(null);
+                                          setPaymentRecords((prev) =>
+                                            prev.map((r) => (r.id === rowId ? { ...r, 備註: e.target.value } : r))
+                                          );
+                                          schedulePersistPaymentRecord(rowId);
+                                        }}
+                                        onBlur={() => flushPersistPaymentRecord(rowId)}
+                                        className={`${inputCls} max-w-full resize-y`}
+                                      />
+                                    </td>
+                                  );
+                                }
+                                return (
+                                  <td key={k} className={`px-2 py-2 align-middle ${k === "付款專案" || k === "付款對象" ? "min-w-[12rem]" : "min-w-[8rem]"}`}>
+                                    <input
+                                      type={k === "付款日期" ? "date" : "text"}
+                                      value={k === "付款日期" ? normalizeDateForInput(val) : val}
+                                      disabled={saving}
+                                      onChange={(e) => {
+                                        setPaymentEditError(null);
+                                        setPaymentRecords((prev) =>
+                                          prev.map((r) => (r.id === rowId ? { ...r, [k]: e.target.value } : r))
+                                        );
+                                        schedulePersistPaymentRecord(rowId);
+                                      }}
+                                      onBlur={() => flushPersistPaymentRecord(rowId)}
+                                      className={inputCls}
+                                    />
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+              {searchedPaymentRecords.length > visiblePaymentRecordsRows.length && (
+                <p className="mt-2 text-right text-xs text-stone-500">載入中 {visiblePaymentRecordsRows.length} / {searchedPaymentRecords.length}</p>
+              )}
+            </>
+          )}
         </section>
         )}
           </div>
@@ -7757,6 +8049,136 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* 新增付款記錄（可批次多列） */}
+      {showPaymentCreateModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/30 p-4 backdrop-blur-sm">
+          <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
+            <header className="flex shrink-0 flex-wrap items-start justify-between gap-2 border-b border-stone-200/90 bg-stone-100/90 px-4 py-3 sm:px-6">
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold tracking-tight text-stone-900 sm:text-xl">新增付款記錄</h2>
+                <p className="mt-0.5 text-xs text-stone-500">
+                  可一次建立多筆；比照付款表欄位填寫發票號碼、付款日期、付款專案、付款對象與付款金額。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPaymentCreateModal(false);
+                  setPaymentCreateError(null);
+                }}
+                className="shrink-0 rounded-xl border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm font-semibold text-stone-600 hover:bg-stone-100"
+              >
+                關閉
+              </button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-auto px-3 py-3 sm:px-6">
+              {paymentCreateError && (
+                <p className="mb-3 rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-800">{paymentCreateError}</p>
+              )}
+              <div className="overflow-x-auto rounded-lg border border-stone-200/90">
+                <table className="min-w-[760px] w-full border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-emerald-800 text-left">
+                      {PAYMENT_RECORD_KEYS.map((k) => (
+                        <th key={k} className="whitespace-nowrap border-b border-emerald-900/30 px-2 py-2 font-semibold text-white">
+                          {tableColumnLabels.paymentRecords?.[k] ?? k}
+                        </th>
+                      ))}
+                      <th className="w-14 border-b border-emerald-900/30 px-1 py-2 text-center font-semibold text-white">　</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paymentDraftRows.map((row, rowIdx) => (
+                      <tr key={rowIdx} className="bg-white">
+                        {PAYMENT_RECORD_KEYS.map((k) => (
+                          <td key={k} className="border-b border-stone-100 p-1 align-top">
+                            <input
+                              type={k === "付款日期" ? "date" : "text"}
+                              value={row[k] ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setPaymentDraftRows((prev) => {
+                                  const next = [...prev];
+                                  next[rowIdx] = { ...next[rowIdx], [k]: v };
+                                  return next;
+                                });
+                              }}
+                              className="w-full min-w-[5rem] rounded border border-stone-200 bg-stone-50 px-1.5 py-1.5 text-stone-900 focus:border-emerald-500/70 focus:outline-none"
+                            />
+                          </td>
+                        ))}
+                        <td className="border-b border-stone-100 p-1 text-center align-top">
+                          <button
+                            type="button"
+                            disabled={paymentDraftRows.length <= 1}
+                            onClick={() => setPaymentDraftRows((prev) => prev.filter((_, j) => j !== rowIdx))}
+                            className="text-[11px] font-medium text-stone-400 hover:text-red-600 disabled:opacity-30"
+                          >
+                            刪列
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPaymentDraftRows((prev) => [...prev, emptyPaymentRecordDraftRow()])}
+                className="mt-3 rounded-lg border border-dashed border-stone-300 bg-stone-50/80 px-3 py-2 text-xs font-semibold text-stone-600 transition hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-900"
+              >
+                + 新增一列
+              </button>
+            </div>
+            <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-stone-200/90 bg-stone-50/90 px-4 py-3 sm:px-6">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPaymentCreateModal(false);
+                  setPaymentCreateError(null);
+                }}
+                className="rounded-xl border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-600 hover:bg-stone-100"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={savingPayments}
+                onClick={async () => {
+                  setPaymentCreateError(null);
+                  setSavingPayments(true);
+                  try {
+                    const res = await fetch("/api/finance-payments", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ payments: paymentDraftRows }),
+                    });
+                    const data = (await safeResJson(res)) as { ok?: boolean; error?: string; payments?: PaymentRecordRow[] };
+                    if (!res.ok || !data.ok) {
+                      setPaymentCreateError(data.error ?? "新增失敗");
+                      setSavingPayments(false);
+                      return;
+                    }
+                    if (data.payments?.length) {
+                      setPaymentRecords((prev) => [...data.payments!, ...prev]);
+                    } else {
+                      await refreshDashboardData(["payments"]);
+                    }
+                    setShowPaymentCreateModal(false);
+                  } catch (err: unknown) {
+                    setPaymentCreateError(err instanceof Error ? err.message : "新增失敗");
+                  }
+                  setSavingPayments(false);
+                }}
+                className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-white shadow shadow-emerald-200/30 transition hover:bg-emerald-400 disabled:opacity-50"
+              >
+                {savingPayments ? "儲存中…" : "儲存"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+
       {/* 大總表 新增專案 Modal */}
       {showCreateMaster && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/30 backdrop-blur-sm">
@@ -7923,6 +8345,12 @@ export default function DashboardPage() {
                         }))
                       }
                     />
+                    {isPayoutModeB(createForm.專案類型) && createForm.KOL名稱.trim() ? (
+                      <>
+                        <Field label="自來件分潤%數（由 KOL 帶出）" value={createMasterSelectedPartner?.自來件分潤} />
+                        <Field label="SDH開發件分潤%數（由 KOL 帶出）" value={createMasterSelectedPartner?.["SDH開發分件分潤"]} />
+                      </>
+                    ) : null}
                     <SelectField
                       label="專案費用類型"
                       value={createForm.專案費用類型}
@@ -8770,6 +9198,14 @@ export default function DashboardPage() {
                   ) : (
                     <Field label="KOL費用未稅" value={formatAmount(selectedMaster.KOL費用未稅)} />
                   )}
+
+                  {isPayoutModeB(isEditingMaster ? editMasterForm.專案類型 : selectedMaster.專案類型 ?? "") &&
+                  String(isEditingMaster ? editMasterForm.KOL名稱 : selectedMaster.KOL名稱 ?? "").trim() ? (
+                    <>
+                      <Field label="自來件分潤%數（由 KOL 帶出）" value={selectedMasterPartner?.自來件分潤} />
+                      <Field label="SDH開發件分潤%數（由 KOL 帶出）" value={selectedMasterPartner?.["SDH開發分件分潤"]} />
+                    </>
+                  ) : null}
 
                   {isEditingMaster ? (
                     <SelectField

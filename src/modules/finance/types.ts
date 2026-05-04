@@ -38,3 +38,15 @@ export interface FinanceRow {
   員工分潤日期?: string;
   [key: string]: string | undefined;
 }
+
+export interface PaymentRecordRow {
+  /** DB uuid，列表 key 用 */
+  id?: string;
+  發票號碼?: string;
+  付款日期?: string;
+  付款專案?: string;
+  付款對象?: string;
+  付款金額?: string;
+  備註?: string;
+  [key: string]: string | undefined;
+}

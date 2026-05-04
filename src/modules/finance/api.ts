@@ -3,5 +3,13 @@
  * 資料來源：Supabase（PostgreSQL）
  */
 
-export { getInvoices, getFinance, createInvoicesBatch, updateInvoiceById } from "@/lib/db/finance";
-export type { InvoiceInsertInput } from "@/lib/db/finance";
+export {
+  getInvoices,
+  getFinance,
+  getPaymentRecords,
+  createInvoicesBatch,
+  updateInvoiceById,
+  createPaymentRecordsBatch,
+  updatePaymentRecordById,
+} from "@/lib/db/finance";
+export type { InvoiceInsertInput, PaymentRecordInput } from "@/lib/db/finance";

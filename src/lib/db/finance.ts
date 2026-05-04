@@ -3,7 +3,7 @@
  */
 
 import { getSupabase } from "@/lib/supabase/server";
-import type { FinanceRow, InvoiceRow } from "@/modules/finance/types";
+import type { FinanceRow, InvoiceRow, PaymentRecordRow } from "@/modules/finance/types";
 import { normalizeDecimalString } from "@/lib/number-normalize";
 
 function normalizeMoneyString(raw: unknown): string | undefined {
@@ -25,6 +25,16 @@ export type InvoiceInsertInput = {
   備註?: string | null;
 };
 
+/** 付款記錄（單筆／批次共用欄位） */
+export type PaymentRecordInput = {
+  發票號碼?: string | null;
+  付款日期?: string | null;
+  付款專案?: string | null;
+  付款對象?: string | null;
+  付款金額?: string | null;
+  備註?: string | null;
+};
+
 function mapInvoiceRecord(r: Record<string, unknown>): InvoiceRow {
   return {
     id: r.id != null ? String(r.id) : undefined,
@@ -39,6 +49,18 @@ function mapInvoiceRecord(r: Record<string, unknown>): InvoiceRow {
     廠商實付金額: normalizeMoneyString(r.廠商實付金額),
     廠商付款狀態: r.廠商付款狀態 != null ? String(r.廠商付款狀態) : undefined,
     廠商付款日期: r.廠商付款日期 != null ? String(r.廠商付款日期) : undefined,
+    備註: r.備註 != null ? String(r.備註) : undefined,
+  };
+}
+
+function mapPaymentRecord(r: Record<string, unknown>): PaymentRecordRow {
+  return {
+    id: r.id != null ? String(r.id) : undefined,
+    發票號碼: r.發票號碼 != null ? String(r.發票號碼) : undefined,
+    付款日期: r.付款日期 != null ? String(r.付款日期) : undefined,
+    付款專案: r.付款專案 != null ? String(r.付款專案) : undefined,
+    付款對象: r.付款對象 != null ? String(r.付款對象) : undefined,
+    付款金額: normalizeMoneyString(r.付款金額),
     備註: r.備註 != null ? String(r.備註) : undefined,
   };
 }
@@ -264,6 +286,71 @@ export async function updateInvoiceById(id: string, row: InvoiceInsertInput): Pr
   if (error) throw error;
   if (!data) throw new Error("找不到該發票或更新失敗");
   return mapInvoiceRecord(data as Record<string, unknown>);
+}
+
+export async function getPaymentRecords(): Promise<PaymentRecordRow[]> {
+  const { data, error } = await getSupabase()
+    .from("付款記錄")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    if (error.code === "42P01") return [];
+    throw error;
+  }
+  return (data ?? []).map((r: Record<string, unknown>) => mapPaymentRecord(r));
+}
+
+function paymentRecordHasContent(row: PaymentRecordInput): boolean {
+  return [
+    row.發票號碼,
+    row.付款日期,
+    row.付款專案,
+    row.付款對象,
+    row.付款金額,
+    row.備註,
+  ].some((v) => String(v ?? "").trim() !== "");
+}
+
+export async function createPaymentRecordsBatch(rows: PaymentRecordInput[]): Promise<PaymentRecordRow[]> {
+  const payload = rows
+    .filter(paymentRecordHasContent)
+    .map((row) => ({
+      發票號碼: trimOrNull(row.發票號碼 ?? undefined),
+      付款日期: trimOrNull(row.付款日期 ?? undefined),
+      付款專案: trimOrNull(row.付款專案 ?? undefined),
+      付款對象: trimOrNull(row.付款對象 ?? undefined),
+      付款金額: normalizeMoneyOrNull(row.付款金額 ?? undefined),
+      備註: trimOrNull(row.備註 ?? undefined),
+    }));
+
+  if (payload.length === 0) {
+    throw new Error("請至少填寫一筆付款記錄");
+  }
+
+  const { data, error } = await getSupabase().from("付款記錄").insert(payload).select("*");
+  if (error) throw error;
+  return (data ?? []).map((r: Record<string, unknown>) => mapPaymentRecord(r));
+}
+
+export async function updatePaymentRecordById(id: string, row: PaymentRecordInput): Promise<PaymentRecordRow> {
+  const pid = String(id ?? "").trim();
+  if (!pid) throw new Error("缺少付款記錄 id");
+
+  const payload = {
+    發票號碼: trimOrNull(row.發票號碼 ?? undefined),
+    付款日期: trimOrNull(row.付款日期 ?? undefined),
+    付款專案: trimOrNull(row.付款專案 ?? undefined),
+    付款對象: trimOrNull(row.付款對象 ?? undefined),
+    付款金額: normalizeMoneyOrNull(row.付款金額 ?? undefined),
+    備註: trimOrNull(row.備註 ?? undefined),
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await getSupabase().from("付款記錄").update(payload).eq("id", pid).select("*").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("找不到該付款記錄或更新失敗");
+  return mapPaymentRecord(data as Record<string, unknown>);
 }
 
 export async function getFinance(): Promise<FinanceRow[]> {

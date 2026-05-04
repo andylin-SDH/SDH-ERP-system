@@ -20,6 +20,7 @@ export const TABLE_LABELS: Record<string, string> = {
   finance: "財務",
   /** ③ 可見欄位用 key；側欄不單獨顯示 */
   invoices: "發票清冊（欄位）",
+  paymentRecords: "付款記錄（欄位）",
   // 僅用於管理者 Dashboard 的設定分頁，不對應實際資料 Table
   visibility: "可見性與權限",
 };
@@ -69,8 +70,8 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "資料夾", label: "資料夾" },
     { key: "KOL開發者", label: "KOL開發者" },
     { key: "經銷約開始日", label: "經銷約開始日" },
-    { key: "自來件分潤", label: "自來件分潤" },
-    { key: "SDH開發分件分潤", label: "SDH開發分件分潤" },
+    { key: "自來件分潤", label: "自來件分潤%數" },
+    { key: "SDH開發分件分潤", label: "SDH開發件分潤%數" },
     { key: "經銷約結束日", label: "經銷約結束日" },
     { key: "廣告經銷夥伴", label: "廣告經銷夥伴" },
     { key: "節目製作夥伴", label: "節目製作夥伴" },
@@ -118,6 +119,14 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "廠商付款日期", label: "廠商付款日期" },
     { key: "員工分潤日期", label: "員工分潤日期" },
   ],
+  paymentRecords: [
+    { key: "發票號碼", label: "發票號碼" },
+    { key: "付款日期", label: "付款日期" },
+    { key: "付款專案", label: "付款專案" },
+    { key: "付款對象", label: "付款對象" },
+    { key: "付款金額", label: "付款金額" },
+    { key: "備註", label: "備註" },
+  ],
   invoices: [
     { key: "專案ID", label: "對應專案（可空白）" },
     { key: "發票號碼", label: "發票號碼" },
@@ -137,4 +146,4 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
  * ③ 可見欄位細選用的 table key（含「發票」欄位組，語意上屬財務模組）
  * ① 側欄僅使用 SECTION_KEYS，不含 invoices
  */
-export const TABLE_KEYS = [...SECTION_KEYS, "invoices"] as const;
+export const TABLE_KEYS = [...SECTION_KEYS, "invoices", "paymentRecords"] as const;
