@@ -977,7 +977,6 @@ export default function DashboardPage() {
   const paymentRecordsRef = useRef<PaymentRecordRow[]>([]);
   const paymentSaveInflightRef = useRef<Set<string>>(new Set());
   const paymentSavePendingRef = useRef<Set<string>>(new Set());
-  const paymentSaveDebounceRef = useRef<Map<string, number>>(new Map());
   const [finance, setFinance] = useState<FinanceRow[]>([]);
   const [financeEditSaving專案ID, setFinanceEditSaving專案ID] = useState<string | null>(null);
   const [financeEditError, setFinanceEditError] = useState<string | null>(null);
@@ -2585,7 +2584,7 @@ export default function DashboardPage() {
     paymentRecordsRef.current = paymentRecords;
   }, [paymentRecords]);
 
-  /** 付款記錄：整列可編輯，延遲寫回 DB */
+  /** 付款記錄：輸入時只更新畫面，離開欄位／按 Enter 才寫回 DB */
   const persistPaymentRecordById = useCallback(
     async (id: string) => {
       if (!id) return;
@@ -2627,39 +2626,6 @@ export default function DashboardPage() {
     },
     []
   );
-
-  const schedulePersistPaymentRecord = useCallback(
-    (id: string) => {
-      const existing = paymentSaveDebounceRef.current.get(id);
-      if (existing) window.clearTimeout(existing);
-      const t = window.setTimeout(() => {
-        paymentSaveDebounceRef.current.delete(id);
-        void persistPaymentRecordById(id);
-      }, 650);
-      paymentSaveDebounceRef.current.set(id, t);
-    },
-    [persistPaymentRecordById]
-  );
-
-  const flushPersistPaymentRecord = useCallback(
-    (id: string) => {
-      const existing = paymentSaveDebounceRef.current.get(id);
-      if (existing) {
-        window.clearTimeout(existing);
-        paymentSaveDebounceRef.current.delete(id);
-      }
-      void persistPaymentRecordById(id);
-    },
-    [persistPaymentRecordById]
-  );
-
-  useEffect(() => {
-    const timers = paymentSaveDebounceRef.current;
-    return () => {
-      for (const t of timers.values()) window.clearTimeout(t);
-      timers.clear();
-    };
-  }, []);
 
   useLayoutEffect(() => {
     financeRef.current = finance;
@@ -7743,9 +7709,13 @@ export default function DashboardPage() {
                                           setPaymentRecords((prev) =>
                                             prev.map((r) => (r.id === rowId ? { ...r, 備註: e.target.value } : r))
                                           );
-                                          schedulePersistPaymentRecord(rowId);
                                         }}
-                                        onBlur={() => flushPersistPaymentRecord(rowId)}
+                                        onBlur={() => void persistPaymentRecordById(rowId)}
+                                        onKeyDown={(e) => {
+                                          if (e.key !== "Enter" || e.shiftKey) return;
+                                          e.preventDefault();
+                                          e.currentTarget.blur();
+                                        }}
                                         className={`${inputCls} max-w-full resize-y`}
                                       />
                                     </td>
@@ -7762,9 +7732,13 @@ export default function DashboardPage() {
                                         setPaymentRecords((prev) =>
                                           prev.map((r) => (r.id === rowId ? { ...r, [k]: e.target.value } : r))
                                         );
-                                        schedulePersistPaymentRecord(rowId);
                                       }}
-                                      onBlur={() => flushPersistPaymentRecord(rowId)}
+                                      onBlur={() => void persistPaymentRecordById(rowId)}
+                                      onKeyDown={(e) => {
+                                        if (e.key !== "Enter") return;
+                                        e.preventDefault();
+                                        e.currentTarget.blur();
+                                      }}
                                       className={inputCls}
                                     />
                                   </td>
