@@ -291,6 +291,50 @@ function InvoiceProjectSearchSelect({
   );
 }
 
+function TaskProjectInfoButton({ project }: { project: MasterRow | undefined }) {
+  if (!project) return null;
+  const fields = [
+    ["專案總金額未稅", formatAmount(project.專案總金額未稅)],
+    ["專案狀態", project.專案狀態 || "—"],
+    ["廠商名稱", project.廠商名稱 || "—"],
+    ["預計付款日", formatPartnerDateDisplay(project.廠商預計付款日)],
+    ["專案成本", formatAmount(project.專案成本)],
+    ["專案營收", formatAmount(project.專案營收)],
+  ] as const;
+
+  return (
+    <span className="group relative inline-flex" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-amber-300 bg-amber-50 text-[11px] font-bold text-amber-800 shadow-sm transition hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-300/70"
+        aria-label="查看專案資訊"
+      >
+        i
+      </button>
+      <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 hidden w-72 -translate-x-1/2 rounded-xl border border-amber-200 bg-white p-3 text-left text-xs shadow-2xl ring-1 ring-stone-200/70 group-hover:block group-focus-within:block">
+        <span className="mb-2 block border-b border-stone-100 pb-2">
+          <span className="block truncate text-sm font-bold text-stone-900">{project.專案名稱 || project.專案ID}</span>
+          <span className="mt-0.5 block truncate text-[11px] text-stone-500">{project.專案ID}</span>
+        </span>
+        <span className="grid grid-cols-2 gap-x-3 gap-y-2">
+          {fields.map(([label, value]) => (
+            <span key={label} className="min-w-0">
+              <span className="block text-[10px] font-semibold text-stone-400">{label}</span>
+              <span className="mt-0.5 block truncate font-medium text-stone-700">{value}</span>
+            </span>
+          ))}
+        </span>
+        {project.專案內容 ? (
+          <span className="mt-2 block border-t border-stone-100 pt-2">
+            <span className="block text-[10px] font-semibold text-stone-400">專案內容</span>
+            <span className="mt-0.5 block line-clamp-3 whitespace-normal text-stone-600">{project.專案內容}</span>
+          </span>
+        ) : null}
+      </span>
+    </span>
+  );
+}
+
 function invoiceRowToInsertInput(row: InvoiceRow): InvoiceInsertInput {
   return {
     專案ID: row.專案ID ?? "",
@@ -1734,6 +1778,15 @@ export default function DashboardPage() {
     }
     return m;
   }, [finance]);
+
+  const masterByProjectId = useMemo(() => {
+    const m = new Map<string, MasterRow>();
+    for (const row of masterList) {
+      const pid = String(row.專案ID ?? "").trim();
+      if (pid) m.set(pid, row);
+    }
+    return m;
+  }, [masterList]);
 
   /**
    * KOL 區塊主列表欄位（與 ③ 可見欄位交集）
@@ -6535,7 +6588,10 @@ export default function DashboardPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-stone-900">{t.任務 ?? "—"}</p>
-                      <p className="mt-0.5 text-xs text-stone-500">{t.專案名稱 ?? "—"}</p>
+                      <p className="mt-0.5 flex items-center gap-1.5 text-xs text-stone-500" onClick={(e) => e.stopPropagation()}>
+                        <span className="min-w-0 truncate">{t.專案名稱 ?? "—"}</span>
+                        <TaskProjectInfoButton project={masterByProjectId.get(String(t.專案ID ?? "").trim())} />
+                      </p>
                     </div>
                     <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${t.任務完成 ? "bg-amber-100 text-amber-800" : "bg-stone-200 text-stone-500"}`}>{t.任務完成 ? "已完成" : "進行中"}</span>
                   </div>
@@ -6823,8 +6879,18 @@ export default function DashboardPage() {
                         }
                         const val = (t as unknown as Record<string, unknown>)[k];
                         const str = String(val ?? "—");
+                        if (k === "專案名稱") {
+                          return (
+                            <td key={k} className="max-w-[220px] px-4 py-3.5 text-sm font-medium text-stone-600" title={str}>
+                              <span className="flex min-w-0 items-center gap-1.5">
+                                <span className="min-w-0 truncate">{str}</span>
+                                <TaskProjectInfoButton project={masterByProjectId.get(String(t.專案ID ?? "").trim())} />
+                              </span>
+                            </td>
+                          );
+                        }
                         return (
-                          <td key={k} className={k === "任務" ? "max-w-[240px] truncate px-4 py-3.5 text-sm font-medium text-stone-900" : k === "專案名稱" ? "max-w-[180px] truncate px-4 py-3.5 text-sm font-medium text-stone-600" : "whitespace-nowrap px-4 py-3.5 text-sm font-medium text-stone-600"} title={k === "專案名稱" || k === "任務" ? str : undefined}>
+                          <td key={k} className={k === "任務" ? "max-w-[240px] truncate px-4 py-3.5 text-sm font-medium text-stone-900" : "whitespace-nowrap px-4 py-3.5 text-sm font-medium text-stone-600"} title={k === "任務" ? str : undefined}>
                             {str}
                           </td>
                         );
