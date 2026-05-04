@@ -26,12 +26,12 @@ export async function POST(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   try {
-    const body = (await request.json()) as { payments?: PaymentRecordInput[] } | null;
+    const body = (await request.json()) as { payments?: PaymentRecordInput[]; allowBlank?: boolean } | null;
     const raw = body?.payments;
     if (!Array.isArray(raw) || raw.length === 0) {
       return NextResponse.json({ ok: false, error: "請提供 payments 陣列" }, { status: 400 });
     }
-    const created = await createPaymentRecordsBatch(raw);
+    const created = await createPaymentRecordsBatch(raw, { allowBlank: Boolean(body?.allowBlank) });
     return NextResponse.json({ ok: true, payments: created, count: created.length });
   } catch (error) {
     console.error("POST /api/finance-payments error:", error);

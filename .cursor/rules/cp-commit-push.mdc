@@ -1,0 +1,18 @@
+---
+description: Treat CP-only messages as commit and push requests
+alwaysApply: true
+---
+
+# CP Shortcut
+
+When the user's entire message is exactly `CP` (case-sensitive, ignoring surrounding whitespace), interpret it as:
+
+1. Commit the current relevant work.
+2. Push the resulting commit to the tracked remote branch.
+
+Follow the normal git safety protocol:
+
+- Inspect status, diff, and recent commit style before committing.
+- Do not include unrelated untracked files unless the user explicitly asks.
+- Use a concise commit message matching the repository style.
+- Push only after the commit succeeds.

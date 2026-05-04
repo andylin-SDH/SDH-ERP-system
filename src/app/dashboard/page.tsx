@@ -7647,14 +7647,32 @@ export default function DashboardPage() {
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <button
                   type="button"
-                  onClick={() => {
-                    setPaymentCreateError(null);
-                    setPaymentDraftRows([emptyPaymentRecordDraftRow()]);
-                    setShowPaymentCreateModal(true);
+                  disabled={savingPayments}
+                  onClick={async () => {
+                    setPaymentEditError(null);
+                    setPaymentRecordsSearch("");
+                    setSavingPayments(true);
+                    try {
+                      const res = await fetch("/api/finance-payments", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ payments: [emptyPaymentRecordDraftRow()], allowBlank: true }),
+                      });
+                      const data = (await safeResJson(res)) as { ok?: boolean; error?: string; payments?: PaymentRecordRow[] };
+                      if (!res.ok || !data.ok || !data.payments?.length) {
+                        setPaymentEditError(data.error ?? "新增空白列失敗");
+                        return;
+                      }
+                      setPaymentRecords((prev) => [...data.payments!, ...prev]);
+                    } catch (err: unknown) {
+                      setPaymentEditError(err instanceof Error ? err.message : "新增空白列失敗");
+                    } finally {
+                      setSavingPayments(false);
+                    }
                   }}
-                  className="rounded-xl border border-emerald-500/70 bg-emerald-500 px-4 py-2 text-xs font-bold text-white shadow-sm shadow-emerald-200/40 transition hover:bg-emerald-400"
+                  className="rounded-xl border border-emerald-500/70 bg-emerald-500 px-4 py-2 text-xs font-bold text-white shadow-sm shadow-emerald-200/40 transition hover:bg-emerald-400 disabled:opacity-60"
                 >
-                  新增付款
+                  {savingPayments ? "新增中…" : "+ 新增空白列"}
                 </button>
                 <input
                   type="text"

@@ -312,9 +312,12 @@ function paymentRecordHasContent(row: PaymentRecordInput): boolean {
   ].some((v) => String(v ?? "").trim() !== "");
 }
 
-export async function createPaymentRecordsBatch(rows: PaymentRecordInput[]): Promise<PaymentRecordRow[]> {
-  const payload = rows
-    .filter(paymentRecordHasContent)
+export async function createPaymentRecordsBatch(
+  rows: PaymentRecordInput[],
+  options?: { allowBlank?: boolean }
+): Promise<PaymentRecordRow[]> {
+  const sourceRows = options?.allowBlank ? rows : rows.filter(paymentRecordHasContent);
+  const payload = sourceRows
     .map((row) => ({
       發票號碼: trimOrNull(row.發票號碼 ?? undefined),
       付款日期: trimOrNull(row.付款日期 ?? undefined),
