@@ -2584,7 +2584,7 @@ export default function DashboardPage() {
     paymentRecordsRef.current = paymentRecords;
   }, [paymentRecords]);
 
-  /** 付款記錄：輸入時只更新畫面，離開欄位／按 Enter 才寫回 DB */
+  /** 付款記錄：輸入時只更新畫面，離開欄位才寫回 DB */
   const persistPaymentRecordById = useCallback(
     async (id: string) => {
       if (!id) return;
@@ -7711,11 +7711,6 @@ export default function DashboardPage() {
                                           );
                                         }}
                                         onBlur={() => void persistPaymentRecordById(rowId)}
-                                        onKeyDown={(e) => {
-                                          if (e.key !== "Enter" || e.shiftKey) return;
-                                          e.preventDefault();
-                                          e.currentTarget.blur();
-                                        }}
                                         className={`${inputCls} max-w-full resize-y`}
                                       />
                                     </td>
@@ -7734,11 +7729,6 @@ export default function DashboardPage() {
                                         );
                                       }}
                                       onBlur={() => void persistPaymentRecordById(rowId)}
-                                      onKeyDown={(e) => {
-                                        if (e.key !== "Enter") return;
-                                        e.preventDefault();
-                                        e.currentTarget.blur();
-                                      }}
                                       className={inputCls}
                                     />
                                   </td>
