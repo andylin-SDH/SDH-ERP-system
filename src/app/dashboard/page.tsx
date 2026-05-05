@@ -323,11 +323,13 @@ function InvoiceProjectSearchSelect({
   options,
   disabled,
   onChange,
+  onBlur,
 }: {
   value: string;
   options: InvoiceProjectOption[];
   disabled?: boolean;
   onChange: (projectId: string) => void;
+  onBlur?: () => void;
 }) {
   const normalizedValue = String(value ?? "").trim();
   const selected = options.find((opt) => opt.id === normalizedValue);
@@ -365,6 +367,7 @@ function InvoiceProjectSearchSelect({
             setOpen(false);
             const current = options.find((opt) => opt.id === String(value ?? "").trim());
             setQuery(invoiceProjectDisplayName(current, String(value ?? "").trim()));
+            onBlur?.();
           }, 120);
         }}
         className="w-full min-w-[10rem] rounded border border-stone-200 bg-white px-2 py-1.5 text-xs font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none disabled:opacity-60"
@@ -1082,7 +1085,6 @@ export default function DashboardPage() {
   const invoicesRef = useRef<InvoiceRow[]>([]);
   const invoiceSaveInflightRef = useRef<Set<string>>(new Set());
   const invoiceSavePendingRef = useRef<Set<string>>(new Set());
-  const invoiceSaveDebounceRef = useRef<Map<string, number>>(new Map());
   const [paymentRecords, setPaymentRecords] = useState<PaymentRecordRow[]>([]);
   const [paymentEditSavingId, setPaymentEditSavingId] = useState<string | null>(null);
   const [paymentEditError, setPaymentEditError] = useState<string | null>(null);
@@ -1095,7 +1097,6 @@ export default function DashboardPage() {
   const financeRef = useRef<FinanceRow[]>([]);
   const financeSaveInflightRef = useRef<Set<string>>(new Set());
   const financeSavePendingRef = useRef<Set<string>>(new Set());
-  const financeSaveDebounceRef = useRef<Map<string, number>>(new Map());
   const [payoutList, setPayoutList] = useState<PayoutRow[]>([]);
   /** Dashboard 分頁搜尋關鍵字（各區塊獨立） */
   const [masterSearch, setMasterSearch] = useState("");
@@ -2698,38 +2699,6 @@ export default function DashboardPage() {
     [refreshDashboardData]
   );
 
-  const schedulePersistInvoiceRow = useCallback(
-    (id: string) => {
-      const existing = invoiceSaveDebounceRef.current.get(id);
-      if (existing) window.clearTimeout(existing);
-      const t = window.setTimeout(() => {
-        invoiceSaveDebounceRef.current.delete(id);
-        void persistInvoiceRowById(id);
-      }, 650);
-      invoiceSaveDebounceRef.current.set(id, t);
-    },
-    [persistInvoiceRowById]
-  );
-
-  const flushPersistInvoiceRow = useCallback(
-    (id: string) => {
-      const existing = invoiceSaveDebounceRef.current.get(id);
-      if (existing) {
-        window.clearTimeout(existing);
-        invoiceSaveDebounceRef.current.delete(id);
-      }
-      void persistInvoiceRowById(id);
-    },
-    [persistInvoiceRowById]
-  );
-
-  useEffect(() => {
-    return () => {
-      for (const t of invoiceSaveDebounceRef.current.values()) window.clearTimeout(t);
-      invoiceSaveDebounceRef.current.clear();
-    };
-  }, []);
-
   const deleteInvoicesByIdList = useCallback(
     async (ids: string[]) => {
       const cleanIds = [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
@@ -2860,38 +2829,6 @@ export default function DashboardPage() {
       }
     }
   }, [refreshDashboardData]);
-
-  const schedulePersistFinanceRow = useCallback(
-    (專案IDKey: string) => {
-      const existing = financeSaveDebounceRef.current.get(專案IDKey);
-      if (existing) window.clearTimeout(existing);
-      const t = window.setTimeout(() => {
-        financeSaveDebounceRef.current.delete(專案IDKey);
-        void persistFinanceRowBy專案ID(專案IDKey);
-      }, 650);
-      financeSaveDebounceRef.current.set(專案IDKey, t);
-    },
-    [persistFinanceRowBy專案ID]
-  );
-
-  const flushPersistFinanceRow = useCallback(
-    (專案IDKey: string) => {
-      const existing = financeSaveDebounceRef.current.get(專案IDKey);
-      if (existing) {
-        window.clearTimeout(existing);
-        financeSaveDebounceRef.current.delete(專案IDKey);
-      }
-      void persistFinanceRowBy專案ID(專案IDKey);
-    },
-    [persistFinanceRowBy專案ID]
-  );
-
-  useEffect(() => {
-    return () => {
-      for (const t of financeSaveDebounceRef.current.values()) window.clearTimeout(t);
-      financeSaveDebounceRef.current.clear();
-    };
-  }, []);
 
   const refetchTasksOnly = useCallback(async () => {
     try {
@@ -7517,7 +7454,7 @@ export default function DashboardPage() {
               )}
               {finance.length > 0 && (
                 <p className="mb-2 text-[11px] text-stone-500">
-                  僅「廠商付款日期」「員工分潤日期」可編輯（日曆選擇）；約 0.65 秒無變更或離開欄位時儲存。若儲存失敗，請確認 Supabase 已套用 migration「034_財務_廠商員工欄位改為日期」。
+                  僅「廠商付款日期」「員工分潤日期」可編輯（日曆選擇）；離開欄位時才會儲存。若儲存失敗，請確認 Supabase 已套用 migration「034_財務_廠商員工欄位改為日期」。
                 </p>
               )}
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
@@ -7601,10 +7538,9 @@ export default function DashboardPage() {
                                             String(r.專案ID ?? "").trim() === fid ? { ...r, [k]: next } : r
                                           )
                                         );
-                                        schedulePersistFinanceRow(fid);
                                       }}
                                       onBlur={() => {
-                                        flushPersistFinanceRow(fid);
+                                        void persistFinanceRowBy專案ID(fid);
                                       }}
                                       className={finDateInputCls}
                                     />
@@ -7709,7 +7645,7 @@ export default function DashboardPage() {
               )}
               {invoices.length > 0 && (
                 <p className="mb-2 text-[11px] text-stone-500">
-                  各欄可直接編輯；約 0.65 秒無變更或離開欄位時會儲存。發票號碼不可空白。
+                  各欄可直接編輯；離開欄位時才會儲存。發票號碼不可空白。
                 </p>
               )}
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
@@ -7809,7 +7745,9 @@ export default function DashboardPage() {
                                           setInvoices((prev) =>
                                             prev.map((r) => (r.id === rowId ? { ...r, 專案ID: projectId } : r))
                                           );
-                                          schedulePersistInvoiceRow(rowId);
+                                        }}
+                                        onBlur={() => {
+                                          void persistInvoiceRowById(rowId);
                                         }}
                                       />
                                     </td>
@@ -7827,10 +7765,9 @@ export default function DashboardPage() {
                                           setInvoices((prev) =>
                                             prev.map((r) => (r.id === rowId ? { ...r, 備註: e.target.value } : r))
                                           );
-                                          schedulePersistInvoiceRow(rowId);
                                         }}
                                         onBlur={() => {
-                                          flushPersistInvoiceRow(rowId);
+                                          void persistInvoiceRowById(rowId);
                                         }}
                                         className={`${inputCls} max-w-full resize-y`}
                                       />
@@ -7849,10 +7786,9 @@ export default function DashboardPage() {
                                         setInvoices((prev) =>
                                           prev.map((r) => (r.id === rowId ? { ...r, [k]: e.target.value } : r))
                                         );
-                                        schedulePersistInvoiceRow(rowId);
                                       }}
                                       onBlur={() => {
-                                        flushPersistInvoiceRow(rowId);
+                                        void persistInvoiceRowById(rowId);
                                       }}
                                       className={inputCls}
                                     />
@@ -7930,7 +7866,7 @@ export default function DashboardPage() {
               )}
               {paymentRecords.length > 0 && (
                 <p className="mb-2 text-[11px] text-stone-500">
-                  各欄可直接編輯；約 0.65 秒無變更或離開欄位時會儲存。欄位比照付款表：發票號碼、付款日期、付款專案、付款對象、付款金額。
+                  各欄可直接編輯；離開欄位時才會儲存。欄位比照付款表：發票號碼、付款日期、付款專案、付款對象、付款金額。
                 </p>
               )}
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
