@@ -517,6 +517,46 @@ function parseNumericField(v: string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+type InvoiceSummary = {
+  rows: InvoiceRow[];
+  count: number;
+  totalAmount: number;
+  paidAmount: number;
+  unpaidAmount: number;
+  status: string;
+};
+
+function buildInvoiceSummary(rows: InvoiceRow[]): InvoiceSummary {
+  let totalAmount = 0;
+  let paidAmount = 0;
+  for (const row of rows) {
+    const amount = parseNumericField(row.發票金額含稅);
+    totalAmount += amount;
+    if (String(row.廠商付款日期 ?? "").trim()) paidAmount += amount;
+  }
+  const unpaidAmount = totalAmount - paidAmount;
+  const status =
+    rows.length === 0
+      ? "未開票"
+      : paidAmount <= 0
+        ? "已開票未收"
+        : unpaidAmount <= 0
+          ? "已收款"
+          : "部分收款";
+  return { rows, count: rows.length, totalAmount, paidAmount, unpaidAmount, status };
+}
+
+function invoiceSummarySearchText(summary: InvoiceSummary | undefined): string {
+  if (!summary || summary.count === 0) return "未開票";
+  return [
+    summary.status,
+    `${summary.count}張`,
+    `含稅${Math.round(summary.totalAmount)}`,
+    `已收${Math.round(summary.paidAmount)}`,
+    `未收${Math.round(summary.unpaidAmount)}`,
+  ].join(" ");
+}
+
 /** 將常見日期字串轉成 yyyy-MM-dd 供 input type="date" */
 function toHtmlDateValue(raw: string | null | undefined): string {
   const s = String(raw ?? "").trim();
@@ -666,11 +706,15 @@ function masterTableCellText(
   row: MasterRow,
   colKey: string,
   partnerByKolName: Map<string, PartnerRow>,
-  financeByProjectId?: Map<string, FinanceRow>
+  financeByProjectId?: Map<string, FinanceRow>,
+  invoiceSummaryByProjectId?: Map<string, InvoiceSummary>
 ): string {
+  const pid = String(row.專案ID ?? "").trim();
   if (colKey === "款項進度") {
-    const pid = String(row.專案ID ?? "").trim();
     return financeProgressShortLabel(pid ? financeByProjectId?.get(pid) : undefined);
+  }
+  if (colKey === "發票摘要") {
+    return invoiceSummarySearchText(pid ? invoiceSummaryByProjectId?.get(pid) : undefined);
   }
   const modeB = isPayoutModeB(String(row.專案類型 ?? ""));
   if (colKey === "經紀人") {
@@ -1673,6 +1717,11 @@ export default function DashboardPage() {
           if (idx !== -1) merged.splice(idx + 1, 0, "款項進度");
           else merged.push("款項進度");
         }
+        if (allKeys.includes("發票摘要") && !merged.includes("發票摘要")) {
+          const idx = merged.indexOf("款項進度");
+          if (idx !== -1) merged.splice(idx + 1, 0, "發票摘要");
+          else merged.push("發票摘要");
+        }
         return merged.filter((k) => allKeys.includes(k));
       }
       return normalized;
@@ -1955,6 +2004,22 @@ export default function DashboardPage() {
     return m;
   }, [finance]);
 
+  const invoiceSummaryByProjectId = useMemo(() => {
+    const grouped = new Map<string, InvoiceRow[]>();
+    for (const invoice of invoices) {
+      const pid = String(invoice.專案ID ?? "").trim();
+      if (!pid) continue;
+      const rows = grouped.get(pid) ?? [];
+      rows.push(invoice);
+      grouped.set(pid, rows);
+    }
+    const summaries = new Map<string, InvoiceSummary>();
+    for (const [pid, rows] of grouped) {
+      summaries.set(pid, buildInvoiceSummary(rows));
+    }
+    return summaries;
+  }, [invoices]);
+
   const masterByProjectId = useMemo(() => {
     const m = new Map<string, MasterRow>();
     for (const row of masterList) {
@@ -1984,10 +2049,10 @@ export default function DashboardPage() {
     if (!q) return masterTabFilteredList;
     return masterTabFilteredList.filter((row) =>
       masterVisibleCols.some((k) =>
-        masterTableCellText(row, k, partnerByKolName, financeByProjectId).toLowerCase().includes(q)
+        masterTableCellText(row, k, partnerByKolName, financeByProjectId, invoiceSummaryByProjectId).toLowerCase().includes(q)
       )
     );
-  }, [masterTabFilteredList, masterVisibleCols, deferredMasterSearch, partnerByKolName, financeByProjectId]);
+  }, [masterTabFilteredList, masterVisibleCols, deferredMasterSearch, partnerByKolName, financeByProjectId, invoiceSummaryByProjectId]);
 
   /**
    * 依「目前子分頁篩選後」是否同時含模式 A 與模式 B 專案，決定表頭角色欄。
@@ -3900,7 +3965,9 @@ export default function DashboardPage() {
                             ? "min-w-[12rem]"
                             : k === "款項進度"
                               ? "min-w-[5.5rem]"
-                              : "min-w-[5rem]"
+                              : k === "發票摘要"
+                                ? "min-w-[11rem]"
+                                : "min-w-[5rem]"
                       }
                     />
                   ))}
@@ -3917,7 +3984,9 @@ export default function DashboardPage() {
                               ? "sticky left-[5rem] z-30 w-48 min-w-[12rem] max-w-[12rem] bg-stone-100 px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
                               : k === "款項進度"
                                 ? "min-w-[5.5rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
-                                : "min-w-[5rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600 whitespace-nowrap"
+                                : k === "發票摘要"
+                                  ? "min-w-[11rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
+                                  : "min-w-[5rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600 whitespace-nowrap"
                         }
                       >
                         {tableColumnLabels.master?.[k] ?? k}
@@ -3970,6 +4039,8 @@ export default function DashboardPage() {
                       const isExpanded = expandedProjectId === pid;
                       // 大總表展開列：該專案任務全顯（不套用任務②可見規則）；側邊「任務」分頁仍為 filteredTasks
                       const projectTasks = tasks.filter((t) => (t.專案ID ?? "").trim().toLowerCase() === pid.trim().toLowerCase());
+                      const invoiceSummary = invoiceSummaryByProjectId.get(String(pid).trim());
+                      const projectInvoices = invoiceSummary?.rows ?? [];
                       return (
                         <Fragment key={row.id ?? pid}>
                           <tr
@@ -4033,6 +4104,45 @@ export default function DashboardPage() {
                                     >
                                       {short}
                                     </span>
+                                  </td>
+                                );
+                              }
+                              if (k === "發票摘要") {
+                                const summary = invoiceSummary ?? buildInvoiceSummary([]);
+                                const hasInvoices = summary.count > 0;
+                                const badgeClass =
+                                  summary.status === "已收款"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : summary.status === "部分收款"
+                                      ? "bg-amber-100 text-amber-800"
+                                      : summary.status === "已開票未收"
+                                        ? "bg-orange-100 text-orange-800"
+                                        : "bg-stone-100 text-stone-500";
+                                return (
+                                  <td key={k} className="whitespace-nowrap bg-white/90 px-4 py-2.5 text-xs text-stone-600">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!hasInvoices) return;
+                                        setExpandedProjectId((prev) => (prev === pid ? null : pid));
+                                      }}
+                                      disabled={!hasInvoices}
+                                      className="group rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 text-left shadow-sm transition hover:border-amber-300 hover:bg-amber-50 disabled:cursor-default disabled:bg-stone-50 disabled:shadow-none"
+                                      title={hasInvoices ? "展開查看此專案發票明細" : "此專案尚無對應發票"}
+                                    >
+                                      <span className={`mb-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${badgeClass}`}>
+                                        {summary.status}
+                                      </span>
+                                      <span className="block font-semibold text-stone-800">
+                                        {hasInvoices ? `${summary.count} 張 / ${formatAmount(String(Math.round(summary.totalAmount)))}` : "尚無發票"}
+                                      </span>
+                                      {hasInvoices && (
+                                        <span className="block text-[10px] text-stone-500">
+                                          已收 {formatAmount(String(Math.round(summary.paidAmount)))} · 未收 {formatAmount(String(Math.round(summary.unpaidAmount)))}
+                                        </span>
+                                      )}
+                                    </button>
                                   </td>
                                 );
                               }
@@ -4270,6 +4380,64 @@ export default function DashboardPage() {
                                         )}
                                       </tbody>
                                     </table>
+                                  </div>
+                                  <div className="mb-4 rounded-lg border border-emerald-100 bg-white/90 p-3">
+                                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                      <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-800">此專案發票</h3>
+                                      {invoiceSummary && invoiceSummary.count > 0 && (
+                                        <p className="text-xs text-stone-500">
+                                          共 {invoiceSummary.count} 張，含稅合計 {formatAmount(String(Math.round(invoiceSummary.totalAmount)))}，
+                                          已收 {formatAmount(String(Math.round(invoiceSummary.paidAmount)))}，
+                                          未收 {formatAmount(String(Math.round(invoiceSummary.unpaidAmount)))}
+                                        </p>
+                                      )}
+                                    </div>
+                                    {projectInvoices.length === 0 ? (
+                                      <p className="rounded-lg bg-stone-50 px-3 py-3 text-sm text-stone-500">
+                                        尚無對應發票。可到「財務 / 發票清冊」將發票的對應專案設為此專案ID。
+                                      </p>
+                                    ) : (
+                                      <div className="max-w-full overflow-x-auto rounded-lg border border-stone-200/90">
+                                        <table className="min-w-full divide-y divide-stone-200 text-xs">
+                                          <thead className="bg-emerald-50">
+                                            <tr>
+                                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">發票號碼</th>
+                                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">發票日期</th>
+                                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">收款對象</th>
+                                              <th className="whitespace-nowrap px-3 py-2 text-right font-semibold text-stone-600">含稅金額</th>
+                                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">預計付款日</th>
+                                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">付款日期</th>
+                                              <th className="min-w-[10rem] px-3 py-2 text-left font-semibold text-stone-600">備註</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-stone-100 bg-white">
+                                            {projectInvoices.map((invoice, idx) => (
+                                              <tr key={invoice.id ?? `${pid}-invoice-${idx}`} className="hover:bg-emerald-50/50">
+                                                <td className="whitespace-nowrap px-3 py-2 font-medium text-stone-800">{invoice.發票號碼 || "—"}</td>
+                                                <td className="whitespace-nowrap px-3 py-2 text-stone-600">{invoice.發票日期 || "—"}</td>
+                                                <td className="whitespace-nowrap px-3 py-2 text-stone-600">{invoice.收款對象 || "—"}</td>
+                                                <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums text-stone-800">
+                                                  {formatAmount(invoice.發票金額含稅)}
+                                                </td>
+                                                <td className="whitespace-nowrap px-3 py-2 text-stone-600">{invoice.廠商預計付款日 || "—"}</td>
+                                                <td className="whitespace-nowrap px-3 py-2 text-stone-600">
+                                                  {invoice.廠商付款日期 ? (
+                                                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-800">
+                                                      {invoice.廠商付款日期}
+                                                    </span>
+                                                  ) : (
+                                                    <span className="rounded-full bg-orange-100 px-2 py-0.5 font-semibold text-orange-800">未收</span>
+                                                  )}
+                                                </td>
+                                                <td className="max-w-[16rem] px-3 py-2 text-stone-600">
+                                                  <span className="line-clamp-2 break-words">{invoice.備註 || "—"}</span>
+                                                </td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    )}
                                   </div>
                                   {addingTaskFor === pid ? (
                                     <form

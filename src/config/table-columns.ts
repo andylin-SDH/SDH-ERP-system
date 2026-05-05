@@ -35,6 +35,8 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "專案狀態", label: "專案狀態" },
     /** 依財務「廠商付款日期／員工分潤日期」衍生，非大總表 DB 欄位 */
     { key: "款項進度", label: "款項進度" },
+    /** 依發票清冊同 專案ID 匯總，非大總表 DB 欄位 */
+    { key: "發票摘要", label: "發票摘要" },
     { key: "開案日期", label: "開案日期" },
     { key: "專案總金額未稅", label: "專案總金額未稅" },
     { key: "專案營收", label: "專案營收" },
