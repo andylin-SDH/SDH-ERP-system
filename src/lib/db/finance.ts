@@ -15,6 +15,7 @@ export type InvoiceInsertInput = {
   專案ID?: string | null;
   發票號碼?: string | null;
   發票日期?: string | null;
+  收款對象?: string | null;
   發票金額含稅?: string | null;
   廠商預計付款日?: string | null;
   廠商付款日期?: string | null;
@@ -38,6 +39,7 @@ function mapInvoiceRecord(r: Record<string, unknown>): InvoiceRow {
       r.專案ID != null && String(r.專案ID).trim() !== "" ? String(r.專案ID) : undefined,
     發票號碼: r.發票號碼 != null ? String(r.發票號碼) : undefined,
     發票日期: r.發票日期 != null ? String(r.發票日期) : undefined,
+    收款對象: r.收款對象 != null ? String(r.收款對象) : undefined,
     發票金額含稅: normalizeMoneyString(r.發票金額含稅),
     廠商預計付款日: r.廠商預計付款日 != null ? String(r.廠商預計付款日) : undefined,
     廠商付款日期: r.廠商付款日期 != null ? String(r.廠商付款日期) : undefined,
@@ -225,6 +227,7 @@ export async function createInvoicesBatch(rows: InvoiceInsertInput[]): Promise<I
       專案ID: trimOrNull(row.專案ID ?? undefined),
       發票號碼: trimOrNull(row.發票號碼 ?? undefined),
       發票日期: trimOrNull(row.發票日期 ?? undefined),
+      收款對象: trimOrNull(row.收款對象 ?? undefined),
       發票金額含稅: normalizeMoneyOrNull(row.發票金額含稅 ?? undefined),
       廠商預計付款日: trimOrNull(row.廠商預計付款日 ?? undefined),
       廠商付款日期: trimOrNull(row.廠商付款日期 ?? undefined),
@@ -255,6 +258,7 @@ export async function updateInvoiceById(id: string, row: InvoiceInsertInput): Pr
     專案ID: trimOrNull(row.專案ID ?? undefined),
     發票號碼,
     發票日期: trimOrNull(row.發票日期 ?? undefined),
+    收款對象: trimOrNull(row.收款對象 ?? undefined),
     發票金額含稅: normalizeMoneyOrNull(row.發票金額含稅 ?? undefined),
     廠商預計付款日: trimOrNull(row.廠商預計付款日 ?? undefined),
     廠商付款日期: trimOrNull(row.廠商付款日期 ?? undefined),
