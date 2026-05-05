@@ -186,6 +186,104 @@ function emptyInvoiceDraftRow(): Record<string, string> {
   return Object.fromEntries(INVOICE_DRAFT_KEYS.map((k) => [k, ""])) as Record<string, string>;
 }
 
+type InvoiceDraftKey = (typeof INVOICE_DRAFT_KEYS)[number];
+
+const INVOICE_IMPORT_HEADER_ALIASES: Record<string, InvoiceDraftKey> = {
+  專案id: "專案ID",
+  專案ID: "專案ID",
+  對應專案: "專案ID",
+  projectid: "專案ID",
+  project_id: "專案ID",
+  發票號碼: "發票號碼",
+  發票編號: "發票號碼",
+  憑證號碼: "發票號碼",
+  發票日期: "發票日期",
+  發票開立日: "發票日期",
+  發票開立日期: "發票日期",
+  開立日期: "發票日期",
+  收款對象: "收款對象",
+  付款方: "收款對象",
+  客戶名稱: "收款對象",
+  客戶: "收款對象",
+  發票金額含稅: "發票金額含稅",
+  含稅金額: "發票金額含稅",
+  收款金額: "發票金額含稅",
+  金額: "發票金額含稅",
+  廠商預計付款日: "廠商預計付款日",
+  預計付款日: "廠商預計付款日",
+  預計收款日: "廠商預計付款日",
+  廠商付款日期: "廠商付款日期",
+  收款日期: "廠商付款日期",
+  實際收款日: "廠商付款日期",
+  付款日期: "廠商付款日期",
+  備註: "備註",
+  note: "備註",
+  notes: "備註",
+};
+
+function normalizeInvoiceImportHeader(header: string): string {
+  return String(header ?? "").replace(/[\s　｜|/\\()（）:_-]/g, "").trim().toLowerCase();
+}
+
+function parseDelimitedLine(line: string, delimiter: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (quoted && line[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (ch === delimiter && !quoted) {
+      out.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  out.push(cur);
+  return out.map((v) => v.trim());
+}
+
+function parseInvoiceImportText(text: string): {
+  headers: string[];
+  mappedKeys: Array<InvoiceDraftKey | "">;
+  rows: Record<string, string>[];
+  error: string | null;
+} {
+  const rawLines = String(text ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .filter((line) => line.trim() !== "");
+  if (rawLines.length === 0) return { headers: [], mappedKeys: [], rows: [], error: null };
+  if (rawLines.length < 2) return { headers: [], mappedKeys: [], rows: [], error: "請貼上含標題列與至少一筆資料的表格" };
+
+  const delimiter = rawLines.some((line) => line.includes("\t")) ? "\t" : ",";
+  const headers = parseDelimitedLine(rawLines[0], delimiter);
+  const mappedKeys = headers.map((h) => INVOICE_IMPORT_HEADER_ALIASES[normalizeInvoiceImportHeader(h)] ?? "");
+  const rows = rawLines.slice(1).map((line) => {
+    const cells = parseDelimitedLine(line, delimiter);
+    const row = emptyInvoiceDraftRow();
+    mappedKeys.forEach((key, idx) => {
+      if (!key) return;
+      row[key] = cells[idx] ?? "";
+    });
+    return row;
+  }).filter((row) => INVOICE_DRAFT_KEYS.some((key) => String(row[key] ?? "").trim() !== ""));
+
+  return {
+    headers,
+    mappedKeys,
+    rows,
+    error: rows.length === 0 ? "沒有解析到可匯入的資料列" : null,
+  };
+}
+
 const PAYMENT_RECORD_KEYS = ["發票號碼", "付款日期", "付款專案", "付款對象", "付款金額", "備註"] as const;
 
 function emptyPaymentRecordDraftRow(): Record<string, string> {
@@ -1038,6 +1136,8 @@ export default function DashboardPage() {
   /** 財務分頁內：依專案列 vs 發票清冊 vs 付款記錄 */
   const [financeSubTab, setFinanceSubTab] = useState<"byProject" | "invoices" | "payments">("byProject");
   const [showInvoiceCreateModal, setShowInvoiceCreateModal] = useState(false);
+  const [showInvoicePasteImportModal, setShowInvoicePasteImportModal] = useState(false);
+  const [invoicePasteText, setInvoicePasteText] = useState("");
   const [invoiceDraftRows, setInvoiceDraftRows] = useState<Array<Record<string, string>>>([]);
   const [savingInvoices, setSavingInvoices] = useState(false);
   const [invoiceCreateError, setInvoiceCreateError] = useState<string | null>(null);
@@ -1112,6 +1212,7 @@ export default function DashboardPage() {
       return byName || a.id.localeCompare(b.id, "zh-TW");
     });
   }, [masterList]);
+  const invoicePasteImport = useMemo(() => parseInvoiceImportText(invoicePasteText), [invoicePasteText]);
   /** 刪除專案確認視窗：連動筆數（任務、分潤列） */
   const masterDeleteRelatedCounts = useMemo(() => {
     if (!selectedMaster) return { tasks: 0, payouts: 0 };
@@ -7462,6 +7563,17 @@ export default function DashboardPage() {
                   >
                     新增發票（批次）
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInvoiceCreateError(null);
+                      setInvoicePasteText("");
+                      setShowInvoicePasteImportModal(true);
+                    }}
+                    className="rounded-xl border border-amber-400/80 bg-white px-4 py-2 text-xs font-bold text-amber-900 shadow-sm shadow-amber-100/40 transition hover:bg-amber-50"
+                  >
+                    貼上匯入
+                  </button>
                 </div>
                 <input
                   type="text"
@@ -8018,6 +8130,157 @@ export default function DashboardPage() {
                 className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 shadow shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-50"
               >
                 {savingInvoices ? "儲存中…" : "儲存"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+
+      {/* 貼上匯入發票（Google Sheet / CSV） */}
+      {showInvoicePasteImportModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/30 p-4 backdrop-blur-sm">
+          <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
+            <header className="flex shrink-0 flex-wrap items-start justify-between gap-2 border-b border-stone-200/90 bg-stone-100/90 px-4 py-3 sm:px-6">
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold tracking-tight text-stone-900 sm:text-xl">貼上匯入發票</h2>
+                <p className="mt-0.5 text-xs text-stone-500">
+                  從 Google Sheet 複製含標題列的範圍後貼上。系統會自動對應同名與常見欄位，例如「發票開立日」、「收款日期」、「收款金額」。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInvoicePasteImportModal(false);
+                  setInvoiceCreateError(null);
+                }}
+                className="shrink-0 rounded-xl border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm font-semibold text-stone-600 hover:bg-stone-100"
+              >
+                關閉
+              </button>
+            </header>
+            <div className="min-h-0 flex-1 space-y-4 overflow-auto px-3 py-3 sm:px-6">
+              {invoiceCreateError && (
+                <p className="rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-800">{invoiceCreateError}</p>
+              )}
+              <div>
+                <label className="mb-1.5 block text-xs font-bold text-stone-600">貼上 Google Sheet / CSV 內容</label>
+                <textarea
+                  value={invoicePasteText}
+                  onChange={(e) => {
+                    setInvoiceCreateError(null);
+                    setInvoicePasteText(e.target.value);
+                  }}
+                  rows={8}
+                  placeholder={"發票號碼\t發票開立日\t收款對象\t收款金額\t收款日期\nAB12345678\t2026/01/01\t某某公司\t10000\t2026/01/15"}
+                  className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2 text-xs font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                />
+              </div>
+
+              {invoicePasteText.trim() !== "" && (
+                <div className="space-y-3">
+                  {invoicePasteImport.error && (
+                    <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{invoicePasteImport.error}</p>
+                  )}
+                  <div className="rounded-xl border border-stone-200/90 bg-stone-50/80 p-3">
+                    <p className="mb-2 text-xs font-bold text-stone-700">欄位對應</p>
+                    <div className="flex flex-wrap gap-2">
+                      {invoicePasteImport.headers.map((header, idx) => {
+                        const mapped = invoicePasteImport.mappedKeys[idx];
+                        return (
+                          <span
+                            key={`${header}-${idx}`}
+                            className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                              mapped
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                : "border-stone-200 bg-white text-stone-400"
+                            }`}
+                          >
+                            {header || `第 ${idx + 1} 欄`} → {mapped || "略過"}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-2 text-[11px] text-stone-500">
+                      解析到 {invoicePasteImport.rows.length} 筆資料。未對應欄位會略過；發票號碼空白的列不會被後端新增。
+                    </p>
+                  </div>
+
+                  {invoicePasteImport.rows.length > 0 && (
+                    <div className="overflow-x-auto rounded-xl border border-stone-200/90">
+                      <table className="min-w-[820px] w-full border-collapse text-xs">
+                        <thead className="bg-stone-100">
+                          <tr>
+                            {INVOICE_DRAFT_KEYS.map((key) => (
+                              <th key={key} className="whitespace-nowrap border-b border-stone-200 px-2 py-2 text-left font-semibold text-stone-600">
+                                {tableColumnLabels.invoices?.[key] ?? key}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {invoicePasteImport.rows.slice(0, 20).map((row, rowIdx) => (
+                            <tr key={rowIdx} className="odd:bg-white even:bg-stone-50">
+                              {INVOICE_DRAFT_KEYS.map((key) => (
+                                <td key={key} className="max-w-[14rem] truncate border-b border-stone-100 px-2 py-2 text-stone-700" title={row[key] || undefined}>
+                                  {row[key] || "—"}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {invoicePasteImport.rows.length > 20 && (
+                        <p className="px-3 py-2 text-right text-[11px] text-stone-500">只預覽前 20 筆，共 {invoicePasteImport.rows.length} 筆</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-stone-200/90 bg-stone-50/90 px-4 py-3 sm:px-6">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInvoicePasteImportModal(false);
+                  setInvoiceCreateError(null);
+                }}
+                className="rounded-xl border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-600 hover:bg-stone-100"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={savingInvoices || invoicePasteImport.rows.length === 0 || Boolean(invoicePasteImport.error)}
+                onClick={async () => {
+                  setInvoiceCreateError(null);
+                  setSavingInvoices(true);
+                  try {
+                    const res = await fetch("/api/invoices", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ invoices: invoicePasteImport.rows }),
+                    });
+                    const data = (await safeResJson(res)) as { ok?: boolean; error?: string; invoices?: InvoiceRow[] };
+                    if (!res.ok || !data.ok) {
+                      setInvoiceCreateError(data.error ?? "匯入失敗");
+                      setSavingInvoices(false);
+                      return;
+                    }
+                    if (data.invoices?.length) {
+                      setInvoices((prev) => [...data.invoices!, ...prev]);
+                    } else {
+                      await refreshDashboardData(["invoices", "finance"]);
+                    }
+                    setShowInvoicePasteImportModal(false);
+                    setInvoicePasteText("");
+                  } catch (err: unknown) {
+                    setInvoiceCreateError(err instanceof Error ? err.message : "匯入失敗");
+                  }
+                  setSavingInvoices(false);
+                }}
+                className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 shadow shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-50"
+              >
+                {savingInvoices ? "匯入中…" : `確認匯入 ${invoicePasteImport.rows.length} 筆`}
               </button>
             </footer>
           </div>
