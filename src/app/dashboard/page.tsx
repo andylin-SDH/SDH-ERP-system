@@ -1705,24 +1705,19 @@ export default function DashboardPage() {
         }
         return merged.filter((k) => allKeys.includes(k));
       }
-      /** 大總表：款項進度（依財務衍生，預設緊接在專案狀態後）；舊 ③ 僅勾「專案引薦人」時補「專案開發人」 */
+      /** 大總表：主表只自動補發票摘要；款項進度移到展開細節中顯示 */
       if (tableKey === "master") {
         const merged = [...normalized];
         if (merged.includes("專案引薦人") && !merged.includes("專案開發人") && allKeys.includes("專案開發人")) {
           const idx = merged.indexOf("專案引薦人");
           merged.splice(idx + 1, 0, "專案開發人");
         }
-        if (allKeys.includes("款項進度") && !merged.includes("款項進度")) {
-          const idx = merged.indexOf("專案狀態");
-          if (idx !== -1) merged.splice(idx + 1, 0, "款項進度");
-          else merged.push("款項進度");
-        }
         if (allKeys.includes("發票摘要") && !merged.includes("發票摘要")) {
-          const idx = merged.indexOf("款項進度");
+          const idx = merged.indexOf("專案狀態");
           if (idx !== -1) merged.splice(idx + 1, 0, "發票摘要");
           else merged.push("發票摘要");
         }
-        return merged.filter((k) => allKeys.includes(k));
+        return merged.filter((k) => allKeys.includes(k) && k !== "款項進度");
       }
       return normalized;
     },
@@ -4041,6 +4036,9 @@ export default function DashboardPage() {
                       const projectTasks = tasks.filter((t) => (t.專案ID ?? "").trim().toLowerCase() === pid.trim().toLowerCase());
                       const invoiceSummary = invoiceSummaryByProjectId.get(String(pid).trim());
                       const projectInvoices = invoiceSummary?.rows ?? [];
+                      const projectFinance = financeByProjectId.get(String(pid).trim());
+                      const financeProgress = financeProgressShortLabel(projectFinance);
+                      const financeProgressInfo = financeProgressDetail(projectFinance);
                       return (
                         <Fragment key={row.id ?? pid}>
                           <tr
@@ -4198,6 +4196,25 @@ export default function DashboardPage() {
                             <tr key={`${pid}-tasks`}>
                               <td colSpan={masterColsForDisplay.length || 15} className="border-t-0 bg-stone-50 px-4 py-4">
                                 <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
+                                  <div className="mb-4 rounded-lg border border-stone-200 bg-white/90 p-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                      <div>
+                                        <h3 className="text-sm font-bold uppercase tracking-wider text-stone-700">款項進度</h3>
+                                        <p className="mt-1 text-xs text-stone-500">{financeProgressInfo}</p>
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                                        <span className={`rounded-full px-2.5 py-0.5 font-semibold ${financeProgressBadgeClass(financeProgress)}`}>
+                                          {financeProgress}
+                                        </span>
+                                        <span className="text-stone-500">
+                                          廠商付款：{projectFinance?.廠商付款日期 || "—"}
+                                        </span>
+                                        <span className="text-stone-500">
+                                          員工分潤：{projectFinance?.員工分潤日期 || "—"}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
                                   <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-amber-800">此專案任務</h3>
                                   <div className="mb-4 max-w-full overflow-x-auto rounded-lg border border-stone-200/90">
                                     {/*
