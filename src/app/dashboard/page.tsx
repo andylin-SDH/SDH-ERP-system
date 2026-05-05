@@ -2168,6 +2168,10 @@ export default function DashboardPage() {
     () => searchedInvoices.slice(0, invoicesRenderCount),
     [searchedInvoices, invoicesRenderCount]
   );
+  const visibleInvoiceIds = useMemo(
+    () => visibleInvoicesRows.map((inv) => inv.id).filter((id): id is string => typeof id === "string" && id.trim() !== ""),
+    [visibleInvoicesRows]
+  );
   const visiblePaymentRecordsRows = useMemo(
     () => searchedPaymentRecords.slice(0, paymentRecordsRenderCount),
     [searchedPaymentRecords, paymentRecordsRenderCount]
@@ -7719,15 +7723,14 @@ export default function DashboardPage() {
                           <input
                             type="checkbox"
                             checked={
-                              visibleInvoicesRows.some((inv) => inv.id) &&
-                              visibleInvoicesRows.filter((inv) => inv.id).every((inv) => selectedInvoiceIdSet.has(inv.id!))
+                              visibleInvoiceIds.length > 0 &&
+                              visibleInvoiceIds.every((id) => selectedInvoiceIdSet.has(id))
                             }
                             onChange={(e) => {
-                              const ids = visibleInvoicesRows.map((inv) => inv.id).filter((id): id is string => Boolean(id));
                               setSelectedInvoiceIds((prev) => {
                                 const next = new Set(prev);
-                                if (e.target.checked) ids.forEach((id) => next.add(id));
-                                else ids.forEach((id) => next.delete(id));
+                                if (e.target.checked) visibleInvoiceIds.forEach((id) => next.add(id));
+                                else visibleInvoiceIds.forEach((id) => next.delete(id));
                                 return [...next];
                               });
                             }}
