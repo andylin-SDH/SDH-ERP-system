@@ -15,12 +15,8 @@ export type InvoiceInsertInput = {
   專案ID?: string | null;
   發票號碼?: string | null;
   發票日期?: string | null;
-  發票金額未稅?: string | null;
   發票金額含稅?: string | null;
-  發票稅金?: string | null;
   廠商預計付款日?: string | null;
-  廠商實付金額?: string | null;
-  廠商付款狀態?: string | null;
   廠商付款日期?: string | null;
   備註?: string | null;
 };
@@ -42,12 +38,8 @@ function mapInvoiceRecord(r: Record<string, unknown>): InvoiceRow {
       r.專案ID != null && String(r.專案ID).trim() !== "" ? String(r.專案ID) : undefined,
     發票號碼: r.發票號碼 != null ? String(r.發票號碼) : undefined,
     發票日期: r.發票日期 != null ? String(r.發票日期) : undefined,
-    發票金額未稅: normalizeMoneyString(r.發票金額未稅),
     發票金額含稅: normalizeMoneyString(r.發票金額含稅),
-    發票稅金: normalizeMoneyString(r.發票稅金),
     廠商預計付款日: r.廠商預計付款日 != null ? String(r.廠商預計付款日) : undefined,
-    廠商實付金額: normalizeMoneyString(r.廠商實付金額),
-    廠商付款狀態: r.廠商付款狀態 != null ? String(r.廠商付款狀態) : undefined,
     廠商付款日期: r.廠商付款日期 != null ? String(r.廠商付款日期) : undefined,
     備註: r.備註 != null ? String(r.備註) : undefined,
   };
@@ -141,12 +133,7 @@ function mapFinanceDbRow(r: Record<string, unknown>, 專案名稱: string | unde
     專案利潤比: normalizeMoneyString(r.專案利潤比),
     發票號碼: r.發票號碼 != null ? String(r.發票號碼) : undefined,
     廠商預計付款日: r.廠商預計付款日 != null ? String(r.廠商預計付款日) : undefined,
-    廠商付款日期:
-      r.廠商付款日期 != null
-        ? String(r.廠商付款日期)
-        : r.廠商付款狀態 != null
-          ? String(r.廠商付款狀態)
-          : undefined,
+    廠商付款日期: r.廠商付款日期 != null ? String(r.廠商付款日期) : undefined,
     員工分潤日期:
       r.員工分潤日期 != null
         ? String(r.員工分潤日期)
@@ -238,12 +225,8 @@ export async function createInvoicesBatch(rows: InvoiceInsertInput[]): Promise<I
       專案ID: trimOrNull(row.專案ID ?? undefined),
       發票號碼: trimOrNull(row.發票號碼 ?? undefined),
       發票日期: trimOrNull(row.發票日期 ?? undefined),
-      發票金額未稅: normalizeMoneyOrNull(row.發票金額未稅 ?? undefined),
       發票金額含稅: normalizeMoneyOrNull(row.發票金額含稅 ?? undefined),
-      發票稅金: normalizeMoneyOrNull(row.發票稅金 ?? undefined),
       廠商預計付款日: trimOrNull(row.廠商預計付款日 ?? undefined),
-      廠商實付金額: normalizeMoneyOrNull(row.廠商實付金額 ?? undefined),
-      廠商付款狀態: trimOrNull(row.廠商付款狀態 ?? undefined),
       廠商付款日期: trimOrNull(row.廠商付款日期 ?? undefined),
       備註: trimOrNull(row.備註 ?? undefined),
     }))
@@ -272,12 +255,8 @@ export async function updateInvoiceById(id: string, row: InvoiceInsertInput): Pr
     專案ID: trimOrNull(row.專案ID ?? undefined),
     發票號碼,
     發票日期: trimOrNull(row.發票日期 ?? undefined),
-    發票金額未稅: normalizeMoneyOrNull(row.發票金額未稅 ?? undefined),
     發票金額含稅: normalizeMoneyOrNull(row.發票金額含稅 ?? undefined),
-    發票稅金: normalizeMoneyOrNull(row.發票稅金 ?? undefined),
     廠商預計付款日: trimOrNull(row.廠商預計付款日 ?? undefined),
-    廠商實付金額: normalizeMoneyOrNull(row.廠商實付金額 ?? undefined),
-    廠商付款狀態: trimOrNull(row.廠商付款狀態 ?? undefined),
     廠商付款日期: trimOrNull(row.廠商付款日期 ?? undefined),
     備註: trimOrNull(row.備註 ?? undefined),
   };

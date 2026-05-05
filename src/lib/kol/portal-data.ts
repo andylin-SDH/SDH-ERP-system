@@ -13,16 +13,6 @@ import type { KolPortalProject } from "@/lib/kol/types";
 
 export type { KolPortalProject } from "@/lib/kol/types";
 
-function parseNum(v: string | null | undefined): number {
-  if (v == null || String(v).trim() === "") return 0;
-  const n = Number(String(v).replace(/,/g, "").trim());
-  return Number.isFinite(n) ? n : 0;
-}
-
-function formatAmountInt(n: number): string {
-  return Math.round(n).toLocaleString("zh-TW");
-}
-
 export async function buildKolPortalData(user: User): Promise<
   | { ok: true; partnerId: string; partnerName: string; projects: KolPortalProject[] }
   | { ok: false; error: string }
@@ -83,10 +73,6 @@ export async function buildKolPortalData(user: User): Promise<
     if (!pid) continue;
     const f = financeByPid.get(pid);
     const invs = invoicesByPid.get(pid) ?? [];
-    let sum未稅 = 0;
-    for (const inv of invs) {
-      sum未稅 += parseNum(inv.發票金額未稅);
-    }
     projects.push({
       專案ID: pid,
       專案名稱: String(row.專案名稱 ?? "—"),
@@ -96,7 +82,7 @@ export async function buildKolPortalData(user: User): Promise<
       款項進度: kolFinanceProgressShort(f?.廠商付款日期, f?.員工分潤日期),
       廠商付款日期: String(f?.廠商付款日期 ?? "").trim() || "—",
       員工分潤日期: String(f?.員工分潤日期 ?? "").trim() || "—",
-      發票已開未稅合計: formatAmountInt(sum未稅),
+      發票已開未稅合計: "—",
       發票筆數: invs.length,
     });
   }

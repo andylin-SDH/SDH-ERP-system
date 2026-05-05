@@ -175,12 +175,8 @@ const INVOICE_DRAFT_KEYS = [
   "專案ID",
   "發票號碼",
   "發票日期",
-  "發票金額未稅",
   "發票金額含稅",
-  "發票稅金",
   "廠商預計付款日",
-  "廠商實付金額",
-  "廠商付款狀態",
   "廠商付款日期",
   "備註",
 ] as const;
@@ -346,12 +342,8 @@ function invoiceRowToInsertInput(row: InvoiceRow): InvoiceInsertInput {
     專案ID: row.專案ID ?? "",
     發票號碼: row.發票號碼 ?? "",
     發票日期: row.發票日期 ?? "",
-    發票金額未稅: row.發票金額未稅 ?? "",
     發票金額含稅: row.發票金額含稅 ?? "",
-    發票稅金: row.發票稅金 ?? "",
     廠商預計付款日: row.廠商預計付款日 ?? "",
-    廠商實付金額: row.廠商實付金額 ?? "",
-    廠商付款狀態: row.廠商付款狀態 ?? "",
     廠商付款日期: row.廠商付款日期 ?? "",
     備註: row.備註 ?? "",
   };
@@ -1521,7 +1513,6 @@ export default function DashboardPage() {
           : cols;
       if (tableKey === "finance" && Array.isArray(normalized) && !normalized.includes("*")) {
         const legacy: Record<string, string> = {
-          廠商付款狀態: "廠商付款日期",
           員工分潤狀態: "員工分潤日期",
         };
         normalized = [...new Set(normalized.map((k) => legacy[k] ?? k))];

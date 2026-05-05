@@ -9,12 +9,8 @@ export interface InvoiceRow {
   專案ID?: string;
   發票號碼?: string;
   發票日期?: string;
-  發票金額未稅?: string;
   發票金額含稅?: string;
-  發票稅金?: string;
   廠商預計付款日?: string;
-  廠商實付金額?: string;
-  廠商付款狀態?: string;
   廠商付款日期?: string;
   備註?: string;
   [key: string]: string | undefined;
