@@ -284,6 +284,23 @@ function parseInvoiceImportText(text: string): {
   };
 }
 
+function invoiceMonthKey(row: InvoiceRow): string {
+  const invoiceDate = String(row.發票日期 ?? "").trim();
+  const paymentDate = String(row.廠商付款日期 ?? "").trim();
+  const raw = invoiceDate || paymentDate;
+  const iso = normalizeDateForInput(raw);
+  if (iso) return iso.slice(0, 7);
+  return "未分類";
+}
+
+function invoiceMonthLabel(key: string): string {
+  if (key === "all") return "全部";
+  if (key === "未分類") return "未分類";
+  const [year, month] = key.split("-");
+  if (!year || !month) return key;
+  return `${year}/${month}`;
+}
+
 const PAYMENT_RECORD_KEYS = ["發票號碼", "付款日期", "付款專案", "付款對象", "付款金額", "備註"] as const;
 
 function emptyPaymentRecordDraftRow(): Record<string, string> {
@@ -1059,6 +1076,9 @@ export default function DashboardPage() {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [invoiceEditSavingId, setInvoiceEditSavingId] = useState<string | null>(null);
   const [invoiceEditError, setInvoiceEditError] = useState<string | null>(null);
+  const [invoiceMonthTab, setInvoiceMonthTab] = useState("all");
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
+  const [deletingInvoiceIds, setDeletingInvoiceIds] = useState<string[]>([]);
   const invoicesRef = useRef<InvoiceRow[]>([]);
   const invoiceSaveInflightRef = useRef<Set<string>>(new Set());
   const invoiceSavePendingRef = useRef<Set<string>>(new Set());
@@ -1902,6 +1922,28 @@ export default function DashboardPage() {
   const financeVisibleCols = useMemo(() => getVisibleColumnKeys("finance"), [getVisibleColumnKeys]);
   const invoicesVisibleCols = useMemo(() => getVisibleColumnKeys("invoices"), [getVisibleColumnKeys]);
   const paymentRecordsVisibleCols = useMemo(() => getVisibleColumnKeys("paymentRecords"), [getVisibleColumnKeys]);
+  const invoiceMonthTabs = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const inv of invoices) {
+      const key = invoiceMonthKey(inv);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const months = [...counts.keys()].sort((a, b) => {
+      if (a === "未分類") return 1;
+      if (b === "未分類") return -1;
+      return b.localeCompare(a);
+    });
+    return [
+      { key: "all", label: "全部", count: invoices.length },
+      ...months.map((key) => ({ key, label: invoiceMonthLabel(key), count: counts.get(key) ?? 0 })),
+    ];
+  }, [invoices]);
+  const monthFilteredInvoices = useMemo(
+    () => (invoiceMonthTab === "all" ? invoices : invoices.filter((inv) => invoiceMonthKey(inv) === invoiceMonthTab)),
+    [invoices, invoiceMonthTab]
+  );
+  const selectedInvoiceIdSet = useMemo(() => new Set(selectedInvoiceIds), [selectedInvoiceIds]);
+  const deletingInvoiceIdSet = useMemo(() => new Set(deletingInvoiceIds), [deletingInvoiceIds]);
 
   const financeByProjectId = useMemo(() => {
     const m = new Map<string, FinanceRow>();
@@ -2090,8 +2132,8 @@ export default function DashboardPage() {
     [finance, financeVisibleCols, deferredFinanceSearch, filterRowsBySearch]
   );
   const searchedInvoices = useMemo(
-    () => filterRowsBySearch(invoices as unknown as Record<string, unknown>[], invoicesVisibleCols, deferredInvoicesSearch),
-    [invoices, invoicesVisibleCols, deferredInvoicesSearch, filterRowsBySearch]
+    () => filterRowsBySearch(monthFilteredInvoices as unknown as Record<string, unknown>[], invoicesVisibleCols, deferredInvoicesSearch),
+    [monthFilteredInvoices, invoicesVisibleCols, deferredInvoicesSearch, filterRowsBySearch]
   );
   const searchedPaymentRecords = useMemo(
     () =>
@@ -2287,6 +2329,16 @@ export default function DashboardPage() {
     timer = window.setTimeout(tick, 0);
     return () => { if (timer) window.clearTimeout(timer); };
   }, [activeSection, financeSubTab, searchedInvoices.length]);
+
+  useEffect(() => {
+    setSelectedInvoiceIds((prev) => prev.filter((id) => invoices.some((inv) => inv.id === id)));
+  }, [invoices]);
+
+  useEffect(() => {
+    if (!invoiceMonthTabs.some((tab) => tab.key === invoiceMonthTab)) {
+      setInvoiceMonthTab("all");
+    }
+  }, [invoiceMonthTab, invoiceMonthTabs]);
 
   useEffect(() => {
     if (activeSection !== "finance" || financeSubTab !== "payments") return;
@@ -2673,6 +2725,39 @@ export default function DashboardPage() {
       invoiceSaveDebounceRef.current.clear();
     };
   }, []);
+
+  const deleteInvoicesByIdList = useCallback(
+    async (ids: string[]) => {
+      const cleanIds = [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
+      if (cleanIds.length === 0) return;
+      const label = cleanIds.length === 1 ? "這筆發票" : `已選取的 ${cleanIds.length} 筆發票`;
+      if (!window.confirm(`確定要刪除${label}？此操作無法復原。`)) return;
+      setInvoiceEditError(null);
+      setDeletingInvoiceIds((prev) => [...new Set([...prev, ...cleanIds])]);
+      try {
+        const res = await fetch("/api/invoices", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: cleanIds }),
+        });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string; count?: number };
+        if (!res.ok || data.ok === false) {
+          setInvoiceEditError(String(data.error ?? "刪除失敗"));
+          return;
+        }
+        const deletedSet = new Set(cleanIds);
+        setInvoices((prev) => prev.filter((inv) => !inv.id || !deletedSet.has(inv.id)));
+        setSelectedInvoiceIds((prev) => prev.filter((id) => !deletedSet.has(id)));
+        await refreshDashboardData(["finance"]);
+      } catch (e) {
+        setInvoiceEditError(e instanceof Error ? e.message : "刪除失敗");
+      } finally {
+        const done = new Set(cleanIds);
+        setDeletingInvoiceIds((prev) => prev.filter((id) => !done.has(id)));
+      }
+    },
+    [refreshDashboardData]
+  );
 
   useLayoutEffect(() => {
     paymentRecordsRef.current = paymentRecords;
@@ -7583,6 +7668,38 @@ export default function DashboardPage() {
                   className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
                 />
               </div>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex max-w-full gap-1 overflow-x-auto rounded-xl border border-stone-200 bg-stone-50/90 p-1">
+                  {invoiceMonthTabs.map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => {
+                        setInvoiceMonthTab(tab.key);
+                        setSelectedInvoiceIds([]);
+                      }}
+                      className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                        invoiceMonthTab === tab.key
+                          ? "bg-amber-500 text-slate-900 shadow shadow-amber-200/40"
+                          : "text-stone-500 hover:bg-white hover:text-stone-900"
+                      }`}
+                    >
+                      {tab.label}
+                      <span className="ml-1 text-[10px] opacity-70">{tab.count}</span>
+                    </button>
+                  ))}
+                </div>
+                {selectedInvoiceIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void deleteInvoicesByIdList(selectedInvoiceIds)}
+                    disabled={deletingInvoiceIds.length > 0}
+                    className="rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 transition hover:bg-red-100 disabled:opacity-60"
+                  >
+                    刪除已選 {selectedInvoiceIds.length} 筆
+                  </button>
+                )}
+              </div>
               {invoiceEditError && (
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{invoiceEditError}</p>
               )}
@@ -7598,17 +7715,38 @@ export default function DashboardPage() {
                   <table className="min-w-full divide-y divide-stone-200">
                     <thead className="bg-stone-100">
                       <tr>
+                        <th className="w-10 px-3 py-3.5 text-left">
+                          <input
+                            type="checkbox"
+                            checked={
+                              visibleInvoicesRows.some((inv) => inv.id) &&
+                              visibleInvoicesRows.filter((inv) => inv.id).every((inv) => selectedInvoiceIdSet.has(inv.id!))
+                            }
+                            onChange={(e) => {
+                              const ids = visibleInvoicesRows.map((inv) => inv.id).filter((id): id is string => Boolean(id));
+                              setSelectedInvoiceIds((prev) => {
+                                const next = new Set(prev);
+                                if (e.target.checked) ids.forEach((id) => next.add(id));
+                                else ids.forEach((id) => next.delete(id));
+                                return [...next];
+                              });
+                            }}
+                            className="h-4 w-4 rounded border-stone-300 text-amber-500"
+                            aria-label="選取目前顯示發票"
+                          />
+                        </th>
                         {invoicesVisibleCols.map((k) => (
                           <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600"}>
                             {tableColumnLabels.invoices?.[k] ?? k}
                           </th>
                         ))}
+                        <th className="px-4 py-3.5 text-right text-xs font-bold uppercase tracking-wider text-stone-600">操作</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-200 bg-amber-50/40">
                       {searchedInvoices.length === 0 ? (
                         <tr>
-                          <td colSpan={invoicesVisibleCols.length || 10} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                          <td colSpan={(invoicesVisibleCols.length || 8) + 2} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                             沒有符合搜尋結果
                           </td>
                         </tr>
@@ -7621,6 +7759,25 @@ export default function DashboardPage() {
                               key={rowId ?? `inv-row-${i}`}
                               className="hover:bg-amber-50/80"
                             >
+                              <td className="px-3 py-2 align-middle">
+                                {rowId ? (
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedInvoiceIdSet.has(rowId)}
+                                    disabled={deletingInvoiceIdSet.has(rowId)}
+                                    onChange={(e) => {
+                                      setSelectedInvoiceIds((prev) => {
+                                        const next = new Set(prev);
+                                        if (e.target.checked) next.add(rowId);
+                                        else next.delete(rowId);
+                                        return [...next];
+                                      });
+                                    }}
+                                    className="h-4 w-4 rounded border-stone-300 text-amber-500 disabled:opacity-50"
+                                    aria-label="選取此發票"
+                                  />
+                                ) : null}
+                              </td>
                               {invoicesVisibleCols.map((k) => {
                                 const v = (inv as unknown as Record<string, unknown>)[k];
                                 if (!rowId) {
@@ -7699,6 +7856,18 @@ export default function DashboardPage() {
                                   </td>
                                 );
                               })}
+                              <td className="whitespace-nowrap px-3 py-2 text-right align-middle">
+                                {rowId ? (
+                                  <button
+                                    type="button"
+                                    disabled={deletingInvoiceIdSet.has(rowId)}
+                                    onClick={() => void deleteInvoicesByIdList([rowId])}
+                                    className="rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50"
+                                  >
+                                    {deletingInvoiceIdSet.has(rowId) ? "刪除中…" : "刪除"}
+                                  </button>
+                                ) : null}
+                              </td>
                             </tr>
                           );
                         })

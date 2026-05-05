@@ -271,6 +271,18 @@ export async function updateInvoiceById(id: string, row: InvoiceInsertInput): Pr
   return mapInvoiceRecord(data as Record<string, unknown>);
 }
 
+export async function deleteInvoicesByIds(ids: string[]): Promise<number> {
+  const cleanIds = [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  if (cleanIds.length === 0) throw new Error("請至少選擇一筆發票");
+
+  const { error, count } = await getSupabase()
+    .from("發票")
+    .delete({ count: "exact" })
+    .in("id", cleanIds);
+  if (error) throw error;
+  return count ?? cleanIds.length;
+}
+
 export async function getPaymentRecords(): Promise<PaymentRecordRow[]> {
   const { data, error } = await getSupabase()
     .from("付款記錄")

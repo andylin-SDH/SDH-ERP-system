@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getInvoices } from "@/modules/finance";
-import { createInvoicesBatch, updateInvoiceById, type InvoiceInsertInput } from "@/lib/db/finance";
+import { createInvoicesBatch, deleteInvoicesByIds, updateInvoiceById, type InvoiceInsertInput } from "@/lib/db/finance";
 import { requireAuth } from "@/lib/auth/api";
 
 export async function GET(request: NextRequest) {
@@ -55,13 +55,38 @@ export async function PATCH(request: NextRequest) {
     if (!id) {
       return NextResponse.json({ ok: false, error: "缺少發票 id" }, { status: 400 });
     }
-    const { id: _drop, ...rest } = body ?? {};
+    const rest = { ...(body ?? {}) } as Record<string, unknown>;
+    delete rest.id;
     const updated = await updateInvoiceById(id, rest as InvoiceInsertInput);
     return NextResponse.json({ ok: true, invoice: updated });
   } catch (error) {
     console.error("PATCH /api/invoices error:", error);
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "更新發票失敗" },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * DELETE：批量刪除發票
+ * Body: { ids: string[] }
+ */
+export async function DELETE(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if (auth instanceof NextResponse) return auth;
+  try {
+    const body = (await request.json()) as { ids?: string[] } | null;
+    const ids = Array.isArray(body?.ids) ? body.ids : [];
+    if (ids.length === 0) {
+      return NextResponse.json({ ok: false, error: "請提供 ids 陣列" }, { status: 400 });
+    }
+    const count = await deleteInvoicesByIds(ids);
+    return NextResponse.json({ ok: true, count });
+  } catch (error) {
+    console.error("DELETE /api/invoices error:", error);
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "刪除發票失敗" },
       { status: 500 }
     );
   }
