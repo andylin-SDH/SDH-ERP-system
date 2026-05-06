@@ -1686,7 +1686,10 @@ export default function DashboardPage() {
         normalized = [...new Set(normalized.map((k) => legacy[k] ?? k))];
       }
       const allKeys = (TABLE_COLUMNS[tableKey] ?? []).map((c) => c.key);
-      if (!normalized || normalized.includes("*")) return allKeys;
+      if (!normalized || normalized.includes("*")) {
+        if (tableKey === "master") return allKeys.filter((k) => k !== "款項進度");
+        return allKeys;
+      }
       /** 任務表：系統時間欄位併入可見清單（舊 ③ 設定未勾選時仍顯示） */
       if (tableKey === "tasks") {
         const merged = [...normalized];
