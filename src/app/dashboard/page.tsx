@@ -1259,7 +1259,7 @@ export default function DashboardPage() {
     const names = partners.map((p) => String(p.合作夥伴名稱 ?? "").trim()).filter(Boolean);
     return [...new Set(names)].sort((a, b) => a.localeCompare(b, "zh-Hant"));
   }, [partners]);
-  /** 發票：用專案名稱搜尋，選到後仍寫入專案ID */
+  /** 財務單據：用專案名稱搜尋，選到後仍寫入專案ID */
   const invoiceProjectOptions = useMemo<InvoiceProjectOption[]>(() => {
     const byId = new Map<string, InvoiceProjectOption>();
     for (const m of masterList) {
@@ -8098,6 +8098,24 @@ export default function DashboardPage() {
                                 }
                                 const inputCls =
                                   "w-full min-w-[7rem] rounded border border-stone-200 bg-white px-2 py-1 text-xs text-stone-800 placeholder:text-stone-400 focus:border-emerald-500/60 focus:outline-none disabled:opacity-60";
+                                if (k === "付款專案") {
+                                  return (
+                                    <td key={k} className="min-w-[12rem] px-2 py-2 align-middle">
+                                      <InvoiceProjectSearchSelect
+                                        value={val}
+                                        options={invoiceProjectOptions}
+                                        disabled={saving}
+                                        onChange={(projectId) => {
+                                          setPaymentEditError(null);
+                                          setPaymentRecords((prev) =>
+                                            prev.map((r) => (r.id === rowId ? { ...r, 付款專案: projectId } : r))
+                                          );
+                                        }}
+                                        onBlur={() => void persistPaymentRecordById(rowId)}
+                                      />
+                                    </td>
+                                  );
+                                }
                                 if (k === "備註") {
                                   return (
                                     <td key={k} className="min-w-[12rem] max-w-[18rem] px-2 py-2 align-top">

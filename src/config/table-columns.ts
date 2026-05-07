@@ -124,7 +124,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
   paymentRecords: [
     { key: "發票號碼", label: "發票號碼" },
     { key: "付款日期", label: "付款日期" },
-    { key: "付款專案", label: "付款專案" },
+    { key: "付款專案", label: "付款專案（連結專案）" },
     { key: "付款對象", label: "付款對象" },
     { key: "付款金額", label: "付款金額" },
     { key: "備註", label: "備註" },
