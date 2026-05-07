@@ -1132,6 +1132,7 @@ export default function DashboardPage() {
   const [paymentRecords, setPaymentRecords] = useState<PaymentRecordRow[]>([]);
   const [paymentEditSavingId, setPaymentEditSavingId] = useState<string | null>(null);
   const [paymentEditError, setPaymentEditError] = useState<string | null>(null);
+  const [paymentDirtyIds, setPaymentDirtyIds] = useState<string[]>([]);
   const paymentRecordsRef = useRef<PaymentRecordRow[]>([]);
   const paymentSaveInflightRef = useRef<Set<string>>(new Set());
   const paymentSavePendingRef = useRef<Set<string>>(new Set());
@@ -1992,6 +1993,7 @@ export default function DashboardPage() {
   );
   const selectedInvoiceIdSet = useMemo(() => new Set(selectedInvoiceIds), [selectedInvoiceIds]);
   const deletingInvoiceIdSet = useMemo(() => new Set(deletingInvoiceIds), [deletingInvoiceIds]);
+  const paymentDirtyIdSet = useMemo(() => new Set(paymentDirtyIds), [paymentDirtyIds]);
 
   const financeByProjectId = useMemo(() => {
     const m = new Map<string, FinanceRow>();
@@ -2826,6 +2828,7 @@ export default function DashboardPage() {
         if (data.payment) {
           setPaymentRecords((prev) => prev.map((r) => (r.id === id ? { ...r, ...data.payment } : r)));
         }
+        setPaymentDirtyIds((prev) => prev.filter((dirtyId) => dirtyId !== id));
       } catch (e) {
         setPaymentEditError(e instanceof Error ? e.message : "儲存失敗");
       } finally {
@@ -8031,6 +8034,10 @@ export default function DashboardPage() {
                         return;
                       }
                       setPaymentRecords((prev) => [...data.payments!, ...prev]);
+                      setPaymentDirtyIds((prev) => [
+                        ...data.payments!.map((p) => p.id).filter((id): id is string => Boolean(id)),
+                        ...prev,
+                      ]);
                     } catch (err: unknown) {
                       setPaymentEditError(err instanceof Error ? err.message : "新增空白列失敗");
                     } finally {
@@ -8054,7 +8061,7 @@ export default function DashboardPage() {
               )}
               {paymentRecords.length > 0 && (
                 <p className="mb-2 text-[11px] text-stone-500">
-                  各欄可直接編輯；離開欄位時才會儲存。欄位比照付款表：發票號碼、付款日期、付款專案、付款對象、付款金額。
+                  各欄可直接編輯；系統不會自動儲存，填好後請按該列「存檔」。欄位比照付款表：發票號碼、付款日期、付款專案、付款對象、付款金額。
                 </p>
               )}
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
@@ -8070,12 +8077,13 @@ export default function DashboardPage() {
                             {tableColumnLabels.paymentRecords?.[k] ?? k}
                           </th>
                         ))}
+                        <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-white">操作</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-200 bg-white">
                       {searchedPaymentRecords.length === 0 ? (
                         <tr>
-                          <td colSpan={(paymentRecordsVisibleCols.length || 6) + 1} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                          <td colSpan={(paymentRecordsVisibleCols.length || 6) + 2} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                             沒有符合搜尋結果
                           </td>
                         </tr>
@@ -8083,6 +8091,7 @@ export default function DashboardPage() {
                         visiblePaymentRecordsRows.map((payment, i) => {
                           const rowId = typeof payment.id === "string" && payment.id ? payment.id : null;
                           const saving = rowId != null && paymentEditSavingId === rowId;
+                          const dirty = rowId != null && paymentDirtyIdSet.has(rowId);
                           return (
                             <tr key={rowId ?? `payment-row-${i}`} className="odd:bg-white even:bg-stone-50 hover:bg-emerald-50/70">
                               <td className="whitespace-nowrap px-3 py-2 text-xs font-medium text-stone-500">{i + 1}</td>
@@ -8107,11 +8116,11 @@ export default function DashboardPage() {
                                         disabled={saving}
                                         onChange={(projectId) => {
                                           setPaymentEditError(null);
+                                          setPaymentDirtyIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
                                           setPaymentRecords((prev) =>
                                             prev.map((r) => (r.id === rowId ? { ...r, 付款專案: projectId } : r))
                                           );
                                         }}
-                                        onBlur={() => void persistPaymentRecordById(rowId)}
                                       />
                                     </td>
                                   );
@@ -8125,11 +8134,11 @@ export default function DashboardPage() {
                                         rows={2}
                                         onChange={(e) => {
                                           setPaymentEditError(null);
+                                          setPaymentDirtyIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
                                           setPaymentRecords((prev) =>
                                             prev.map((r) => (r.id === rowId ? { ...r, 備註: e.target.value } : r))
                                           );
                                         }}
-                                        onBlur={() => void persistPaymentRecordById(rowId)}
                                         className={`${inputCls} max-w-full resize-y`}
                                       />
                                     </td>
@@ -8143,16 +8152,32 @@ export default function DashboardPage() {
                                       disabled={saving}
                                       onChange={(e) => {
                                         setPaymentEditError(null);
+                                        setPaymentDirtyIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
                                         setPaymentRecords((prev) =>
                                           prev.map((r) => (r.id === rowId ? { ...r, [k]: e.target.value } : r))
                                         );
                                       }}
-                                      onBlur={() => void persistPaymentRecordById(rowId)}
                                       className={inputCls}
                                     />
                                   </td>
                                 );
                               })}
+                              <td className="whitespace-nowrap px-3 py-2 text-right align-middle">
+                                {rowId ? (
+                                  <button
+                                    type="button"
+                                    disabled={saving || !dirty}
+                                    onClick={() => void persistPaymentRecordById(rowId)}
+                                    className={`rounded-lg px-3 py-1 text-xs font-bold transition ${
+                                      dirty
+                                        ? "border border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-400"
+                                        : "border border-stone-200 bg-stone-50 text-stone-400"
+                                    } disabled:opacity-60`}
+                                  >
+                                    {saving ? "存檔中…" : dirty ? "存檔" : "已儲存"}
+                                  </button>
+                                ) : null}
+                              </td>
                             </tr>
                           );
                         })
