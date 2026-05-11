@@ -6,6 +6,7 @@ export type { InvoiceRow, FinanceRow, PaymentRecordRow } from "./types";
 export type { InvoiceInsertInput, PaymentRecordInput } from "./api";
 export {
   getInvoices,
+  sortInvoicesByInvoiceNumber,
   getFinance,
   getPaymentRecords,
   createInvoicesBatch,

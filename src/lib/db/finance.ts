@@ -191,17 +191,27 @@ export async function updateFinanceBy專案ID(專案ID: string, row: FinanceUpda
   return updated;
 }
 
+/** 發票清冊：固定依「發票號碼」排序（不依建立／更新時間），空白號碼排最後 */
+export function sortInvoicesByInvoiceNumber(rows: InvoiceRow[]): InvoiceRow[] {
+  return [...rows].sort((a, b) => {
+    const na = String(a.發票號碼 ?? "").trim();
+    const nb = String(b.發票號碼 ?? "").trim();
+    if (!na && !nb) return 0;
+    if (!na) return 1;
+    if (!nb) return -1;
+    return na.localeCompare(nb, "zh-Hant", { numeric: true, sensitivity: "base" });
+  });
+}
+
 export async function getInvoices(): Promise<InvoiceRow[]> {
-  const { data, error } = await getSupabase()
-    .from("發票")
-    .select("*")
-    .order("created_at", { ascending: false });
+  const { data, error } = await getSupabase().from("發票").select("*");
 
   if (error) {
     if (error.code === "42P01") return []; // 表不存在時回傳空陣列，避免 500
     throw error;
   }
-  return (data ?? []).map((r: Record<string, unknown>) => mapInvoiceRecord(r));
+  const rows = (data ?? []).map((r: Record<string, unknown>) => mapInvoiceRecord(r));
+  return sortInvoicesByInvoiceNumber(rows);
 }
 
 function trimOrNull(v: string | null | undefined): string | null {

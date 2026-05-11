@@ -8,6 +8,7 @@ import type { TaskRow } from "@/modules/tasks";
 import type { PartnerRow } from "@/modules/partners";
 import type { MasterRow } from "@/lib/db/master";
 import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, PaymentRecordRow } from "@/modules/finance";
+import { sortInvoicesByInvoiceNumber } from "@/modules/finance";
 import type { FinanceUpdateFields } from "@/lib/db/finance";
 import type { PayoutRow } from "@/lib/db/payout";
 import { applyDedupeRules } from "@/lib/payout-dedupe";
@@ -1126,6 +1127,7 @@ export default function DashboardPage() {
   const [invoiceMonthTab, setInvoiceMonthTab] = useState("all");
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
   const [deletingInvoiceIds, setDeletingInvoiceIds] = useState<string[]>([]);
+  const [invoiceDirtyIds, setInvoiceDirtyIds] = useState<string[]>([]);
   const invoicesRef = useRef<InvoiceRow[]>([]);
   const invoiceSaveInflightRef = useRef<Set<string>>(new Set());
   const invoiceSavePendingRef = useRef<Set<string>>(new Set());
@@ -1993,6 +1995,7 @@ export default function DashboardPage() {
   );
   const selectedInvoiceIdSet = useMemo(() => new Set(selectedInvoiceIds), [selectedInvoiceIds]);
   const deletingInvoiceIdSet = useMemo(() => new Set(deletingInvoiceIds), [deletingInvoiceIds]);
+  const invoiceDirtyIdSet = useMemo(() => new Set(invoiceDirtyIds), [invoiceDirtyIds]);
   const paymentDirtyIdSet = useMemo(() => new Set(paymentDirtyIds), [paymentDirtyIds]);
 
   const financeByProjectId = useMemo(() => {
@@ -2677,7 +2680,7 @@ export default function DashboardPage() {
             .then(safeResJson)
             .then((res) => {
               if (!(res as { ok?: boolean }).ok) return;
-              setInvoices(((res as { invoices?: InvoiceRow[] }).invoices) ?? []);
+              setInvoices(sortInvoicesByInvoiceNumber(((res as { invoices?: InvoiceRow[] }).invoices) ?? []));
             })
         );
       }
@@ -2745,8 +2748,11 @@ export default function DashboardPage() {
           return;
         }
         if (data.invoice) {
-          setInvoices((prev) => prev.map((r) => (r.id === id ? { ...r, ...data.invoice } : r)));
+          setInvoices((prev) =>
+            sortInvoicesByInvoiceNumber(prev.map((r) => (r.id === id ? { ...r, ...data.invoice } : r)))
+          );
         }
+        setInvoiceDirtyIds((prev) => prev.filter((dirtyId) => dirtyId !== id));
         await refreshDashboardData(["finance"]);
       } catch (e) {
         setInvoiceEditError(e instanceof Error ? e.message : "儲存失敗");
@@ -2784,8 +2790,9 @@ export default function DashboardPage() {
           return;
         }
         const deletedSet = new Set(cleanIds);
-        setInvoices((prev) => prev.filter((inv) => !inv.id || !deletedSet.has(inv.id)));
+        setInvoices((prev) => sortInvoicesByInvoiceNumber(prev.filter((inv) => !inv.id || !deletedSet.has(inv.id))));
         setSelectedInvoiceIds((prev) => prev.filter((id) => !deletedSet.has(id)));
+        setInvoiceDirtyIds((prev) => prev.filter((id) => !deletedSet.has(id)));
         await refreshDashboardData(["finance"]);
       } catch (e) {
         setInvoiceEditError(e instanceof Error ? e.message : "刪除失敗");
@@ -7836,7 +7843,7 @@ export default function DashboardPage() {
               )}
               {invoices.length > 0 && (
                 <p className="mb-2 text-[11px] text-stone-500">
-                  各欄可直接編輯；離開欄位時才會儲存。發票號碼不可空白。
+                  各欄可直接編輯；系統不會自動儲存，填好後請按該列「存檔」。發票號碼不可空白。
                 </p>
               )}
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
@@ -7884,6 +7891,7 @@ export default function DashboardPage() {
                         visibleInvoicesRows.map((inv, i) => {
                           const rowId = typeof inv.id === "string" && inv.id ? inv.id : null;
                           const saving = rowId != null && invoiceEditSavingId === rowId;
+                          const dirty = rowId != null && invoiceDirtyIdSet.has(rowId);
                           return (
                             <tr
                               key={rowId ?? `inv-row-${i}`}
@@ -7933,12 +7941,10 @@ export default function DashboardPage() {
                                         disabled={saving}
                                         onChange={(projectId) => {
                                           setInvoiceEditError(null);
+                                          setInvoiceDirtyIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
                                           setInvoices((prev) =>
                                             prev.map((r) => (r.id === rowId ? { ...r, 專案ID: projectId } : r))
                                           );
-                                        }}
-                                        onBlur={() => {
-                                          void persistInvoiceRowById(rowId);
                                         }}
                                       />
                                     </td>
@@ -7953,12 +7959,10 @@ export default function DashboardPage() {
                                         rows={2}
                                         onChange={(e) => {
                                           setInvoiceEditError(null);
+                                          setInvoiceDirtyIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
                                           setInvoices((prev) =>
                                             prev.map((r) => (r.id === rowId ? { ...r, 備註: e.target.value } : r))
                                           );
-                                        }}
-                                        onBlur={() => {
-                                          void persistInvoiceRowById(rowId);
                                         }}
                                         className={`${inputCls} max-w-full resize-y`}
                                       />
@@ -7974,12 +7978,10 @@ export default function DashboardPage() {
                                       disabled={saving}
                                       onChange={(e) => {
                                         setInvoiceEditError(null);
+                                        setInvoiceDirtyIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
                                         setInvoices((prev) =>
                                           prev.map((r) => (r.id === rowId ? { ...r, [k]: e.target.value } : r))
                                         );
-                                      }}
-                                      onBlur={() => {
-                                        void persistInvoiceRowById(rowId);
                                       }}
                                       className={inputCls}
                                     />
@@ -7988,14 +7990,28 @@ export default function DashboardPage() {
                               })}
                               <td className="whitespace-nowrap px-3 py-2 text-right align-middle">
                                 {rowId ? (
-                                  <button
-                                    type="button"
-                                    disabled={deletingInvoiceIdSet.has(rowId)}
-                                    onClick={() => void deleteInvoicesByIdList([rowId])}
-                                    className="rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50"
-                                  >
-                                    {deletingInvoiceIdSet.has(rowId) ? "刪除中…" : "刪除"}
-                                  </button>
+                                  <div className="flex justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={saving || !dirty}
+                                      onClick={() => void persistInvoiceRowById(rowId)}
+                                      className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                                        dirty
+                                          ? "border border-amber-500 bg-amber-500 text-slate-900 hover:bg-amber-400"
+                                          : "border border-stone-200 bg-stone-50 text-stone-400"
+                                      } disabled:opacity-60`}
+                                    >
+                                      {saving ? "存檔中…" : dirty ? "存檔" : "已儲存"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={deletingInvoiceIdSet.has(rowId)}
+                                      onClick={() => void deleteInvoicesByIdList([rowId])}
+                                      className="rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50"
+                                    >
+                                      {deletingInvoiceIdSet.has(rowId) ? "刪除中…" : "刪除"}
+                                    </button>
+                                  </div>
                                 ) : null}
                               </td>
                             </tr>
@@ -8449,7 +8465,7 @@ export default function DashboardPage() {
                       return;
                     }
                     if (data.invoices?.length) {
-                      setInvoices((prev) => [...data.invoices!, ...prev]);
+                      setInvoices((prev) => sortInvoicesByInvoiceNumber([...data.invoices!, ...prev]));
                     } else {
                       await refreshDashboardData(["invoices", "finance"]);
                     }
@@ -8606,7 +8622,7 @@ export default function DashboardPage() {
                       return;
                     }
                     if (data.invoices?.length) {
-                      setInvoices((prev) => [...data.invoices!, ...prev]);
+                      setInvoices((prev) => sortInvoicesByInvoiceNumber([...data.invoices!, ...prev]));
                     } else {
                       await refreshDashboardData(["invoices", "finance"]);
                     }

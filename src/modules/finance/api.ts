@@ -5,6 +5,7 @@
 
 export {
   getInvoices,
+  sortInvoicesByInvoiceNumber,
   getFinance,
   getPaymentRecords,
   createInvoicesBatch,
