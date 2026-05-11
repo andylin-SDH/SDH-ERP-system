@@ -186,6 +186,10 @@ const INVOICE_DRAFT_KEYS = [
 /** 發票清冊／批次表單以 HTML date 編輯的欄位 */
 const INVOICE_DATE_INPUT_KEYS = new Set<string>(["發票日期", "廠商預計付款日", "廠商付款日期"]);
 
+/** 發票金額含稅：較醒目的數字輸入（右對齊、等寬數字、琥珀邊框與淺底） */
+const INVOICE_AMOUNT_INPUT_CLS =
+  "w-full min-w-[7.5rem] max-w-[13rem] rounded-lg border-2 border-amber-400/75 bg-amber-50/90 px-2.5 py-1.5 text-right text-sm font-semibold tabular-nums tracking-tight text-stone-900 shadow-sm shadow-amber-200/20 placeholder:text-stone-400 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-400/35 disabled:opacity-60 [color-scheme:light]";
+
 function emptyInvoiceDraftRow(): Record<string, string> {
   return Object.fromEntries(INVOICE_DRAFT_KEYS.map((k) => [k, ""])) as Record<string, string>;
 }
@@ -1997,6 +2001,17 @@ export default function DashboardPage() {
     [invoices, invoiceMonthTab]
   );
   const selectedInvoiceIdSet = useMemo(() => new Set(selectedInvoiceIds), [selectedInvoiceIds]);
+  /** 發票清冊：勾選列的發票金額含稅即時加總（狀態列用） */
+  const selectedInvoicesTaxedAmountSum = useMemo(() => {
+    let sum = 0;
+    for (const inv of invoices) {
+      const id = inv.id;
+      if (typeof id !== "string" || !id.trim()) continue;
+      if (!selectedInvoiceIdSet.has(id)) continue;
+      sum += parseNumericField(inv.發票金額含稅);
+    }
+    return sum;
+  }, [invoices, selectedInvoiceIdSet]);
   const deletingInvoiceIdSet = useMemo(() => new Set(deletingInvoiceIds), [deletingInvoiceIds]);
   const invoiceDirtyIdSet = useMemo(() => new Set(invoiceDirtyIds), [invoiceDirtyIds]);
   const paymentDirtyIdSet = useMemo(() => new Set(paymentDirtyIds), [paymentDirtyIds]);
@@ -7853,7 +7868,8 @@ export default function DashboardPage() {
                 {invoices.length === 0 ? (
                   <p className="px-4 py-8 text-center text-stone-500">尚無發票資料</p>
                 ) : (
-                  <table className="min-w-full divide-y divide-stone-200">
+                  <>
+                    <table className="min-w-full divide-y divide-stone-200">
                     <thead className="bg-stone-100">
                       <tr>
                         <th className="w-10 px-3 py-3.5 text-left">
@@ -7926,8 +7942,14 @@ export default function DashboardPage() {
                                     k === "專案ID" && (v == null || String(v).trim() === "")
                                       ? "—"
                                       : String(v ?? "—");
+                                  const cellCls =
+                                    k === "專案ID"
+                                      ? "font-medium text-stone-900"
+                                      : k === "發票金額含稅" && str !== "—"
+                                        ? "text-right text-base font-semibold tabular-nums text-stone-900"
+                                        : "text-stone-600";
                                   return (
-                                    <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm ${k === "專案ID" ? "font-medium text-stone-900" : "text-stone-600"}`}>
+                                    <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm ${cellCls}`}>
                                       {str}
                                     </td>
                                   );
@@ -8002,6 +8024,26 @@ export default function DashboardPage() {
                                     </td>
                                   );
                                 }
+                                if (k === "發票金額含稅") {
+                                  return (
+                                    <td key={k} className="min-w-[7.5rem] max-w-[13rem] px-2 py-2 align-middle">
+                                      <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        value={val}
+                                        disabled={saving}
+                                        onChange={(e) => {
+                                          setInvoiceEditError(null);
+                                          setInvoiceDirtyIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
+                                          setInvoices((prev) =>
+                                            prev.map((r) => (r.id === rowId ? { ...r, 發票金額含稅: e.target.value } : r))
+                                          );
+                                        }}
+                                        className={INVOICE_AMOUNT_INPUT_CLS}
+                                      />
+                                    </td>
+                                  );
+                                }
                                 const wide = k === "發票號碼";
                                 return (
                                   <td key={k} className={`px-2 py-2 align-middle ${wide ? "min-w-[7rem] max-w-[11rem]" : "min-w-[4.5rem] max-w-[8rem]"}`}>
@@ -8053,6 +8095,25 @@ export default function DashboardPage() {
                       )}
                     </tbody>
                   </table>
+                    {selectedInvoiceIds.length > 0 && (
+                      <div
+                        className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 border-t-2 border-amber-200/80 bg-gradient-to-r from-stone-100/95 via-amber-50/50 to-amber-50/70 px-4 py-2 text-xs shadow-[inset_0_1px_0_0_rgba(255,255,255,0.6)]"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        <span className="text-stone-600">
+                          已選 <strong className="tabular-nums text-stone-900">{selectedInvoiceIds.length}</strong> 筆
+                        </span>
+                        <span className="hidden text-stone-300 sm:inline" aria-hidden>
+                          ·
+                        </span>
+                        <span className="font-semibold text-stone-700">發票金額含稅加總</span>
+                        <span className="text-base font-bold tabular-nums tracking-tight text-amber-950">
+                          {formatAmount(String(Math.round(selectedInvoicesTaxedAmountSum)))}
+                        </span>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
               {searchedInvoices.length > visibleInvoicesRows.length && (
@@ -8427,6 +8488,21 @@ export default function DashboardPage() {
                                     return next;
                                   });
                                 }}
+                              />
+                            ) : k === "發票金額含稅" ? (
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={row[k] ?? ""}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setInvoiceDraftRows((prev) => {
+                                    const next = [...prev];
+                                    next[rowIdx] = { ...next[rowIdx], [k]: v };
+                                    return next;
+                                  });
+                                }}
+                                className={INVOICE_AMOUNT_INPUT_CLS}
                               />
                             ) : INVOICE_DATE_INPUT_KEYS.has(k) ? (
                               <input
