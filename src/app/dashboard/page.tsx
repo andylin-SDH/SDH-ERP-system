@@ -7615,7 +7615,12 @@ export default function DashboardPage() {
 
         {/* 財務：依專案 + 發票清冊（發票 DB 可無專案ID） */}
         {activeSection === "finance" && (
-        <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
+        <>
+        <section
+          className={`rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6 ${
+            financeSubTab === "invoices" && selectedInvoiceIds.length > 0 ? "mb-16 sm:mb-20" : ""
+          }`}
+        >
           <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div>
               <h2 className="text-xl font-bold tracking-tight text-stone-900">財務</h2>
@@ -8095,24 +8100,6 @@ export default function DashboardPage() {
                       )}
                     </tbody>
                   </table>
-                    {selectedInvoiceIds.length > 0 && (
-                      <div
-                        className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 border-t-2 border-amber-200/80 bg-gradient-to-r from-stone-100/95 via-amber-50/50 to-amber-50/70 px-4 py-2 text-xs shadow-[inset_0_1px_0_0_rgba(255,255,255,0.6)]"
-                        role="status"
-                        aria-live="polite"
-                      >
-                        <span className="text-stone-600">
-                          已選 <strong className="tabular-nums text-stone-900">{selectedInvoiceIds.length}</strong> 筆
-                        </span>
-                        <span className="hidden text-stone-300 sm:inline" aria-hidden>
-                          ·
-                        </span>
-                        <span className="font-semibold text-stone-700">發票金額含稅加總</span>
-                        <span className="text-base font-bold tabular-nums tracking-tight text-amber-950">
-                          {formatAmount(String(Math.round(selectedInvoicesTaxedAmountSum)))}
-                        </span>
-                      </div>
-                    )}
                   </>
                 )}
               </div>
@@ -8302,6 +8289,28 @@ export default function DashboardPage() {
             </>
           )}
         </section>
+        {financeSubTab === "invoices" && selectedInvoiceIds.length > 0 && (
+          <div
+            className={`fixed bottom-0 right-0 z-[35] border-t-2 border-amber-300/90 bg-gradient-to-r from-stone-100/98 via-amber-50/95 to-amber-50/90 px-3 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom,0px))] shadow-[0_-8px_24px_-4px_rgba(0,0,0,0.12)] backdrop-blur-sm sm:px-5 sm:pt-3 sm:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] ${me && tabSections.length > 0 ? (sidebarCollapsed ? "left-0 md:left-[4.25rem]" : "left-0 md:left-56") : "left-0"}`}
+            role="status"
+            aria-live="polite"
+            aria-label="已勾選發票金額加總"
+          >
+            <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs sm:text-sm">
+              <span className="text-stone-600">
+                已選 <strong className="tabular-nums text-stone-900">{selectedInvoiceIds.length}</strong> 筆
+              </span>
+              <span className="hidden text-stone-300 sm:inline" aria-hidden>
+                ·
+              </span>
+              <span className="font-semibold text-stone-700">發票金額含稅加總</span>
+              <span className="text-base font-bold tabular-nums tracking-tight text-amber-950 sm:text-lg">
+                {formatAmount(String(Math.round(selectedInvoicesTaxedAmountSum)))}
+              </span>
+            </div>
+          </div>
+        )}
+        </>
         )}
           </div>
         )}
