@@ -7969,6 +7969,34 @@ export default function DashboardPage() {
                                     </td>
                                   );
                                 }
+                                if (k === "發票日期") {
+                                  const rawDateVal = val;
+                                  const dateInputVal = normalizeDateForInput(rawDateVal);
+                                  const invoiceDateInputCls =
+                                    "w-full min-w-[9.5rem] max-w-[11rem] rounded border border-stone-200 bg-white px-1.5 py-1 text-xs font-sans tabular-nums text-stone-800 focus:border-amber-500/60 focus:outline-none disabled:opacity-60 [color-scheme:light]";
+                                  return (
+                                    <td key={k} className="min-w-[9.5rem] max-w-[11rem] px-2 py-2 align-middle">
+                                      <input
+                                        type="date"
+                                        value={dateInputVal}
+                                        disabled={saving}
+                                        title={
+                                          rawDateVal && rawDateVal !== dateInputVal
+                                            ? `已正規化為西元日期；原值：${rawDateVal}`
+                                            : undefined
+                                        }
+                                        onChange={(e) => {
+                                          setInvoiceEditError(null);
+                                          setInvoiceDirtyIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
+                                          setInvoices((prev) =>
+                                            prev.map((r) => (r.id === rowId ? { ...r, 發票日期: e.target.value } : r))
+                                          );
+                                        }}
+                                        className={invoiceDateInputCls}
+                                      />
+                                    </td>
+                                  );
+                                }
                                 const wide = k === "發票號碼";
                                 return (
                                   <td key={k} className={`px-2 py-2 align-middle ${wide ? "min-w-[7rem] max-w-[11rem]" : "min-w-[4.5rem] max-w-[8rem]"}`}>
@@ -8394,6 +8422,20 @@ export default function DashboardPage() {
                                     return next;
                                   });
                                 }}
+                              />
+                            ) : k === "發票日期" ? (
+                              <input
+                                type="date"
+                                value={normalizeDateForInput(row[k] ?? "")}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setInvoiceDraftRows((prev) => {
+                                    const next = [...prev];
+                                    next[rowIdx] = { ...next[rowIdx], [k]: v };
+                                    return next;
+                                  });
+                                }}
+                                className="w-full min-w-[9.5rem] max-w-[11rem] rounded border border-stone-200 bg-stone-50 px-1.5 py-1.5 text-stone-900 focus:border-amber-400/70 focus:outline-none [color-scheme:light]"
                               />
                             ) : (
                               <input
