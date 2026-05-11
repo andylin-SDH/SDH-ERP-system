@@ -183,6 +183,9 @@ const INVOICE_DRAFT_KEYS = [
   "備註",
 ] as const;
 
+/** 發票清冊／批次表單以 HTML date 編輯的欄位 */
+const INVOICE_DATE_INPUT_KEYS = new Set<string>(["發票日期", "廠商預計付款日", "廠商付款日期"]);
+
 function emptyInvoiceDraftRow(): Record<string, string> {
   return Object.fromEntries(INVOICE_DRAFT_KEYS.map((k) => [k, ""])) as Record<string, string>;
 }
@@ -7969,7 +7972,7 @@ export default function DashboardPage() {
                                     </td>
                                   );
                                 }
-                                if (k === "發票日期") {
+                                if (INVOICE_DATE_INPUT_KEYS.has(k)) {
                                   const rawDateVal = val;
                                   const dateInputVal = normalizeDateForInput(rawDateVal);
                                   const invoiceDateInputCls =
@@ -7989,7 +7992,9 @@ export default function DashboardPage() {
                                           setInvoiceEditError(null);
                                           setInvoiceDirtyIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
                                           setInvoices((prev) =>
-                                            prev.map((r) => (r.id === rowId ? { ...r, 發票日期: e.target.value } : r))
+                                            prev.map((r) =>
+                                              r.id === rowId ? { ...r, [k]: e.target.value } : r
+                                            )
                                           );
                                         }}
                                         className={invoiceDateInputCls}
@@ -8423,7 +8428,7 @@ export default function DashboardPage() {
                                   });
                                 }}
                               />
-                            ) : k === "發票日期" ? (
+                            ) : INVOICE_DATE_INPUT_KEYS.has(k) ? (
                               <input
                                 type="date"
                                 value={normalizeDateForInput(row[k] ?? "")}
