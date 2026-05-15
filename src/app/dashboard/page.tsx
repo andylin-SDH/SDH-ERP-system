@@ -1798,10 +1798,53 @@ export default function DashboardPage() {
     [masterList, masterCreatedSortDirection]
   );
 
-  const filteredMasterList = useMemo(
-    () => filterRowsByVisibility(masterListByCreatedAt as unknown as Record<string, unknown>[], "master") as unknown as MasterRow[],
-    [masterListByCreatedAt, filterRowsByVisibility]
+  /** ② 任務表列級可見性（與下方 filteredTasks 同源，僅計算一次） */
+  const visibilityFilteredTasks = useMemo(
+    () => filterRowsByVisibility(tasks as unknown as Record<string, unknown>[], "tasks") as unknown as TaskRow[],
+    [tasks, filterRowsByVisibility]
   );
+
+  /**
+   * 任務負責人為登入者之任務所屬專案 ID：擴充大總表整列（整專案）。
+   * 改為掃描**全部載入任務**（不依 ②），與「指派給誰誰就該對到專案」一致；
+   * 任務清單本身仍只顯示 ② 可見列，兩者脫鉤。全權角色不擴充。
+   */
+  const taskVisibleProjectIdsForMasterAugment = useMemo(() => {
+    if (!me || isFullAccessRole(me.role)) return null;
+    const uName = (me.name ?? "").trim();
+    const uEmail = (me.email ?? "").trim();
+    const s = new Set<string>();
+    for (const t of tasks) {
+      if (!taskAssigneeIsUser(t, uName, uEmail)) continue;
+      const pid = String(t.專案ID ?? "").trim();
+      if (pid) s.add(pid);
+    }
+    return s;
+  }, [me, tasks]);
+
+  const filteredMasterList = useMemo(() => {
+    const base = filterRowsByVisibility(
+      masterListByCreatedAt as unknown as Record<string, unknown>[],
+      "master"
+    ) as unknown as MasterRow[];
+    if (!taskVisibleProjectIdsForMasterAugment || taskVisibleProjectIdsForMasterAugment.size === 0) {
+      return base;
+    }
+    const allowedPid = new Set<string>();
+    for (const r of base) {
+      const pid = String(r.專案ID ?? "").trim();
+      if (pid) allowedPid.add(pid);
+    }
+    for (const pid of taskVisibleProjectIdsForMasterAugment) {
+      allowedPid.add(pid);
+    }
+    const baseRef = new Set(base);
+    return masterListByCreatedAt.filter((r) => {
+      const pid = String(r.專案ID ?? "").trim();
+      if (pid && allowedPid.has(pid)) return true;
+      return baseRef.has(r);
+    }) as MasterRow[];
+  }, [masterListByCreatedAt, filterRowsByVisibility, taskVisibleProjectIdsForMasterAugment]);
 
   /** 大總表頂部「進行中／已結案」數量（② 可見範圍內） */
   const masterLifecycleCounts = useMemo(() => {
@@ -1848,10 +1891,7 @@ export default function DashboardPage() {
     () => filterRowsByVisibility(partners as unknown as Record<string, unknown>[], "partners") as unknown as PartnerRow[],
     [partners, filterRowsByVisibility]
   );
-  const filteredTasks = useMemo(
-    () => filterRowsByVisibility(tasks as unknown as Record<string, unknown>[], "tasks") as unknown as TaskRow[],
-    [tasks, filterRowsByVisibility]
-  );
+  const filteredTasks = visibilityFilteredTasks;
   const tasksLifecycleCounts = useMemo(() => {
     let inProgress = 0;
     let completed = 0;
