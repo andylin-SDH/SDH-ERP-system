@@ -797,6 +797,40 @@ function normalizeDateForInput(raw: string | null | undefined): string {
   return "";
 }
 
+/** 發票清冊表頭：發票日期排序模式（預設＝後端／狀態之發票號碼序） */
+type InvoiceListDateSortMode = "default" | "dateAsc" | "dateDesc";
+
+function compareInvoiceRowsByDateThenNumber(a: InvoiceRow, b: InvoiceRow, direction: "asc" | "desc"): number {
+  const da = normalizeDateForInput(String(a.發票日期 ?? ""));
+  const db = normalizeDateForInput(String(b.發票日期 ?? ""));
+  const aEmpty = !da;
+  const bEmpty = !db;
+  if (aEmpty && bEmpty) {
+    const na = String(a.發票號碼 ?? "").trim();
+    const nb = String(b.發票號碼 ?? "").trim();
+    if (!na && !nb) return 0;
+    if (!na) return 1;
+    if (!nb) return -1;
+    return na.localeCompare(nb, "zh-Hant", { numeric: true, sensitivity: "base" });
+  }
+  if (aEmpty) return 1;
+  if (bEmpty) return -1;
+  const cmp = da.localeCompare(db);
+  if (cmp !== 0) return direction === "desc" ? -cmp : cmp;
+  const na = String(a.發票號碼 ?? "").trim();
+  const nb = String(b.發票號碼 ?? "").trim();
+  if (!na && !nb) return 0;
+  if (!na) return 1;
+  if (!nb) return -1;
+  return na.localeCompare(nb, "zh-Hant", { numeric: true, sensitivity: "base" });
+}
+
+function applyInvoiceListSort(rows: InvoiceRow[], mode: InvoiceListDateSortMode): InvoiceRow[] {
+  if (mode === "default") return [...rows];
+  const direction = mode === "dateDesc" ? "desc" : "asc";
+  return [...rows].sort((a, b) => compareInvoiceRowsByDateThenNumber(a, b, direction));
+}
+
 function taskAssigneeIsUser(t: TaskRow, userName: string, userEmail: string): boolean {
   const a = String(t.任務負責人 ?? "").trim();
   if (!a) return false;
@@ -1210,6 +1244,8 @@ export default function DashboardPage() {
   });
   /** 財務分頁內：依專案列 vs 發票清冊 vs 付款記錄 */
   const [financeSubTab, setFinanceSubTab] = useState<"byProject" | "invoices" | "payments">("byProject");
+  /** 發票清冊：點「發票日期」表頭循環：發票號碼序 → 日期新→舊 → 日期舊→新 */
+  const [invoiceListDateSortMode, setInvoiceListDateSortMode] = useState<InvoiceListDateSortMode>("default");
   const [showInvoiceCreateModal, setShowInvoiceCreateModal] = useState(false);
   const [showInvoicePasteImportModal, setShowInvoicePasteImportModal] = useState(false);
   const [invoicePasteText, setInvoicePasteText] = useState("");
@@ -2262,6 +2298,10 @@ export default function DashboardPage() {
     () => filterRowsBySearch(monthFilteredInvoices as unknown as Record<string, unknown>[], invoicesVisibleCols, deferredInvoicesSearch),
     [monthFilteredInvoices, invoicesVisibleCols, deferredInvoicesSearch, filterRowsBySearch]
   );
+  const invoicesSortedForDisplay = useMemo(
+    () => applyInvoiceListSort(searchedInvoices as unknown as InvoiceRow[], invoiceListDateSortMode),
+    [searchedInvoices, invoiceListDateSortMode]
+  );
   const searchedPaymentRecords = useMemo(
     () =>
       filterRowsBySearch(
@@ -2292,8 +2332,8 @@ export default function DashboardPage() {
     [searchedFinance, financeRenderCount]
   );
   const visibleInvoicesRows = useMemo(
-    () => searchedInvoices.slice(0, invoicesRenderCount),
-    [searchedInvoices, invoicesRenderCount]
+    () => invoicesSortedForDisplay.slice(0, invoicesRenderCount),
+    [invoicesSortedForDisplay, invoicesRenderCount]
   );
   const visibleInvoiceIds = useMemo(
     () => visibleInvoicesRows.map((inv) => inv.id).filter((id): id is string => typeof id === "string" && id.trim() !== ""),
@@ -2448,18 +2488,23 @@ export default function DashboardPage() {
   useEffect(() => {
     if (activeSection !== "finance" || financeSubTab !== "invoices") return;
     setInvoicesRenderCount(RENDER_CHUNK_SIZE);
-    if (searchedInvoices.length <= RENDER_CHUNK_SIZE) return;
+    if (invoicesSortedForDisplay.length <= RENDER_CHUNK_SIZE) return;
     let timer: number | undefined;
     const tick = () => {
       setInvoicesRenderCount((prev) => {
-        const next = Math.min(prev + RENDER_CHUNK_SIZE, searchedInvoices.length);
-        if (next < searchedInvoices.length) timer = window.setTimeout(tick, 0);
+        const next = Math.min(prev + RENDER_CHUNK_SIZE, invoicesSortedForDisplay.length);
+        if (next < invoicesSortedForDisplay.length) timer = window.setTimeout(tick, 0);
         return next;
       });
     };
     timer = window.setTimeout(tick, 0);
     return () => { if (timer) window.clearTimeout(timer); };
-  }, [activeSection, financeSubTab, searchedInvoices.length]);
+  }, [activeSection, financeSubTab, invoicesSortedForDisplay.length]);
+
+  useEffect(() => {
+    if (activeSection !== "finance" || financeSubTab !== "invoices") return;
+    setInvoicesRenderCount(RENDER_CHUNK_SIZE);
+  }, [invoiceListDateSortMode, activeSection, financeSubTab]);
 
   useEffect(() => {
     setSelectedInvoiceIds((prev) => prev.filter((id) => invoices.some((inv) => inv.id === id)));
@@ -7936,16 +7981,51 @@ export default function DashboardPage() {
                             aria-label="選取目前顯示發票"
                           />
                         </th>
-                        {invoicesVisibleCols.map((k) => (
-                          <th key={k} className={k === "專案ID" ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800" : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600"}>
-                            {tableColumnLabels.invoices?.[k] ?? k}
-                          </th>
-                        ))}
+                        {invoicesVisibleCols.map((k) => {
+                          const thCls =
+                            k === "專案ID"
+                              ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800"
+                              : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600";
+                          if (k === "發票日期") {
+                            const sort = invoiceListDateSortMode;
+                            const ariaSort = sort === "dateDesc" ? "descending" : sort === "dateAsc" ? "ascending" : "none";
+                            const hint =
+                              sort === "default" ? "目前：發票號碼序，點擊改為日期新→舊" : sort === "dateDesc" ? "目前：日期新→舊" : "目前：日期舊→新";
+                            const arrow = sort === "dateDesc" ? "↓" : sort === "dateAsc" ? "↑" : "⇅";
+                            return (
+                              <th key={k} className={thCls} aria-sort={ariaSort}>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setInvoiceListDateSortMode((m) =>
+                                      m === "default" ? "dateDesc" : m === "dateDesc" ? "dateAsc" : "default"
+                                    )
+                                  }
+                                  className="group inline-flex max-w-full items-center gap-0.5 rounded-md px-0.5 py-0.5 text-left uppercase tracking-wider transition hover:bg-stone-200/80 hover:text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-400/50"
+                                  title={`${hint}（再點切換；第三下還原發票號碼序）`}
+                                >
+                                  {tableColumnLabels.invoices?.[k] ?? k}
+                                  <span
+                                    className="text-[10px] font-normal normal-case text-amber-800 tabular-nums group-hover:text-amber-900"
+                                    aria-hidden
+                                  >
+                                    {arrow}
+                                  </span>
+                                </button>
+                              </th>
+                            );
+                          }
+                          return (
+                            <th key={k} className={thCls}>
+                              {tableColumnLabels.invoices?.[k] ?? k}
+                            </th>
+                          );
+                        })}
                         <th className="px-4 py-3.5 text-right text-xs font-bold uppercase tracking-wider text-stone-600">操作</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-200 bg-amber-50/40">
-                      {searchedInvoices.length === 0 ? (
+                      {invoicesSortedForDisplay.length === 0 ? (
                         <tr>
                           <td colSpan={(invoicesVisibleCols.length || 8) + 2} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                             沒有符合搜尋結果
@@ -8143,8 +8223,8 @@ export default function DashboardPage() {
                   </>
                 )}
               </div>
-              {searchedInvoices.length > visibleInvoicesRows.length && (
-                <p className="mt-2 text-right text-xs text-stone-500">載入中 {visibleInvoicesRows.length} / {searchedInvoices.length}</p>
+              {invoicesSortedForDisplay.length > visibleInvoicesRows.length && (
+                <p className="mt-2 text-right text-xs text-stone-500">載入中 {visibleInvoicesRows.length} / {invoicesSortedForDisplay.length}</p>
               )}
             </>
           )}
