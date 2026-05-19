@@ -2,12 +2,16 @@
  * 大總表 API
  * GET：回傳所有大總表資料（需登入）
  * POST：新增一筆大總表（需登入，任何人可建立專案）
- * PATCH：更新大總表（限董事長/管理者）
+ * PATCH：更新大總表（登入即可；金額／營收／成本／分潤成數僅 master.update 角色可改）
  * DELETE：刪除專案（僅董事長；連動任務、分潤表、財務）
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createMaster, getMasterList, updateMaster, type NewMasterInput, type UpdateMasterInput } from "@/lib/db/master";
+import {
+  applyMasterNumericFieldPolicy,
+  canEditMasterNumericFields,
+} from "@/config/master-permissions";
+import { createMaster, getMasterById, getMasterList, updateMaster, type NewMasterInput, type UpdateMasterInput } from "@/lib/db/master";
 import { deleteMasterProjectByRowId } from "@/lib/db/master-project-delete";
 import { DEFAULT_PAYOUT_DEDUPE_RULES } from "@/config/payout-dedupe-defaults";
 import { getSystemConfig } from "@/lib/db/system-config";
@@ -106,11 +110,14 @@ export async function PATCH(request: NextRequest) {
     }
     const { role_permissions } = await getSystemConfig();
     const role = auth.user.role;
-    const canUpdate = role_permissions.master.update.includes(role);
-    if (!canUpdate) {
-      return NextResponse.json({ ok: false, error: "您沒有編輯專案的權限" }, { status: 403 });
+    const canEditNumbers = canEditMasterNumericFields(role, role_permissions);
+
+    const existing = await getMasterById(id);
+    if (!existing) {
+      return NextResponse.json({ ok: false, error: "找不到該專案" }, { status: 404 });
     }
-    const payload: UpdateMasterInput = {
+
+    const rawPayload: UpdateMasterInput = {
       id,
       專案名稱: (body?.專案名稱 as string) ?? null,
       專案類型: (body?.專案類型 as string) ?? null,
@@ -130,17 +137,18 @@ export async function PATCH(request: NextRequest) {
       專案內容: (body?.專案內容 as string) ?? null,
       備註: (body?.備註 as string) ?? null,
       專案BDPM: (body?.專案BDPM as string) ?? null,
-      專案BDPM分潤成數: (body?.專案BDPM分潤成數 as string) ?? null,
       專案引薦人: (body?.專案引薦人 as string) ?? null,
       專案開發人: (body?.專案開發人 as string) ?? null,
       專案管理員: (body?.專案管理員 as string) ?? null,
       執行管理員: (body?.執行管理員 as string) ?? null,
       專案資料夾: (body?.專案資料夾 as string) ?? null,
-      專案引薦人分潤成數: (body?.專案引薦人分潤成數 as string) ?? null,
-      專案開發人分潤成數: (body?.專案開發人分潤成數 as string) ?? null,
-      專案管理員分潤成數: (body?.專案管理員分潤成數 as string) ?? null,
-      執行管理員分潤成數: (body?.執行管理員分潤成數 as string) ?? null,
     };
+
+    const payload = applyMasterNumericFieldPolicy(
+      rawPayload,
+      existing as unknown as Record<string, unknown>,
+      canEditNumbers
+    ) as UpdateMasterInput;
 
     const master = await updateMaster(payload);
     if (master) {

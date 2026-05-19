@@ -106,6 +106,15 @@ export async function getMasterList(): Promise<MasterRow[]> {
   return (data ?? []).map((r) => rowToMaster(r as Record<string, unknown>));
 }
 
+export async function getMasterById(id: string): Promise<MasterRow | null> {
+  const rowId = String(id ?? "").trim();
+  if (!rowId) return null;
+  const { data, error } = await getSupabase().from("大總表").select("*").eq("id", rowId).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return rowToMaster(data as Record<string, unknown>);
+}
+
 export type NewMasterInput = Omit<MasterRow, "id" | "created_at" | "updated_at">;
 
 export async function createMaster(payload: NewMasterInput): Promise<MasterRow> {

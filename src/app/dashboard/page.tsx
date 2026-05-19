@@ -12,6 +12,7 @@ import { sortInvoicesByInvoiceNumber } from "@/modules/finance";
 import type { FinanceUpdateFields } from "@/lib/db/finance";
 import type { PayoutRow } from "@/lib/db/payout";
 import { applyDedupeRules } from "@/lib/payout-dedupe";
+import { canEditMasterNumericFields } from "@/config/master-permissions";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
 import { PROJECT_TYPES, costFromTotalByProjectType } from "@/config/project-types";
 import { DEFAULT_PROJECT_STATUS_OPTIONS } from "@/config/project-status-defaults";
@@ -1363,7 +1364,7 @@ export default function DashboardPage() {
 
   const kolPartnerScopeOptions = useMemo(() => kolPartnerSelectOptions(partners), [partners]);
 
-  /** 專案權限設定：預設 create = 所有角色；update/delete = 董事長 + 管理者，可在 UI 調整 */
+  /** 專案權限設定：預設 create = 所有角色；update = 編輯金額／數字；delete = 董事長 + 管理者 */
   const rolePermissions = useMemo(() => {
     const roles = displayRoles;
     const defaultCreate = roles;
@@ -1390,8 +1391,9 @@ export default function DashboardPage() {
 
   /** 董事長／管理者可為使用者設定可見範圍、調整系統設定 */
   const canEditVisibility = me && ["董事長", "管理者"].includes(me.role);
-  const canUpdateMaster = useMemo(
-    () => Boolean(me?.role && rolePermissions.master.update.includes(me.role)),
+  /** 大總表金額／營收／成本（分潤成數仍僅 Config／此權限）；其餘欄位登入即可編輯 */
+  const canEditMasterNumbers = useMemo(
+    () => Boolean(me?.role && canEditMasterNumericFields(me.role, rolePermissions)),
     [me?.role, rolePermissions]
   );
 
@@ -4264,13 +4266,6 @@ export default function DashboardPage() {
                                 const rowId = String(row.id ?? "").trim();
                                 const current = String(row.專案狀態 ?? "");
                                 const statusOptions = [...new Set([...projectStatusOptions, current].filter(Boolean))];
-                                if (!canUpdateMaster) {
-                                  return (
-                                    <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm font-medium text-stone-600">
-                                      {current || "—"}
-                                    </td>
-                                  );
-                                }
                                 return (
                                   <td
                                     key={k}
@@ -5231,7 +5226,7 @@ export default function DashboardPage() {
                 <div className="space-y-2">
                   {[
                     { key: "create" as const, label: "新增專案" },
-                    { key: "update" as const, label: "編輯專案" },
+                    { key: "update" as const, label: "編輯金額／數字" },
                     { key: "delete" as const, label: "刪除專案" },
                   ].map(({ key, label }) => (
                     <div key={key} className="flex items-center gap-3">
@@ -9670,13 +9665,24 @@ export default function DashboardPage() {
                             id: selectedMaster.id,
                             ...(() => {
                               const { 專案BDPM分潤成數, 專案引薦人分潤成數, 專案開發人分潤成數, 專案管理員分潤成數, 執行管理員分潤成數, ...rest } = editMasterForm;
-                              return rest;
+                              if (!canEditMasterNumbers) {
+                                return {
+                                  ...rest,
+                                  專案總金額未稅: selectedMaster.專案總金額未稅 ?? "",
+                                  專案成本: selectedMaster.專案成本 ?? "",
+                                  KOL費用未稅: selectedMaster.KOL費用未稅 ?? "",
+                                  專案營收: selectedMaster.專案營收 ?? "",
+                                };
+                              }
+                              return {
+                                ...rest,
+                                專案營收: calc專案營收(
+                                  editMasterForm.專案總金額未稅,
+                                  editMasterForm.專案成本,
+                                  editMasterForm.KOL費用未稅
+                                ),
+                              };
                             })(),
-                            專案營收: calc專案營收(
-                              editMasterForm.專案總金額未稅,
-                              editMasterForm.專案成本,
-                              editMasterForm.KOL費用未稅
-                            ),
                           }),
                         });
                         const data = (await safeResJson(res)) as { ok?: boolean; error?: string; master?: MasterRow };
@@ -9717,6 +9723,9 @@ export default function DashboardPage() {
                       value={editMasterForm.專案類型}
                       onChange={(v) =>
                         setEditMasterForm((f) => {
+                          if (!canEditMasterNumbers) {
+                            return { ...f, 專案類型: v };
+                          }
                           const autoCost = costFromTotalByProjectType(v, f.專案總金額未稅);
                           const nextCost = autoCost != null ? autoCost : f.專案成本;
                           return {
@@ -9975,8 +9984,13 @@ export default function DashboardPage() {
 
               <section>
                 <h3 className="mb-3 text-base font-bold text-amber-800">金額與成本</h3>
+                {isEditingMaster && !canEditMasterNumbers && (
+                  <p className="mb-3 rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-600">
+                    金額欄位僅董事長／管理者（或於「專案權限設定」勾選「編輯金額／數字」的角色）可修改；其餘欄位仍可儲存。
+                  </p>
+                )}
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                  {isEditingMaster ? (
+                  {isEditingMaster && canEditMasterNumbers ? (
                     <NumberField
                       label="專案總金額未稅"
                       value={editMasterForm.專案總金額未稅}
@@ -9997,7 +10011,7 @@ export default function DashboardPage() {
                     <Field label="專案總金額未稅" value={formatAmount(selectedMaster.專案總金額未稅)} />
                   )}
 
-                  {isEditingMaster ? (
+                  {isEditingMaster && canEditMasterNumbers ? (
                     <div>
                       <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-500">專案營收</p>
                       <p className="text-sm font-medium text-stone-700 tabular-nums">{formatAmount(editMasterForm.專案營收)}</p>
@@ -10007,7 +10021,7 @@ export default function DashboardPage() {
                     <Field label="專案營收" value={formatAmount(selectedMaster.專案營收)} />
                   )}
 
-                  {isEditingMaster ? (
+                  {isEditingMaster && canEditMasterNumbers ? (
                     <div>
                       <NumberField
                         label="專案成本"
@@ -10028,7 +10042,7 @@ export default function DashboardPage() {
                     <Field label="專案成本" value={formatAmount(selectedMaster.專案成本)} />
                   )}
 
-                  {isEditingMaster ? (
+                  {isEditingMaster && canEditMasterNumbers ? (
                     <NumberField
                       label="KOL費用未稅"
                       value={editMasterForm.KOL費用未稅}
