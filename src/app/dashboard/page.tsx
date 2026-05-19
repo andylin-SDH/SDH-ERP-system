@@ -117,6 +117,8 @@ function sortPayoutColumnsForDisplay(cols: string[]): string[] {
 }
 
 const RENDER_CHUNK_SIZE = 120;
+/** 發票清冊：每頁筆數（分頁瀏覽，非自動分段載入） */
+const INVOICE_LIST_PAGE_SIZE = 50;
 type MasterCreatedSortDirection = "desc" | "asc";
 
 /** 金額顯示用（數字型態，千分位） */
@@ -1268,7 +1270,7 @@ export default function DashboardPage() {
   const [payoutRenderCount, setPayoutRenderCount] = useState(RENDER_CHUNK_SIZE);
   const [tasksRenderCount, setTasksRenderCount] = useState(RENDER_CHUNK_SIZE);
   const [financeRenderCount, setFinanceRenderCount] = useState(RENDER_CHUNK_SIZE);
-  const [invoicesRenderCount, setInvoicesRenderCount] = useState(RENDER_CHUNK_SIZE);
+  const [invoiceListPage, setInvoiceListPage] = useState(1);
   const [paymentRecordsRenderCount, setPaymentRecordsRenderCount] = useState(RENDER_CHUNK_SIZE);
   /** 讓輸入先回應，再延後套用篩選，降低卡頓 */
   const deferredMasterSearch = useDeferredValue(masterSearch);
@@ -2333,10 +2335,15 @@ export default function DashboardPage() {
     () => searchedFinance.slice(0, financeRenderCount),
     [searchedFinance, financeRenderCount]
   );
-  const visibleInvoicesRows = useMemo(
-    () => invoicesSortedForDisplay.slice(0, invoicesRenderCount),
-    [invoicesSortedForDisplay, invoicesRenderCount]
+  const invoiceListPageCount = useMemo(
+    () => Math.max(1, Math.ceil(invoicesSortedForDisplay.length / INVOICE_LIST_PAGE_SIZE)),
+    [invoicesSortedForDisplay.length]
   );
+  const invoiceListPageSafe = Math.min(Math.max(1, invoiceListPage), invoiceListPageCount);
+  const visibleInvoicesRows = useMemo(() => {
+    const start = (invoiceListPageSafe - 1) * INVOICE_LIST_PAGE_SIZE;
+    return invoicesSortedForDisplay.slice(start, start + INVOICE_LIST_PAGE_SIZE);
+  }, [invoicesSortedForDisplay, invoiceListPageSafe]);
   const visibleInvoiceIds = useMemo(
     () => visibleInvoicesRows.map((inv) => inv.id).filter((id): id is string => typeof id === "string" && id.trim() !== ""),
     [visibleInvoicesRows]
@@ -2488,25 +2495,14 @@ export default function DashboardPage() {
   }, [activeSection, financeSubTab, searchedFinance.length]);
 
   useEffect(() => {
-    if (activeSection !== "finance" || financeSubTab !== "invoices") return;
-    setInvoicesRenderCount(RENDER_CHUNK_SIZE);
-    if (invoicesSortedForDisplay.length <= RENDER_CHUNK_SIZE) return;
-    let timer: number | undefined;
-    const tick = () => {
-      setInvoicesRenderCount((prev) => {
-        const next = Math.min(prev + RENDER_CHUNK_SIZE, invoicesSortedForDisplay.length);
-        if (next < invoicesSortedForDisplay.length) timer = window.setTimeout(tick, 0);
-        return next;
-      });
-    };
-    timer = window.setTimeout(tick, 0);
-    return () => { if (timer) window.clearTimeout(timer); };
-  }, [activeSection, financeSubTab, invoicesSortedForDisplay.length]);
+    setInvoiceListPage(1);
+  }, [invoiceMonthTab, deferredInvoicesSearch, invoiceListDateSortMode, financeSubTab]);
 
   useEffect(() => {
-    if (activeSection !== "finance" || financeSubTab !== "invoices") return;
-    setInvoicesRenderCount(RENDER_CHUNK_SIZE);
-  }, [invoiceListDateSortMode, activeSection, financeSubTab]);
+    if (invoiceListPage > invoiceListPageCount) {
+      setInvoiceListPage(invoiceListPageCount);
+    }
+  }, [invoiceListPage, invoiceListPageCount]);
 
   useEffect(() => {
     setSelectedInvoiceIds((prev) => prev.filter((id) => invoices.some((inv) => inv.id === id)));
@@ -8218,8 +8214,41 @@ export default function DashboardPage() {
                   </>
                 )}
               </div>
-              {invoicesSortedForDisplay.length > visibleInvoicesRows.length && (
-                <p className="mt-2 text-right text-xs text-stone-500">載入中 {visibleInvoicesRows.length} / {invoicesSortedForDisplay.length}</p>
+              {invoicesSortedForDisplay.length > 0 && (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-stone-200/90 pt-3">
+                  <p className="text-xs text-stone-600">
+                    共 <strong className="tabular-nums text-stone-900">{invoicesSortedForDisplay.length}</strong> 筆
+                    {invoicesSortedForDisplay.length > INVOICE_LIST_PAGE_SIZE && (
+                      <span className="text-stone-500">
+                        {" "}
+                        · 第 {invoiceListPageSafe} / {invoiceListPageCount} 頁（每頁 {INVOICE_LIST_PAGE_SIZE} 筆）
+                      </span>
+                    )}
+                  </p>
+                  {invoiceListPageCount > 1 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={invoiceListPageSafe <= 1}
+                        onClick={() => setInvoiceListPage((p) => Math.max(1, p - 1))}
+                        className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        上一頁
+                      </button>
+                      <span className="min-w-[5rem] text-center text-xs font-medium tabular-nums text-stone-600">
+                        {invoiceListPageSafe} / {invoiceListPageCount}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={invoiceListPageSafe >= invoiceListPageCount}
+                        onClick={() => setInvoiceListPage((p) => Math.min(invoiceListPageCount, p + 1))}
+                        className="rounded-lg border border-amber-400/80 bg-amber-500 px-3 py-1.5 text-xs font-bold text-slate-900 shadow-sm transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        下一頁
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
             </>
           )}
