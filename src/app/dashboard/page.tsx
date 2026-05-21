@@ -117,8 +117,9 @@ function sortPayoutColumnsForDisplay(cols: string[]): string[] {
 }
 
 const RENDER_CHUNK_SIZE = 120;
-/** 發票清冊：每頁筆數（分頁瀏覽，非自動分段載入） */
-const INVOICE_LIST_PAGE_SIZE = 50;
+/** 發票清冊：可選每頁筆數 */
+const INVOICE_LIST_PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
+type InvoiceListPageSize = (typeof INVOICE_LIST_PAGE_SIZE_OPTIONS)[number];
 type MasterCreatedSortDirection = "desc" | "asc";
 
 /** 金額顯示用（數字型態，千分位） */
@@ -297,19 +298,49 @@ function parseInvoiceImportText(text: string): {
 
 type InvoiceLedgerTab = "all" | "credited" | "uncredited";
 
-/** 廠商付款日期已填＝已入帳 */
+/** 廠商付款日期已填＝已入帳（畫面即時值，含未存檔編輯） */
 function invoiceIsCredited(row: InvoiceRow): boolean {
   return Boolean(normalizeDateForInput(String(row.廠商付款日期 ?? "")));
 }
 
-function filterInvoicesByLedgerTab(rows: InvoiceRow[], tab: InvoiceLedgerTab): InvoiceRow[] {
-  if (tab === "credited") return rows.filter(invoiceIsCredited);
-  if (tab === "uncredited") return rows.filter((r) => !invoiceIsCredited(r));
+/** 入帳分類用：僅依上次成功存檔的廠商付款日期 */
+type InvoiceLedgerSnapshot = Readonly<Record<string, string>>;
+
+function buildInvoiceLedgerSnapshot(rows: InvoiceRow[]): Record<string, string> {
+  const snap: Record<string, string> = {};
+  for (const r of rows) {
+    const id = typeof r.id === "string" ? r.id.trim() : "";
+    if (id) snap[id] = String(r.廠商付款日期 ?? "");
+  }
+  return snap;
+}
+
+function invoiceSavedVendorPaymentDate(row: InvoiceRow, snap: InvoiceLedgerSnapshot): string {
+  const id = typeof row.id === "string" ? row.id.trim() : "";
+  if (id && id in snap) return snap[id];
+  return String(row.廠商付款日期 ?? "");
+}
+
+function invoiceIsCreditedForLedger(row: InvoiceRow, snap: InvoiceLedgerSnapshot): boolean {
+  return Boolean(normalizeDateForInput(invoiceSavedVendorPaymentDate(row, snap)));
+}
+
+function filterInvoicesByLedgerTab(
+  rows: InvoiceRow[],
+  tab: InvoiceLedgerTab,
+  snap: InvoiceLedgerSnapshot
+): InvoiceRow[] {
+  if (tab === "credited") return rows.filter((r) => invoiceIsCreditedForLedger(r, snap));
+  if (tab === "uncredited") return rows.filter((r) => !invoiceIsCreditedForLedger(r, snap));
   return rows;
 }
 
-function invoiceMonthKeyForLedgerTab(row: InvoiceRow, tab: InvoiceLedgerTab): string {
-  return tab === "credited" ? invoiceCreditedMonthKey(row) : invoiceMonthKey(row);
+function invoiceMonthKeyForLedgerTab(
+  row: InvoiceRow,
+  tab: InvoiceLedgerTab,
+  snap: InvoiceLedgerSnapshot
+): string {
+  return tab === "credited" ? invoiceCreditedMonthKeyForLedger(row, snap) : invoiceMonthKey(row);
 }
 
 function invoiceMonthKey(row: InvoiceRow): string {
@@ -321,9 +352,16 @@ function invoiceMonthKey(row: InvoiceRow): string {
   return "未分類";
 }
 
-/** 已入帳列表依「廠商付款日期」分月 */
+/** 已入帳列表依「廠商付款日期」分月（畫面即時值） */
 function invoiceCreditedMonthKey(row: InvoiceRow): string {
   const iso = normalizeDateForInput(String(row.廠商付款日期 ?? ""));
+  if (iso) return iso.slice(0, 7);
+  return "未分類";
+}
+
+/** 已入帳列表依「已存檔」廠商付款日期分月 */
+function invoiceCreditedMonthKeyForLedger(row: InvoiceRow, snap: InvoiceLedgerSnapshot): string {
+  const iso = normalizeDateForInput(invoiceSavedVendorPaymentDate(row, snap));
   if (iso) return iso.slice(0, 7);
   return "未分類";
 }
@@ -1198,6 +1236,8 @@ export default function DashboardPage() {
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
   const [deletingInvoiceIds, setDeletingInvoiceIds] = useState<string[]>([]);
   const [invoiceDirtyIds, setInvoiceDirtyIds] = useState<string[]>([]);
+  /** 入帳分類／月份：僅反映已存檔的廠商付款日期 */
+  const [invoiceLedgerSnapshot, setInvoiceLedgerSnapshot] = useState<Record<string, string>>({});
   const invoicesRef = useRef<InvoiceRow[]>([]);
   const invoiceSaveInflightRef = useRef<Set<string>>(new Set());
   const invoiceSavePendingRef = useRef<Set<string>>(new Set());
@@ -1297,6 +1337,7 @@ export default function DashboardPage() {
   const [tasksRenderCount, setTasksRenderCount] = useState(RENDER_CHUNK_SIZE);
   const [financeRenderCount, setFinanceRenderCount] = useState(RENDER_CHUNK_SIZE);
   const [invoiceListPage, setInvoiceListPage] = useState(1);
+  const [invoiceListPageSize, setInvoiceListPageSize] = useState<InvoiceListPageSize>(50);
   const [paymentRecordsRenderCount, setPaymentRecordsRenderCount] = useState(RENDER_CHUNK_SIZE);
   /** 讓輸入先回應，再延後套用篩選，降低卡頓 */
   const deferredMasterSearch = useDeferredValue(masterSearch);
@@ -2089,16 +2130,24 @@ export default function DashboardPage() {
   const invoiceLedgerTabs = useMemo(
     () => [
       { key: "all" as const, label: "全部", count: invoices.length },
-      { key: "uncredited" as const, label: "未入帳", count: invoices.filter((r) => !invoiceIsCredited(r)).length },
-      { key: "credited" as const, label: "已入帳", count: invoices.filter(invoiceIsCredited).length },
+      {
+        key: "uncredited" as const,
+        label: "未入帳",
+        count: invoices.filter((r) => !invoiceIsCreditedForLedger(r, invoiceLedgerSnapshot)).length,
+      },
+      {
+        key: "credited" as const,
+        label: "已入帳",
+        count: invoices.filter((r) => invoiceIsCreditedForLedger(r, invoiceLedgerSnapshot)).length,
+      },
     ],
-    [invoices]
+    [invoices, invoiceLedgerSnapshot]
   );
   const invoiceMonthTabs = useMemo(() => {
-    const base = filterInvoicesByLedgerTab(invoices, invoiceLedgerTab);
+    const base = filterInvoicesByLedgerTab(invoices, invoiceLedgerTab, invoiceLedgerSnapshot);
     const counts = new Map<string, number>();
     for (const inv of base) {
-      const key = invoiceMonthKeyForLedgerTab(inv, invoiceLedgerTab);
+      const key = invoiceMonthKeyForLedgerTab(inv, invoiceLedgerTab, invoiceLedgerSnapshot);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     const months = [...counts.keys()].sort((a, b) => {
@@ -2110,16 +2159,17 @@ export default function DashboardPage() {
       { key: "all", label: "全部月份", count: base.length },
       ...months.map((key) => ({ key, label: invoiceMonthLabel(key), count: counts.get(key) ?? 0 })),
     ];
-  }, [invoices, invoiceLedgerTab]);
+  }, [invoices, invoiceLedgerTab, invoiceLedgerSnapshot]);
   const monthFilteredInvoices = useMemo(() => {
-    let rows = filterInvoicesByLedgerTab(invoices, invoiceLedgerTab);
+    let rows = filterInvoicesByLedgerTab(invoices, invoiceLedgerTab, invoiceLedgerSnapshot);
     if (invoiceMonthTab !== "all") {
       rows = rows.filter(
-        (inv) => invoiceMonthKeyForLedgerTab(inv, invoiceLedgerTab) === invoiceMonthTab
+        (inv) =>
+          invoiceMonthKeyForLedgerTab(inv, invoiceLedgerTab, invoiceLedgerSnapshot) === invoiceMonthTab
       );
     }
     return rows;
-  }, [invoices, invoiceLedgerTab, invoiceMonthTab]);
+  }, [invoices, invoiceLedgerTab, invoiceMonthTab, invoiceLedgerSnapshot]);
   const selectedInvoiceIdSet = useMemo(() => new Set(selectedInvoiceIds), [selectedInvoiceIds]);
   /** 發票清冊：勾選列的發票金額含稅即時加總（狀態列用） */
   const selectedInvoicesTaxedAmountSum = useMemo(() => {
@@ -2376,14 +2426,14 @@ export default function DashboardPage() {
     [searchedFinance, financeRenderCount]
   );
   const invoiceListPageCount = useMemo(
-    () => Math.max(1, Math.ceil(invoicesSortedForDisplay.length / INVOICE_LIST_PAGE_SIZE)),
-    [invoicesSortedForDisplay.length]
+    () => Math.max(1, Math.ceil(invoicesSortedForDisplay.length / invoiceListPageSize)),
+    [invoicesSortedForDisplay.length, invoiceListPageSize]
   );
   const invoiceListPageSafe = Math.min(Math.max(1, invoiceListPage), invoiceListPageCount);
   const visibleInvoicesRows = useMemo(() => {
-    const start = (invoiceListPageSafe - 1) * INVOICE_LIST_PAGE_SIZE;
-    return invoicesSortedForDisplay.slice(start, start + INVOICE_LIST_PAGE_SIZE);
-  }, [invoicesSortedForDisplay, invoiceListPageSafe]);
+    const start = (invoiceListPageSafe - 1) * invoiceListPageSize;
+    return invoicesSortedForDisplay.slice(start, start + invoiceListPageSize);
+  }, [invoicesSortedForDisplay, invoiceListPageSafe, invoiceListPageSize]);
   const visibleInvoiceIds = useMemo(
     () => visibleInvoicesRows.map((inv) => inv.id).filter((id): id is string => typeof id === "string" && id.trim() !== ""),
     [visibleInvoicesRows]
@@ -2536,7 +2586,14 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setInvoiceListPage(1);
-  }, [invoiceLedgerTab, invoiceMonthTab, deferredInvoicesSearch, invoiceListDateSortMode, financeSubTab]);
+  }, [
+    invoiceLedgerTab,
+    invoiceMonthTab,
+    deferredInvoicesSearch,
+    invoiceListDateSortMode,
+    financeSubTab,
+    invoiceListPageSize,
+  ]);
 
   useEffect(() => {
     if (invoiceListPage > invoiceListPageCount) {
@@ -2821,7 +2878,9 @@ export default function DashboardPage() {
             .then(safeResJson)
             .then((res) => {
               if (!(res as { ok?: boolean }).ok) return;
-              setInvoices(sortInvoicesByInvoiceNumber(((res as { invoices?: InvoiceRow[] }).invoices) ?? []));
+              const loaded = sortInvoicesByInvoiceNumber(((res as { invoices?: InvoiceRow[] }).invoices) ?? []);
+              setInvoiceLedgerSnapshot(buildInvoiceLedgerSnapshot(loaded));
+              setInvoices(loaded);
             })
         );
       }
@@ -2889,6 +2948,11 @@ export default function DashboardPage() {
           return;
         }
         if (data.invoice) {
+          const savedId = String(data.invoice.id ?? id);
+          setInvoiceLedgerSnapshot((prev) => ({
+            ...prev,
+            [savedId]: String(data.invoice!.廠商付款日期 ?? ""),
+          }));
           setInvoices((prev) =>
             sortInvoicesByInvoiceNumber(prev.map((r) => (r.id === id ? { ...r, ...data.invoice } : r)))
           );
@@ -2931,6 +2995,11 @@ export default function DashboardPage() {
           return;
         }
         const deletedSet = new Set(cleanIds);
+        setInvoiceLedgerSnapshot((prev) => {
+          const next = { ...prev };
+          for (const delId of cleanIds) delete next[delId];
+          return next;
+        });
         setInvoices((prev) => sortInvoicesByInvoiceNumber(prev.filter((inv) => !inv.id || !deletedSet.has(inv.id))));
         setSelectedInvoiceIds((prev) => prev.filter((id) => !deletedSet.has(id)));
         setInvoiceDirtyIds((prev) => prev.filter((id) => !deletedSet.has(id)));
@@ -8009,14 +8078,19 @@ export default function DashboardPage() {
                     ))}
                   </div>
                 </div>
+                {(invoiceLedgerTab === "credited" || invoiceLedgerTab === "uncredited") && (
+                  <p className="text-[11px] text-stone-500">
+                    入帳分類以<strong>已按「存檔」</strong>的廠商付款日期為準；編輯中尚未存檔不會移動分頁。
+                  </p>
+                )}
                 {invoiceLedgerTab === "credited" && (
                   <p className="text-[11px] text-emerald-800/90">
-                    已入帳：廠商付款日期已填寫；月份依<strong>付款日期</strong>分組。可再搭配上方搜尋。
+                    已入帳：廠商付款日期已存檔；月份依<strong>付款日期</strong>分組。可再搭配上方搜尋。
                   </p>
                 )}
                 {invoiceLedgerTab === "uncredited" && (
                   <p className="text-[11px] text-stone-600">
-                    未入帳：廠商付款日期尚未填寫；月份依<strong>發票日期</strong>分組。可再搭配上方搜尋。
+                    未入帳：廠商付款日期尚未存檔；月份依<strong>發票日期</strong>分組。可再搭配上方搜尋。
                   </p>
                 )}
               </div>
@@ -8301,36 +8375,58 @@ export default function DashboardPage() {
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-stone-200/90 pt-3">
                   <p className="text-xs text-stone-600">
                     共 <strong className="tabular-nums text-stone-900">{invoicesSortedForDisplay.length}</strong> 筆
-                    {invoicesSortedForDisplay.length > INVOICE_LIST_PAGE_SIZE && (
+                    {invoicesSortedForDisplay.length > invoiceListPageSize && (
                       <span className="text-stone-500">
                         {" "}
-                        · 第 {invoiceListPageSafe} / {invoiceListPageCount} 頁（每頁 {INVOICE_LIST_PAGE_SIZE} 筆）
+                        · 第 {invoiceListPageSafe} / {invoiceListPageCount} 頁（每頁 {invoiceListPageSize} 筆）
                       </span>
                     )}
                   </p>
-                  {invoiceListPageCount > 1 && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={invoiceListPageSafe <= 1}
-                        onClick={() => setInvoiceListPage((p) => Math.max(1, p - 1))}
-                        className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-1.5 text-xs text-stone-600">
+                      <span className="shrink-0 font-medium">每頁</span>
+                      <select
+                        value={invoiceListPageSize}
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          if (INVOICE_LIST_PAGE_SIZE_OPTIONS.includes(n as InvoiceListPageSize)) {
+                            setInvoiceListPageSize(n as InvoiceListPageSize);
+                          }
+                        }}
+                        className="rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-xs font-semibold text-stone-800 focus:border-amber-500/60 focus:outline-none"
+                        aria-label="每頁顯示筆數"
                       >
-                        上一頁
-                      </button>
-                      <span className="min-w-[5rem] text-center text-xs font-medium tabular-nums text-stone-600">
-                        {invoiceListPageSafe} / {invoiceListPageCount}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={invoiceListPageSafe >= invoiceListPageCount}
-                        onClick={() => setInvoiceListPage((p) => Math.min(invoiceListPageCount, p + 1))}
-                        className="rounded-lg border border-amber-400/80 bg-amber-500 px-3 py-1.5 text-xs font-bold text-slate-900 shadow-sm transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        下一頁
-                      </button>
-                    </div>
-                  )}
+                        {INVOICE_LIST_PAGE_SIZE_OPTIONS.map((n) => (
+                          <option key={n} value={n}>
+                            {n} 筆
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {invoiceListPageCount > 1 && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={invoiceListPageSafe <= 1}
+                          onClick={() => setInvoiceListPage((p) => Math.max(1, p - 1))}
+                          className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          上一頁
+                        </button>
+                        <span className="min-w-[5rem] text-center text-xs font-medium tabular-nums text-stone-600">
+                          {invoiceListPageSafe} / {invoiceListPageCount}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={invoiceListPageSafe >= invoiceListPageCount}
+                          onClick={() => setInvoiceListPage((p) => Math.min(invoiceListPageCount, p + 1))}
+                          className="rounded-lg border border-amber-400/80 bg-amber-500 px-3 py-1.5 text-xs font-bold text-slate-900 shadow-sm transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          下一頁
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </>
@@ -8824,6 +8920,7 @@ export default function DashboardPage() {
                       return;
                     }
                     if (data.invoices?.length) {
+                      setInvoiceLedgerSnapshot((prev) => ({ ...prev, ...buildInvoiceLedgerSnapshot(data.invoices!) }));
                       setInvoices((prev) => sortInvoicesByInvoiceNumber([...data.invoices!, ...prev]));
                     } else {
                       await refreshDashboardData(["invoices", "finance"]);
@@ -8981,6 +9078,7 @@ export default function DashboardPage() {
                       return;
                     }
                     if (data.invoices?.length) {
+                      setInvoiceLedgerSnapshot((prev) => ({ ...prev, ...buildInvoiceLedgerSnapshot(data.invoices!) }));
                       setInvoices((prev) => sortInvoicesByInvoiceNumber([...data.invoices!, ...prev]));
                     } else {
                       await refreshDashboardData(["invoices", "finance"]);
