@@ -80,6 +80,27 @@ export interface CreatePartnerOptions {
   建立者?: string | null;
 }
 
+import {
+  findPartnerDuplicateInList,
+  type PartnerDuplicateMatch,
+} from "@/lib/partners/duplicate";
+
+export {
+  findPartnerDuplicateInList,
+  formatPartnerDuplicateError,
+  type PartnerDuplicateMatch,
+} from "@/lib/partners/duplicate";
+
+/** 全表比對（含待審核／已駁回） */
+export async function findPartnerDuplicate(input: {
+  合作夥伴名稱?: string;
+  Email?: string;
+  excludePartnerId?: string;
+}): Promise<PartnerDuplicateMatch | null> {
+  const { partners } = await getPartnersWithError();
+  return findPartnerDuplicateInList(partners, input);
+}
+
 export async function createPartner(
   payload: NewPartnerInput,
   options?: CreatePartnerOptions

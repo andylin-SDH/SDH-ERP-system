@@ -4,6 +4,8 @@ import {
   getPartnersPendingWithError,
   createPartner,
   updatePartner,
+  findPartnerDuplicate,
+  formatPartnerDuplicateError,
   type NewPartnerInput,
   type UpdatePartnerInput,
 } from "@/lib/db/partners";
@@ -77,6 +79,22 @@ export async function POST(request: NextRequest) {
     const PartnerID = String(body?.PartnerID ?? "").trim();
     if (!PartnerID) {
       return NextResponse.json({ ok: false, error: "PartnerID 為必填" }, { status: 400 });
+    }
+    const name = String(body?.合作夥伴名稱 ?? "").trim();
+    if (!name) {
+      return NextResponse.json({ ok: false, error: "合作夥伴名稱 為必填" }, { status: 400 });
+    }
+
+    const dup = await findPartnerDuplicate({
+      合作夥伴名稱: name,
+      Email: body?.Email,
+      excludePartnerId: PartnerID,
+    });
+    if (dup) {
+      return NextResponse.json(
+        { ok: false, error: formatPartnerDuplicateError(dup) },
+        { status: 409 }
+      );
     }
 
     const admin = isAdminRole(auth.user.role);

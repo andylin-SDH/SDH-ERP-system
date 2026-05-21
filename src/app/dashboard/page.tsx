@@ -6,6 +6,10 @@ import Link from "next/link";
 import type { User } from "@/lib/types";
 import type { TaskRow } from "@/modules/tasks";
 import type { PartnerRow } from "@/modules/partners";
+import {
+  findPartnerDuplicateInList,
+  formatPartnerDuplicateError,
+} from "@/lib/partners/duplicate";
 import type { MasterRow } from "@/lib/db/master";
 import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, PaymentRecordRow } from "@/modules/finance";
 import { sortInvoicesByInvoiceNumber } from "@/modules/finance";
@@ -2277,6 +2281,11 @@ export default function DashboardPage() {
     () =>
       filterRowsBySearch(filteredPartners as unknown as Record<string, unknown>[], partnerListCols, deferredPartnersSearch) as unknown as PartnerRow[],
     [filteredPartners, partnerListCols, deferredPartnersSearch, filterRowsBySearch]
+  );
+  const partnersApprovedCount = useMemo(() => filteredPartners.length, [filteredPartners]);
+  const partnersPendingCount = useMemo(
+    () => partnersPending.length + partnerChangeRequests.length,
+    [partnersPending.length, partnerChangeRequests.length]
   );
   const searchedTasks = useMemo(
     () =>
@@ -5531,6 +5540,15 @@ export default function DashboardPage() {
                   setCreatePartnerError("合作夥伴名稱 為必填");
                   return;
                 }
+                const dup = findPartnerDuplicateInList([...partners, ...partnersPending], {
+                  合作夥伴名稱: createPartnerForm.合作夥伴名稱,
+                  Email: createPartnerForm.Email,
+                  excludePartnerId: createPartnerForm.PartnerID,
+                });
+                if (dup) {
+                  setCreatePartnerError(formatPartnerDuplicateError(dup));
+                  return;
+                }
                 setCreatingPartner(true);
                 try {
                   const res = await fetch("/api/partners", {
@@ -5604,6 +5622,9 @@ export default function DashboardPage() {
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 合作夥伴名稱: e.target.value }))}
                       className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
+                    <p className="mt-1 text-[11px] text-stone-500">
+                      系統會比對已上架與待審核列表，相同名稱或 Email 無法重複新增。
+                    </p>
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-semibold text-stone-500">類別一</label>
@@ -6402,6 +6423,7 @@ export default function DashboardPage() {
                   }`}
                 >
                   已上架
+                  <span className="ml-1 text-[10px] opacity-80">{partnersApprovedCount}</span>
                 </button>
                 <button
                   type="button"
@@ -6414,11 +6436,7 @@ export default function DashboardPage() {
                   }`}
                 >
                   待審核
-                  {(partnersPending.length > 0 || partnerChangeRequests.length > 0) && (
-                    <span className="ml-1 rounded-full bg-amber-200/80 px-1.5 py-0.5 text-[10px] text-amber-800">
-                      {partnersPending.length + partnerChangeRequests.length}
-                    </span>
-                  )}
+                  <span className="ml-1 text-[10px] opacity-80">{partnersPendingCount}</span>
                 </button>
               </div>
             </div>
