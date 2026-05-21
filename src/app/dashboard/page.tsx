@@ -295,11 +295,35 @@ function parseInvoiceImportText(text: string): {
   };
 }
 
+type InvoiceLedgerTab = "all" | "credited" | "uncredited";
+
+/** 廠商付款日期已填＝已入帳 */
+function invoiceIsCredited(row: InvoiceRow): boolean {
+  return Boolean(normalizeDateForInput(String(row.廠商付款日期 ?? "")));
+}
+
+function filterInvoicesByLedgerTab(rows: InvoiceRow[], tab: InvoiceLedgerTab): InvoiceRow[] {
+  if (tab === "credited") return rows.filter(invoiceIsCredited);
+  if (tab === "uncredited") return rows.filter((r) => !invoiceIsCredited(r));
+  return rows;
+}
+
+function invoiceMonthKeyForLedgerTab(row: InvoiceRow, tab: InvoiceLedgerTab): string {
+  return tab === "credited" ? invoiceCreditedMonthKey(row) : invoiceMonthKey(row);
+}
+
 function invoiceMonthKey(row: InvoiceRow): string {
   const invoiceDate = String(row.發票日期 ?? "").trim();
   const paymentDate = String(row.廠商付款日期 ?? "").trim();
   const raw = invoiceDate || paymentDate;
   const iso = normalizeDateForInput(raw);
+  if (iso) return iso.slice(0, 7);
+  return "未分類";
+}
+
+/** 已入帳列表依「廠商付款日期」分月 */
+function invoiceCreditedMonthKey(row: InvoiceRow): string {
+  const iso = normalizeDateForInput(String(row.廠商付款日期 ?? ""));
   if (iso) return iso.slice(0, 7);
   return "未分類";
 }
@@ -1168,6 +1192,8 @@ export default function DashboardPage() {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [invoiceEditSavingId, setInvoiceEditSavingId] = useState<string | null>(null);
   const [invoiceEditError, setInvoiceEditError] = useState<string | null>(null);
+  /** 發票清冊：入帳狀態（全部／已入帳／未入帳） */
+  const [invoiceLedgerTab, setInvoiceLedgerTab] = useState<InvoiceLedgerTab>("all");
   const [invoiceMonthTab, setInvoiceMonthTab] = useState("all");
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
   const [deletingInvoiceIds, setDeletingInvoiceIds] = useState<string[]>([]);
@@ -2060,10 +2086,19 @@ export default function DashboardPage() {
   const financeVisibleCols = useMemo(() => getVisibleColumnKeys("finance"), [getVisibleColumnKeys]);
   const invoicesVisibleCols = useMemo(() => getVisibleColumnKeys("invoices"), [getVisibleColumnKeys]);
   const paymentRecordsVisibleCols = useMemo(() => getVisibleColumnKeys("paymentRecords"), [getVisibleColumnKeys]);
+  const invoiceLedgerTabs = useMemo(
+    () => [
+      { key: "all" as const, label: "全部", count: invoices.length },
+      { key: "uncredited" as const, label: "未入帳", count: invoices.filter((r) => !invoiceIsCredited(r)).length },
+      { key: "credited" as const, label: "已入帳", count: invoices.filter(invoiceIsCredited).length },
+    ],
+    [invoices]
+  );
   const invoiceMonthTabs = useMemo(() => {
+    const base = filterInvoicesByLedgerTab(invoices, invoiceLedgerTab);
     const counts = new Map<string, number>();
-    for (const inv of invoices) {
-      const key = invoiceMonthKey(inv);
+    for (const inv of base) {
+      const key = invoiceMonthKeyForLedgerTab(inv, invoiceLedgerTab);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     const months = [...counts.keys()].sort((a, b) => {
@@ -2072,14 +2107,19 @@ export default function DashboardPage() {
       return b.localeCompare(a);
     });
     return [
-      { key: "all", label: "全部", count: invoices.length },
+      { key: "all", label: "全部月份", count: base.length },
       ...months.map((key) => ({ key, label: invoiceMonthLabel(key), count: counts.get(key) ?? 0 })),
     ];
-  }, [invoices]);
-  const monthFilteredInvoices = useMemo(
-    () => (invoiceMonthTab === "all" ? invoices : invoices.filter((inv) => invoiceMonthKey(inv) === invoiceMonthTab)),
-    [invoices, invoiceMonthTab]
-  );
+  }, [invoices, invoiceLedgerTab]);
+  const monthFilteredInvoices = useMemo(() => {
+    let rows = filterInvoicesByLedgerTab(invoices, invoiceLedgerTab);
+    if (invoiceMonthTab !== "all") {
+      rows = rows.filter(
+        (inv) => invoiceMonthKeyForLedgerTab(inv, invoiceLedgerTab) === invoiceMonthTab
+      );
+    }
+    return rows;
+  }, [invoices, invoiceLedgerTab, invoiceMonthTab]);
   const selectedInvoiceIdSet = useMemo(() => new Set(selectedInvoiceIds), [selectedInvoiceIds]);
   /** 發票清冊：勾選列的發票金額含稅即時加總（狀態列用） */
   const selectedInvoicesTaxedAmountSum = useMemo(() => {
@@ -2496,7 +2536,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setInvoiceListPage(1);
-  }, [invoiceMonthTab, deferredInvoicesSearch, invoiceListDateSortMode, financeSubTab]);
+  }, [invoiceLedgerTab, invoiceMonthTab, deferredInvoicesSearch, invoiceListDateSortMode, financeSubTab]);
 
   useEffect(() => {
     if (invoiceListPage > invoiceListPageCount) {
@@ -7905,36 +7945,79 @@ export default function DashboardPage() {
                   className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
                 />
               </div>
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex max-w-full gap-1 overflow-x-auto rounded-xl border border-stone-200 bg-stone-50/90 p-1">
-                  {invoiceMonthTabs.map((tab) => (
+              <div className="mb-3 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400">入帳</span>
+                    <div className="flex gap-0.5 rounded-lg border border-stone-200 bg-stone-50/90 p-0.5">
+                      {invoiceLedgerTabs.map((tab) => (
+                        <button
+                          key={tab.key}
+                          type="button"
+                          onClick={() => {
+                            setInvoiceLedgerTab(tab.key);
+                            setInvoiceMonthTab("all");
+                            setSelectedInvoiceIds([]);
+                          }}
+                          className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                            invoiceLedgerTab === tab.key
+                              ? tab.key === "credited"
+                                ? "bg-emerald-600 text-white shadow-sm"
+                                : tab.key === "uncredited"
+                                  ? "bg-stone-700 text-white shadow-sm"
+                                  : "bg-amber-500 text-slate-900 shadow-sm"
+                              : "text-stone-500 hover:bg-white hover:text-stone-900"
+                          }`}
+                        >
+                          {tab.label}
+                          <span className="ml-1 text-[10px] opacity-80">{tab.count}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {selectedInvoiceIds.length > 0 && (
                     <button
-                      key={tab.key}
                       type="button"
-                      onClick={() => {
-                        setInvoiceMonthTab(tab.key);
-                        setSelectedInvoiceIds([]);
-                      }}
-                      className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                        invoiceMonthTab === tab.key
-                          ? "bg-amber-500 text-slate-900 shadow shadow-amber-200/40"
-                          : "text-stone-500 hover:bg-white hover:text-stone-900"
-                      }`}
+                      onClick={() => void deleteInvoicesByIdList(selectedInvoiceIds)}
+                      disabled={deletingInvoiceIds.length > 0}
+                      className="rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 transition hover:bg-red-100 disabled:opacity-60"
                     >
-                      {tab.label}
-                      <span className="ml-1 text-[10px] opacity-70">{tab.count}</span>
+                      刪除已選 {selectedInvoiceIds.length} 筆
                     </button>
-                  ))}
+                  )}
                 </div>
-                {selectedInvoiceIds.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => void deleteInvoicesByIdList(selectedInvoiceIds)}
-                    disabled={deletingInvoiceIds.length > 0}
-                    className="rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 transition hover:bg-red-100 disabled:opacity-60"
-                  >
-                    刪除已選 {selectedInvoiceIds.length} 筆
-                  </button>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-stone-400">月份</span>
+                  <div className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto rounded-lg border border-stone-200/80 bg-white p-0.5">
+                    {invoiceMonthTabs.map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => {
+                          setInvoiceMonthTab(tab.key);
+                          setSelectedInvoiceIds([]);
+                        }}
+                        className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                          invoiceMonthTab === tab.key
+                            ? "bg-stone-800 text-white"
+                            : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"
+                        }`}
+                      >
+                        {tab.label}
+                        <span className="ml-1 text-[10px] opacity-75">{tab.count}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {invoiceLedgerTab === "credited" && (
+                  <p className="text-[11px] text-emerald-800/90">
+                    已入帳：廠商付款日期已填寫；月份依<strong>付款日期</strong>分組。可再搭配上方搜尋。
+                  </p>
+                )}
+                {invoiceLedgerTab === "uncredited" && (
+                  <p className="text-[11px] text-stone-600">
+                    未入帳：廠商付款日期尚未填寫；月份依<strong>發票日期</strong>分組。可再搭配上方搜尋。
+                  </p>
                 )}
               </div>
               {invoiceEditError && (
