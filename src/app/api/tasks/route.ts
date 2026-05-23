@@ -94,6 +94,8 @@ export async function PATCH(request: NextRequest) {
       備註?: string | null;
       任務完成?: boolean;
       到期日?: string | null;
+      /** 僅編輯任務按「儲存」且前端判定有內容變更時為 true */
+      notifyAssignee?: boolean;
     } | null;
     const 任務ID = String(body?.任務ID ?? "").trim();
     if (!任務ID) {
@@ -108,21 +110,23 @@ export async function PATCH(request: NextRequest) {
       任務完成: body?.任務完成,
       到期日: body?.到期日 !== undefined ? (body.到期日 === null || body.到期日 === "" ? null : String(body.到期日)) : undefined,
     });
-    // 若此次更新有指定負責人，寄送指派通知
-    const 負責人 = body?.負責人 !== undefined ? String(body.負責人 ?? "").trim() : null;
-    if (負責人) {
-      getEmailByNameOrEmail(負責人).then((email) => {
-        if (email) {
-          sendTaskAssignedEmail({
-            to: email,
-            taskName: task.任務 ?? "",
-            projectId: task.專案ID ?? "",
-            projectName: task.專案名稱 ?? undefined,
-            creator: task.建立者 ?? undefined,
-            note: task.備註 ?? undefined,
-          }).catch((e) => console.error("PATCH /api/tasks 寄送通知失敗", e));
-        }
-      });
+    // 僅前端編輯任務按「儲存」且內容有變更時寄送；列表快速勾選完成／改類型等不自動寄信
+    if (body?.notifyAssignee === true) {
+      const 負責人 = String(task.任務負責人 ?? "").trim();
+      if (負責人) {
+        getEmailByNameOrEmail(負責人).then((email) => {
+          if (email) {
+            sendTaskAssignedEmail({
+              to: email,
+              taskName: task.任務 ?? "",
+              projectId: task.專案ID ?? "",
+              projectName: task.專案名稱 ?? undefined,
+              creator: task.建立者 ?? undefined,
+              note: task.備註 ?? undefined,
+            }).catch((e) => console.error("PATCH /api/tasks 寄送通知失敗", e));
+          }
+        });
+      }
     }
     return NextResponse.json({ ok: true, task });
   } catch (error) {

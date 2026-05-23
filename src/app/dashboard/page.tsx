@@ -903,6 +903,27 @@ function taskAssigneeIsUser(t: TaskRow, userName: string, userEmail: string): bo
   return a === userName || a === userEmail;
 }
 
+/** 編輯任務：是否變更「內容欄位」（不含僅勾選任務完成）→ 儲存時才寄信給負責人 */
+function taskEditFormHasNotifyChanges(
+  form: {
+    任務名稱: string;
+    任務類型: string;
+    任務負責人: string;
+    到期日: string;
+    備註: string;
+  },
+  task: TaskRow
+): boolean {
+  const normDate = (d: string | null | undefined) => (d?.trim() ? d.trim().slice(0, 10) : "");
+  return (
+    form.任務名稱.trim() !== String(task.任務 ?? "").trim() ||
+    form.任務類型.trim() !== String(task.任務類型 ?? "").trim() ||
+    form.任務負責人.trim() !== String(task.任務負責人 ?? "").trim() ||
+    form.到期日.trim() !== normDate(task.到期日) ||
+    form.備註.trim() !== String(task.備註 ?? "").trim()
+  );
+}
+
 type MasterTaskTemplate = {
   id: number;
   專案ID: string;
@@ -10557,6 +10578,9 @@ export default function DashboardPage() {
                 setSaveTaskError(null);
                 setSavingTask(true);
                 try {
+                  const notifyAssignee =
+                    taskEditFormHasNotifyChanges(editTaskForm, selectedTask) &&
+                    editTaskForm.任務負責人.trim() !== "";
                   const res = await fetch("/api/tasks", {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
@@ -10568,6 +10592,7 @@ export default function DashboardPage() {
                       備註: editTaskForm.備註.trim() || null,
                       到期日: editTaskForm.到期日.trim() || null,
                       任務完成: editTaskForm.任務完成,
+                      notifyAssignee,
                     }),
                   });
                   const data = (await safeResJson(res)) as { ok?: boolean; error?: string; task?: TaskRow };
@@ -10677,6 +10702,9 @@ export default function DashboardPage() {
                   />
                   <span className="text-sm font-medium text-stone-700">任務完成</span>
                 </label>
+                <p className="text-[11px] text-stone-500">
+                  僅變更任務名稱、類型、負責人、到期日或備註後按「儲存」，才會寄信通知負責人；僅勾選完成或列表快速操作不會寄信。
+                </p>
               </div>
               <div className="mt-8">
                 <button
