@@ -10,7 +10,7 @@ import { PARTNER_STATUS, normalizePartnerStatus } from "@/lib/db/partner-approva
 
 /** 與目前 DB 中文欄位一致；若任一名稱不符 PostgREST 會整段失敗 */
 const PARTNER_SELECT =
-  '"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "KOL開發者", "主管", "經銷約開始日", "自來件分潤", "SDH開發分件分潤", "經銷約結束日", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級", "審核狀態", "建立者", "駁回理由", "待審核送出者"';
+  '"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "KOL開發者", "主管", "經銷約開始日", "自來件分潤", "SDH開發分件分潤", "經銷約結束日", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級", "形象照", "審核狀態", "建立者", "駁回理由", "待審核送出者"';
 
 function rowToPartner(r: Record<string, unknown>): PartnerRow {
   // 舊表 partners（migration 000）為 partner_id / partner_name 等，一併對應
@@ -42,6 +42,7 @@ function rowToPartner(r: Record<string, unknown>): PartnerRow {
     課程製作夥伴: (r["課程製作夥伴"] as boolean) ?? false,
     Email: (r.Email as string) || undefined,
     分級: (r["分級"] as string) || undefined,
+    形象照: (r["形象照"] as string) || undefined,
     審核狀態: normalizePartnerStatus(r["審核狀態"] as string),
     建立者: (r["建立者"] as string) || undefined,
     駁回理由: (r["駁回理由"] as string) || undefined,
@@ -170,6 +171,7 @@ export interface UpdatePartnerInput {
   課程製作夥伴?: boolean;
   Email?: string;
   分級?: string;
+  形象照?: string | null;
   /** 僅董事長/管理者可寫入 */
   審核狀態?: string;
   駁回理由?: string | null;
@@ -199,6 +201,7 @@ export async function updatePartner(PartnerID: string, payload: UpdatePartnerInp
   if (payload.課程製作夥伴 !== undefined) update["課程製作夥伴"] = Boolean(payload.課程製作夥伴);
   if (payload.Email !== undefined) update["Email"] = payload.Email ?? null;
   if (payload.分級 !== undefined) update["分級"] = payload.分級 ?? null;
+  if (payload.形象照 !== undefined) update["形象照"] = payload.形象照 ?? null;
   if (payload.審核狀態 !== undefined) update["審核狀態"] = payload.審核狀態 ?? null;
   if (payload.駁回理由 !== undefined) update["駁回理由"] = payload.駁回理由 ?? null;
   if (payload.待審核送出者 !== undefined) update["待審核送出者"] = payload.待審核送出者 ?? null;

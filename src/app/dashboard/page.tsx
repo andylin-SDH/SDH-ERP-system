@@ -1738,6 +1738,12 @@ export default function DashboardPage() {
     setShowEditPartner(true);
   }, []);
 
+  const handlePartnerAvatarUpdated = useCallback((updated: PartnerRow) => {
+    const pid = updated.PartnerID;
+    if (!pid) return;
+    setPartners((prev) => prev.map((p) => (p.PartnerID === pid ? { ...p, ...updated } : p)));
+  }, []);
+
   const canPartnerAgentSave = useMemo(() => {
     if (!me || !editingPartnerSource) return false;
     const row = editingPartnerSource;
@@ -6683,6 +6689,7 @@ export default function DashboardPage() {
                 selectedPartner={selectedPartner}
                 onSelectPartner={(pt) => setSelectedPartnerId(pt.PartnerID ?? null)}
                 onEditPartner={openPartnerEdit}
+                onPartnerUpdated={handlePartnerAvatarUpdated}
                 gradeTabs={partnersGradeTabs}
                 gradeFilter={partnersGradeFilter}
                 onGradeFilterChange={(v) => {

@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { SocialLinkIcons } from "@/components/SocialLinkIcons";
+import { PartnerAvatar } from "@/components/partners/PartnerAvatar";
 import type { PartnerRow } from "@/modules/partners";
 
 export const PARTNERS_LIST_PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
@@ -30,12 +31,6 @@ export function partnerGradeKey(row: PartnerRow): PartnersGradeFilter {
   const g = String(row.分級 ?? "").trim().toUpperCase();
   if (g === "S" || g === "A" || g === "B") return g;
   return "ungraded";
-}
-
-function partnerInitial(name: string): string {
-  const t = name.trim();
-  if (!t) return "?";
-  return t.charAt(0);
 }
 
 export function PartnerGradePill({ grade }: { grade: string | null | undefined }) {
@@ -106,20 +101,25 @@ function PartnerDetailPanel({
   partner,
   columnLabels,
   onEdit,
+  onPartnerUpdated,
 }: {
   partner: PartnerRow;
   columnLabels: Record<string, string | undefined>;
   onEdit: () => void;
+  onPartnerUpdated?: (partner: PartnerRow) => void;
 }) {
   const name = String(partner.合作夥伴名稱 ?? "—").trim() || "—";
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="shrink-0 border-b border-stone-200/90 bg-white px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-stone-800 text-sm font-bold text-white">
-              {partnerInitial(name)}
-            </div>
+          <div className="flex min-w-0 items-start gap-4">
+            <PartnerAvatar
+              partner={partner}
+              size="lg"
+              editable
+              onUpdated={onPartnerUpdated}
+            />
             <div className="min-w-0">
               <h3 className="truncate text-lg font-bold text-stone-900">{name}</h3>
               <p className="mt-0.5 text-xs text-stone-500">
@@ -275,6 +275,7 @@ export interface PartnersMasterDetailProps {
   selectedPartner: PartnerRow | null;
   onSelectPartner: (pt: PartnerRow) => void;
   onEditPartner: (pt: PartnerRow) => void;
+  onPartnerUpdated?: (partner: PartnerRow) => void;
   gradeTabs: PartnerFilterTab[];
   gradeFilter: PartnersGradeFilter;
   onGradeFilterChange: (v: PartnersGradeFilter) => void;
@@ -302,6 +303,7 @@ export function PartnersMasterDetail({
   selectedPartner,
   onSelectPartner,
   onEditPartner,
+  onPartnerUpdated,
   gradeTabs,
   gradeFilter,
   onGradeFilterChange,
@@ -376,13 +378,7 @@ export function PartnersMasterDetail({
                           active ? "bg-stone-900/[0.04] ring-1 ring-inset ring-amber-400/40" : "hover:bg-stone-50"
                         }`}
                       >
-                        <div
-                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${
-                            active ? "bg-stone-800 text-white" : "bg-stone-200 text-stone-700"
-                          }`}
-                        >
-                          {partnerInitial(name)}
-                        </div>
+                        <PartnerAvatar partner={pt} size="sm" />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-semibold text-stone-900">{name}</p>
                           <p className="mt-0.5 truncate text-[11px] text-stone-500">
@@ -467,6 +463,7 @@ export function PartnersMasterDetail({
               partner={selectedPartner}
               columnLabels={columnLabels}
               onEdit={() => onEditPartner(selectedPartner)}
+              onPartnerUpdated={onPartnerUpdated}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center p-8 text-sm text-stone-500">
@@ -492,6 +489,7 @@ export function PartnersMasterDetail({
               partner={selectedPartner}
               columnLabels={columnLabels}
               onEdit={() => onEditPartner(selectedPartner)}
+              onPartnerUpdated={onPartnerUpdated}
             />
           </div>
         </div>

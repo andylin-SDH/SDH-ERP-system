@@ -65,6 +65,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "類別二", label: "類別二" },
     { key: "類別三", label: "類別三" },
     { key: "合作夥伴名稱", label: "合作夥伴名稱" },
+    { key: "形象照", label: "形象照" },
     { key: "社群網站", label: "社群網站" },
     { key: "粉絲數", label: "粉絲數" },
     { key: "頻道｜節目名稱", label: "頻道｜節目名稱" },
