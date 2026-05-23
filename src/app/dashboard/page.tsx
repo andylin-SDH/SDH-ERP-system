@@ -32,6 +32,12 @@ import {
   type OverviewKpiKey,
 } from "@/config/overview-kpi";
 import { SocialLinkIcons } from "@/components/SocialLinkIcons";
+import {
+  PartnersMasterDetail,
+  partnerGradeKey,
+  type PartnersGradeFilter,
+  type PartnersListPageSize,
+} from "@/components/partners/PartnersMasterDetail";
 import { PARTNER_STATUS, isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
 import { normalizeDecimalString } from "@/lib/number-normalize";
 import { TASK_DUE_SOON_DAYS } from "@/config/task-due";
@@ -663,15 +669,6 @@ function formatPartnerDateDisplay(raw: string | null | undefined): string {
   return s;
 }
 
-/** KOL 展開列：分組標題與欄位 key（主表不顯示的詳細欄位集中於此） */
-const PARTNER_EXPAND_SECTION_KEYS: { title: string; keys: string[] }[] = [
-  { title: "識別與分類", keys: ["PartnerID", "合作夥伴名稱", "類別一", "類別二", "類別三"] },
-  { title: "聯絡與管道", keys: ["社群網站", "Email", "資料夾", "粉絲數", "頻道｜節目名稱"] },
-  { title: "分潤與合約", keys: ["自來件分潤", "SDH開發分件分潤", "經銷約開始日", "經銷約結束日"] },
-  { title: "人員", keys: ["KOL開發者", "主管"] },
-  { title: "夥伴類型與其他", keys: ["分級", "是否有經營 私域群", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴"] },
-];
-
 function masterRowUntaxedTotal(row: MasterRow): number {
   return parseNumericField(row.專案總金額未稅);
 }
@@ -1129,10 +1126,17 @@ export default function DashboardPage() {
   });
   const [creatingPartner, setCreatingPartner] = useState(false);
   const [createPartnerError, setCreatePartnerError] = useState<string | null>(null);
-  const [expandedPartnerId, setExpandedPartnerId] = useState<string | null>(null);
+  const [showEditPartner, setShowEditPartner] = useState(false);
+  /** 已上架 KOL：主從式列表選取 */
+  const [selectedPartnerId, setSelectedPartnerId] = useState<string | null>(null);
+  const [partnerDetailMobileOpen, setPartnerDetailMobileOpen] = useState(false);
+  const [partnersGradeFilter, setPartnersGradeFilter] = useState<PartnersGradeFilter>("all");
+  const [partnersCategory1Filter, setPartnersCategory1Filter] = useState("all");
+  const [partnersCategory2Filter, setPartnersCategory2Filter] = useState("all");
+  const [partnersListPage, setPartnersListPage] = useState(1);
+  const [partnersListPageSize, setPartnersListPageSize] = useState<PartnersListPageSize>(50);
   /** 分潤表卡片：展開更多詳情的 key（row.id 或 fallback 索引） */
   const [expandedPayoutCardKey, setExpandedPayoutCardKey] = useState<string | null>(null);
-  const [showEditPartner, setShowEditPartner] = useState(false);
   const [editPartnerForm, setEditPartnerForm] = useState<{
     PartnerID: string;
     類別一: string;
@@ -1336,7 +1340,6 @@ export default function DashboardPage() {
   const [invoiceSeqPad, setInvoiceSeqPad] = useState("");
   /** 大資料量時分段渲染，降低首屏與互動卡頓 */
   const [masterRenderCount, setMasterRenderCount] = useState(RENDER_CHUNK_SIZE);
-  const [partnersRenderCount, setPartnersRenderCount] = useState(RENDER_CHUNK_SIZE);
   const [payoutRenderCount, setPayoutRenderCount] = useState(RENDER_CHUNK_SIZE);
   const [tasksRenderCount, setTasksRenderCount] = useState(RENDER_CHUNK_SIZE);
   const [financeRenderCount, setFinanceRenderCount] = useState(RENDER_CHUNK_SIZE);
@@ -1685,6 +1688,35 @@ export default function DashboardPage() {
    * - 已核准：任一同登入者可編輯（除 KOL開發者）
    * - 待審核／已駁回：僅建立者可編輯
    */
+  const openPartnerEdit = useCallback((pt: PartnerRow) => {
+    const pid = pt.PartnerID ?? "";
+    setEditingPartnerSource(pt);
+    setEditPartnerForm({
+      PartnerID: pid,
+      類別一: String(pt.類別一 ?? ""),
+      類別二: String(pt.類別二 ?? ""),
+      類別三: String(pt.類別三 ?? ""),
+      合作夥伴名稱: String(pt.合作夥伴名稱 ?? ""),
+      社群網站: String(pt.社群網站 ?? ""),
+      粉絲數: String(pt.粉絲數 ?? ""),
+      "頻道｜節目名稱": String(pt["頻道｜節目名稱"] ?? ""),
+      "是否有經營 私域群": Boolean(pt["是否有經營 私域群"]),
+      資料夾: String(pt.資料夾 ?? ""),
+      KOL開發者: String(pt.KOL開發者 ?? ""),
+      經銷約開始日: String(pt.經銷約開始日 ?? ""),
+      自來件分潤: String(pt.自來件分潤 ?? ""),
+      "SDH開發分件分潤": String(pt["SDH開發分件分潤"] ?? ""),
+      經銷約結束日: String(pt.經銷約結束日 ?? ""),
+      廣告經銷夥伴: Boolean(pt.廣告經銷夥伴),
+      節目製作夥伴: Boolean(pt.節目製作夥伴),
+      課程製作夥伴: Boolean(pt.課程製作夥伴),
+      Email: String(pt.Email ?? ""),
+      分級: String(pt.分級 ?? ""),
+    });
+    setPartnerEditError(null);
+    setShowEditPartner(true);
+  }, []);
+
   const canPartnerAgentSave = useMemo(() => {
     if (!me || !editingPartnerSource) return false;
     const row = editingPartnerSource;
@@ -2225,16 +2257,23 @@ export default function DashboardPage() {
   }, [masterList]);
 
   /**
-   * KOL 區塊主列表欄位（與 ③ 可見欄位交集）
-   * ② 篩選：勾選之欄位須與登入者 Users.姓名 或 Users.帳號 完全一致才會留下該列（經紀人改在大總表專案維護，合作夥伴不含此欄）
+   * KOL 區塊主列表欄位（③ 可見欄位交集；主從式 UI 改由 PartnersMasterDetail 呈現）
    */
-  const partnerListCols = useMemo(
+  const partnerSearchCols = useMemo(
     () =>
-      /** KOL開發者、經銷約開始日不顯示在主列表，僅在新增/編輯 Modal 與展開詳情維護 */
-      /** 自來件分潤、SDH分潤、經銷約起迄等詳見列下方展開區 */
-      ["合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "資料夾", "分級"].filter((k) =>
-        partnersVisibleCols.includes(k)
-      ),
+      [
+        "PartnerID",
+        "合作夥伴名稱",
+        "Email",
+        "類別一",
+        "類別二",
+        "類別三",
+        "分級",
+        "粉絲數",
+        "頻道｜節目名稱",
+        "資料夾",
+        "KOL開發者",
+      ].filter((k) => partnersVisibleCols.includes(k) || ["PartnerID", "Email", "類別一", "類別二", "類別三", "分級"].includes(k)),
     [partnersVisibleCols]
   );
 
@@ -2279,8 +2318,86 @@ export default function DashboardPage() {
 
   const searchedPartners = useMemo(
     () =>
-      filterRowsBySearch(filteredPartners as unknown as Record<string, unknown>[], partnerListCols, deferredPartnersSearch) as unknown as PartnerRow[],
-    [filteredPartners, partnerListCols, deferredPartnersSearch, filterRowsBySearch]
+      filterRowsBySearch(filteredPartners as unknown as Record<string, unknown>[], partnerSearchCols, deferredPartnersSearch) as unknown as PartnerRow[],
+    [filteredPartners, partnerSearchCols, deferredPartnersSearch, filterRowsBySearch]
+  );
+  const partnersGradeTabs = useMemo(() => {
+    const counts = { all: searchedPartners.length, S: 0, A: 0, B: 0, ungraded: 0 };
+    for (const p of searchedPartners) {
+      const k = partnerGradeKey(p);
+      if (k === "S" || k === "A" || k === "B") counts[k] += 1;
+      else counts.ungraded += 1;
+    }
+    return [
+      { key: "all" as const, label: "全部", count: counts.all },
+      { key: "S" as const, label: "S", count: counts.S },
+      { key: "A" as const, label: "A", count: counts.A },
+      { key: "B" as const, label: "B", count: counts.B },
+      { key: "ungraded" as const, label: "未分級", count: counts.ungraded },
+    ];
+  }, [searchedPartners]);
+  const partnersAfterGradeFilter = useMemo(() => {
+    if (partnersGradeFilter === "all") return searchedPartners;
+    return searchedPartners.filter((p) => partnerGradeKey(p) === partnersGradeFilter);
+  }, [searchedPartners, partnersGradeFilter]);
+  const partnersCategory1Tabs = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of partnersAfterGradeFilter) {
+      const key = String(p.類別一 ?? "").trim() || "未分類";
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const keys = [...counts.keys()].sort((a, b) => {
+      if (a === "未分類") return 1;
+      if (b === "未分類") return -1;
+      return a.localeCompare(b, "zh-TW");
+    });
+    return [
+      { key: "all", label: "全部", count: partnersAfterGradeFilter.length },
+      ...keys.map((key) => ({ key, label: key, count: counts.get(key) ?? 0 })),
+    ];
+  }, [partnersAfterGradeFilter]);
+  const partnersAfterCategory1Filter = useMemo(() => {
+    if (partnersCategory1Filter === "all") return partnersAfterGradeFilter;
+    if (partnersCategory1Filter === "未分類") {
+      return partnersAfterGradeFilter.filter((p) => !String(p.類別一 ?? "").trim());
+    }
+    return partnersAfterGradeFilter.filter((p) => String(p.類別一 ?? "").trim() === partnersCategory1Filter);
+  }, [partnersAfterGradeFilter, partnersCategory1Filter]);
+  const partnersCategory2Tabs = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of partnersAfterCategory1Filter) {
+      const key = String(p.類別二 ?? "").trim() || "未分類";
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const keys = [...counts.keys()].sort((a, b) => {
+      if (a === "未分類") return 1;
+      if (b === "未分類") return -1;
+      return a.localeCompare(b, "zh-TW");
+    });
+    return [
+      { key: "all", label: "全部", count: partnersAfterCategory1Filter.length },
+      ...keys.map((key) => ({ key, label: key, count: counts.get(key) ?? 0 })),
+    ];
+  }, [partnersAfterCategory1Filter]);
+  const partnersFilteredForList = useMemo(() => {
+    if (partnersCategory2Filter === "all") return partnersAfterCategory1Filter;
+    if (partnersCategory2Filter === "未分類") {
+      return partnersAfterCategory1Filter.filter((p) => !String(p.類別二 ?? "").trim());
+    }
+    return partnersAfterCategory1Filter.filter((p) => String(p.類別二 ?? "").trim() === partnersCategory2Filter);
+  }, [partnersAfterCategory1Filter, partnersCategory2Filter]);
+  const partnersListPageCount = useMemo(
+    () => Math.max(1, Math.ceil(partnersFilteredForList.length / partnersListPageSize)),
+    [partnersFilteredForList.length, partnersListPageSize]
+  );
+  const partnersListPageSafe = Math.min(Math.max(1, partnersListPage), partnersListPageCount);
+  const partnersListPageRows = useMemo(() => {
+    const start = (partnersListPageSafe - 1) * partnersListPageSize;
+    return partnersFilteredForList.slice(start, start + partnersListPageSize);
+  }, [partnersFilteredForList, partnersListPageSafe, partnersListPageSize]);
+  const selectedPartner = useMemo(
+    () => partnersFilteredForList.find((p) => p.PartnerID === selectedPartnerId) ?? null,
+    [partnersFilteredForList, selectedPartnerId]
   );
   const partnersApprovedCount = useMemo(() => filteredPartners.length, [filteredPartners]);
   const partnersPendingCount = useMemo(
@@ -2418,10 +2535,6 @@ export default function DashboardPage() {
     () => searchedMasterList.slice(0, masterRenderCount),
     [searchedMasterList, masterRenderCount]
   );
-  const visiblePartnersRows = useMemo(
-    () => searchedPartners.slice(0, partnersRenderCount),
-    [searchedPartners, partnersRenderCount]
-  );
   const visiblePayoutRows = useMemo(
     () => searchedPayout.slice(0, payoutRenderCount),
     [searchedPayout, payoutRenderCount]
@@ -2531,19 +2644,38 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (activeSection !== "partners" || partnersTab !== "approved") return;
-    setPartnersRenderCount(RENDER_CHUNK_SIZE);
-    if (searchedPartners.length <= RENDER_CHUNK_SIZE) return;
-    let timer: number | undefined;
-    const tick = () => {
-      setPartnersRenderCount((prev) => {
-        const next = Math.min(prev + RENDER_CHUNK_SIZE, searchedPartners.length);
-        if (next < searchedPartners.length) timer = window.setTimeout(tick, 0);
-        return next;
-      });
-    };
-    timer = window.setTimeout(tick, 0);
-    return () => { if (timer) window.clearTimeout(timer); };
-  }, [activeSection, partnersTab, searchedPartners.length]);
+    setPartnersListPage(1);
+    setPartnersGradeFilter("all");
+    setPartnersCategory1Filter("all");
+    setPartnersCategory2Filter("all");
+    setPartnerDetailMobileOpen(false);
+  }, [activeSection, partnersTab, deferredPartnersSearch]);
+
+  useEffect(() => {
+    setPartnersListPage(1);
+    setPartnersCategory2Filter("all");
+  }, [partnersGradeFilter, partnersCategory1Filter]);
+
+  useEffect(() => {
+    setPartnersListPage(1);
+  }, [partnersCategory2Filter, partnersListPageSize]);
+
+  useEffect(() => {
+    if (partnersListPage > partnersListPageCount) {
+      setPartnersListPage(partnersListPageCount);
+    }
+  }, [partnersListPage, partnersListPageCount]);
+
+  useEffect(() => {
+    if (partnersTab !== "approved") return;
+    if (partnersFilteredForList.length === 0) {
+      setSelectedPartnerId(null);
+      return;
+    }
+    if (!selectedPartnerId || !partnersFilteredForList.some((p) => p.PartnerID === selectedPartnerId)) {
+      setSelectedPartnerId(partnersFilteredForList[0].PartnerID ?? null);
+    }
+  }, [partnersTab, partnersFilteredForList, selectedPartnerId]);
 
   useEffect(() => {
     if (activeSection !== "payout") return;
@@ -6309,7 +6441,6 @@ export default function DashboardPage() {
                           setPartnersTab("pending");
                         }
                         setShowEditPartner(false);
-                        setExpandedPartnerId(null);
                         setEditingPartnerSource(null);
                         setSavingPartner(false);
                       } catch (err) {
@@ -6518,206 +6649,47 @@ export default function DashboardPage() {
               <p className="mt-2 text-xs text-amber-800">{refreshFollowersMessage}</p>
             )}
           </div>
-          {/* 已上架：原主列表 */}
+          {/* 已上架：主從式列表 + 分類篩選 */}
           {partnersTab === "approved" && (
-          <>
-          <div className="max-h-[60vh] overflow-y-auto overflow-x-auto rounded-xl border border-stone-200/90">
-            <table className="min-w-full divide-y divide-stone-200">
-              <thead className="sticky top-0 z-20 bg-amber-100/90">
-                <tr>
-                  <th className="w-10 px-2 py-3.5 text-left text-sm font-semibold tracking-wider text-amber-700 border-b border-amber-400/60" />
-                  {partnerListCols.map((k) => (
-                    <th
-                      key={k}
-                      className="px-4 py-3.5 text-left text-sm font-semibold tracking-wider text-amber-700 border-b border-amber-400/60"
-                    >
-                      {tableColumnLabels.partners?.[k] ?? k}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-200 bg-amber-50/40">
-                {partners.length === 0 ? (
-                  <tr>
-                    <td colSpan={(partnerListCols.length || 6) + 1} className="px-4 py-8 text-center text-base font-medium text-stone-500">
-                      尚無合作夥伴資料
-                    </td>
-                  </tr>
-                ) : searchedPartners.length === 0 ? (
-                  <tr>
-                    <td colSpan={(partnerListCols.length || 6) + 1} className="px-4 py-8 text-center text-base font-medium text-stone-500">
-                      沒有符合搜尋結果
-                    </td>
-                  </tr>
-                ) : (
-                  visiblePartnersRows.flatMap((pt, i) => {
-                    const pid = pt.PartnerID ?? "";
-                    const expanded = expandedPartnerId === pid;
-                    return [
-                      <tr
-                        key={pt.PartnerID ?? i}
-                        onClick={() => {
-                          setEditingPartnerSource(pt);
-                          setEditPartnerForm({
-                            PartnerID: pid,
-                            類別一: String(pt.類別一 ?? ""),
-                            類別二: String(pt.類別二 ?? ""),
-                            類別三: String(pt.類別三 ?? ""),
-                            合作夥伴名稱: String(pt.合作夥伴名稱 ?? ""),
-                            社群網站: String(pt.社群網站 ?? ""),
-                            粉絲數: String(pt.粉絲數 ?? ""),
-                            "頻道｜節目名稱": String(pt["頻道｜節目名稱"] ?? ""),
-                            "是否有經營 私域群": Boolean(pt["是否有經營 私域群"]),
-                            資料夾: String(pt.資料夾 ?? ""),
-                            KOL開發者: String(pt.KOL開發者 ?? ""),
-                            經銷約開始日: String(pt.經銷約開始日 ?? ""),
-                            自來件分潤: String(pt.自來件分潤 ?? ""),
-                            "SDH開發分件分潤": String(pt["SDH開發分件分潤"] ?? ""),
-                            經銷約結束日: String(pt.經銷約結束日 ?? ""),
-                            廣告經銷夥伴: Boolean(pt.廣告經銷夥伴),
-                            節目製作夥伴: Boolean(pt.節目製作夥伴),
-                            課程製作夥伴: Boolean(pt.課程製作夥伴),
-                            Email: String(pt.Email ?? ""),
-                            分級: String(pt.分級 ?? ""),
-                          });
-                          setPartnerEditError(null);
-                          setShowEditPartner(true);
-                        }}
-                        className="cursor-pointer transition hover:bg-amber-50/80"
-                      >
-                        <td
-                          className="w-10 px-2 py-3.5"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setExpandedPartnerId((prev) => (prev === pid ? null : pid));
-                          }}
-                        >
-                          <button
-                            type="button"
-                            className="inline-flex h-7 w-7 items-center justify-center rounded text-stone-500 transition hover:bg-stone-100 hover:text-amber-800"
-                            aria-label={expanded ? "收起" : "展開"}
-                          >
-                            <svg
-                              className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`}
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </button>
-                        </td>
-                        {partnerListCols.map((k) => {
-                          const val = (pt as unknown as Record<string, unknown>)[k];
-                          if (
-                            k === "是否有經營 私域群" ||
-                            k === "廣告經銷夥伴" ||
-                            k === "節目製作夥伴" ||
-                            k === "課程製作夥伴"
-                          ) {
-                            const checked = Boolean(val);
-                            return (
-                              <td key={k} className="px-4 py-3.5 text-center text-sm">
-                                {checked ? <span className="text-amber-800">✓</span> : <span className="text-stone-500">—</span>}
-                              </td>
-                            );
-                          }
-                          if (k === "社群網站") {
-                            return (
-                              <td key={k} className="px-4 py-3.5 text-sm" onClick={(e) => e.stopPropagation()}>
-                                <SocialLinkIcons value={val as string} />
-                              </td>
-                            );
-                          }
-                          const str = String(val ?? "—");
-                          return (
-                            <td
-                              key={k}
-                              className={`px-4 py-3.5 text-sm font-medium ${k === "PartnerID" || k === "合作夥伴名稱" ? "whitespace-nowrap text-stone-900" : "text-stone-600"} ${k === "Email" || k === "頻道｜節目名稱" ? "max-w-[220px] truncate" : ""}`}
-                              title={k === "Email" || k === "頻道｜節目名稱" ? str : undefined}
-                            >
-                              {str}
-                            </td>
-                          );
-                        })}
-                      </tr>,
-                      expanded && (
-                        <tr key={`${pt.PartnerID ?? i}-detail`} className="bg-white/90">
-                          <td
-                            colSpan={(partnerListCols.length || 6) + 1}
-                            className="px-6 py-4 text-sm"
-                          >
-                            <div className="rounded-xl border border-amber-200/70 bg-gradient-to-b from-amber-50/50 to-white px-5 py-4 shadow-sm ring-1 ring-amber-100/50">
-                              {PARTNER_EXPAND_SECTION_KEYS.map((section, sectionIdx) => (
-                                <div
-                                  key={section.title}
-                                  className={
-                                    sectionIdx > 0
-                                      ? "mt-5 border-t border-dotted border-amber-200/90 pt-5"
-                                      : undefined
-                                  }
-                                >
-                                  <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-900/80">
-                                    {section.title}
-                                  </p>
-                                  <dl className="grid gap-x-6 gap-y-3.5 sm:grid-cols-2 lg:grid-cols-3">
-                                    {section.keys.map((key) => {
-                                      const val = (pt as unknown as Record<string, unknown>)[key];
-                                      const label = tableColumnLabels.partners?.[key] ?? key;
-                                      const isBool =
-                                        key === "是否有經營 私域群" ||
-                                        key === "廣告經銷夥伴" ||
-                                        key === "節目製作夥伴" ||
-                                        key === "課程製作夥伴";
-                                      if (key === "社群網站") {
-                                        return (
-                                          <div key={key} className="sm:col-span-2 lg:col-span-3">
-                                            <dt className="text-[11px] font-semibold uppercase tracking-wide text-stone-500">{label}</dt>
-                                            <dd className="mt-1">
-                                              <SocialLinkIcons value={val as string} />
-                                            </dd>
-                                          </div>
-                                        );
-                                      }
-                                      let text: string;
-                                      if (isBool) {
-                                        text = Boolean(val) ? "是" : "否";
-                                      } else if (key === "經銷約開始日" || key === "經銷約結束日") {
-                                        text = formatPartnerDateDisplay(val as string);
-                                      } else {
-                                        const s = String(val ?? "").trim();
-                                        text = s === "" ? "—" : s;
-                                      }
-                                      return (
-                                        <div key={key}>
-                                          <dt className="text-[11px] font-semibold uppercase tracking-wide text-stone-500">{label}</dt>
-                                          <dd
-                                            className={`mt-0.5 text-sm leading-relaxed text-stone-800 ${
-                                              key === "經銷約開始日" || key === "經銷約結束日" ? "tabular-nums" : ""
-                                            }`}
-                                          >
-                                            {text}
-                                          </dd>
-                                        </div>
-                                      );
-                                    })}
-                                  </dl>
-                                </div>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      ),
-                    ].filter(Boolean);
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-          {searchedPartners.length > visiblePartnersRows.length && (
-            <p className="mt-2 text-right text-xs text-stone-500">載入中 {visiblePartnersRows.length} / {searchedPartners.length}</p>
-          )}
-          </>
+            partners.length === 0 ? (
+              <p className="rounded-xl border border-stone-200/90 px-4 py-12 text-center text-sm text-stone-500">
+                尚無合作夥伴資料
+              </p>
+            ) : (
+              <PartnersMasterDetail
+                listPartners={partnersListPageRows}
+                totalCount={partnersFilteredForList.length}
+                selectedPartner={selectedPartner}
+                onSelectPartner={(pt) => setSelectedPartnerId(pt.PartnerID ?? null)}
+                onEditPartner={openPartnerEdit}
+                gradeTabs={partnersGradeTabs}
+                gradeFilter={partnersGradeFilter}
+                onGradeFilterChange={(v) => {
+                  setPartnersGradeFilter(v);
+                  setPartnersCategory1Filter("all");
+                  setPartnersCategory2Filter("all");
+                }}
+                category1Tabs={partnersCategory1Tabs}
+                category1Filter={partnersCategory1Filter}
+                onCategory1FilterChange={(v) => {
+                  setPartnersCategory1Filter(v);
+                  setPartnersCategory2Filter("all");
+                }}
+                category2Tabs={partnersCategory2Tabs}
+                category2Filter={partnersCategory2Filter}
+                onCategory2FilterChange={setPartnersCategory2Filter}
+                showCategory2={partnersCategory1Filter !== "all"}
+                listPage={partnersListPage}
+                listPageCount={partnersListPageCount}
+                listPageSafe={partnersListPageSafe}
+                listPageSize={partnersListPageSize}
+                onListPageChange={setPartnersListPage}
+                onListPageSizeChange={setPartnersListPageSize}
+                columnLabels={tableColumnLabels.partners ?? {}}
+                mobileDetailOpen={partnerDetailMobileOpen}
+                onMobileDetailOpenChange={setPartnerDetailMobileOpen}
+              />
+            )
           )}
 
           {/* 待審核 */}
