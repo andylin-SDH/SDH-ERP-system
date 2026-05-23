@@ -353,9 +353,9 @@ export function PartnersMasterDetail({
         )}
       </div>
 
-      <div className="flex min-h-[58vh] flex-col overflow-hidden rounded-xl border border-stone-200/90 bg-white lg:flex-row">
-        <div className="flex min-h-[280px] flex-col border-stone-200/90 lg:w-[min(380px,36%)] lg:border-r">
-          <div className="flex-1 overflow-y-auto">
+      <div className="flex h-[min(62vh,640px)] min-h-[320px] max-h-[820px] flex-col overflow-hidden rounded-xl border border-stone-200/90 bg-white lg:h-[calc(100vh-16rem)] lg:min-h-[480px] lg:flex-row">
+        <div className="flex h-full min-h-0 w-full flex-col overflow-hidden border-stone-200/90 lg:w-[min(380px,36%)] lg:shrink-0 lg:border-r">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             {empty ? (
               <p className="px-4 py-12 text-center text-sm text-stone-500">沒有符合條件的 KOL</p>
             ) : listPartners.length === 0 ? (
@@ -457,7 +457,7 @@ export function PartnersMasterDetail({
           )}
         </div>
 
-        <div className="hidden min-h-[320px] flex-1 flex-col bg-white lg:flex">
+        <div className="hidden h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white lg:flex">
           {selectedPartner ? (
             <PartnerDetailPanel
               partner={selectedPartner}
