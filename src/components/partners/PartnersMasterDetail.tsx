@@ -5,6 +5,16 @@ import { SocialLinkIcons } from "@/components/SocialLinkIcons";
 import { PartnerAvatar } from "@/components/partners/PartnerAvatar";
 import type { PartnerRow } from "@/modules/partners";
 
+export type PartnerEditLogItem = {
+  id: string;
+  PartnerID: string;
+  操作: string;
+  更新者: string;
+  變更內容: Record<string, unknown>;
+  變更前快照?: Record<string, unknown>;
+  created_at?: string;
+};
+
 export const PARTNERS_LIST_PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
 export type PartnersListPageSize = (typeof PARTNERS_LIST_PAGE_SIZE_OPTIONS)[number];
 export type PartnersGradeFilter = "all" | "S" | "A" | "B" | "ungraded";
@@ -97,16 +107,98 @@ function PartnerDetailField({
   );
 }
 
+function formatEditLogTime(iso: string | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("zh-TW", { hour12: false });
+}
+
+function formatEditLogValue(val: unknown): string {
+  if (val === undefined || val === null || val === "") return "—";
+  if (typeof val === "boolean") return val ? "是" : "否";
+  return String(val);
+}
+
+function PartnerEditHistory({
+  logs,
+  loading,
+  columnLabels,
+}: {
+  logs: PartnerEditLogItem[];
+  loading: boolean;
+  columnLabels: Record<string, string | undefined>;
+}) {
+  return (
+    <div className="mt-6 border-t border-dotted border-stone-200 pt-6">
+      <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.14em] text-stone-500">編輯紀錄</p>
+      {loading ? (
+        <p className="text-sm text-stone-400">載入中…</p>
+      ) : logs.length === 0 ? (
+        <p className="text-sm text-stone-400">尚無編輯紀錄</p>
+      ) : (
+        <ul className="space-y-4">
+          {logs.map((log) => {
+            const changes = Object.entries(log.變更內容 ?? {});
+            return (
+              <li key={log.id} className="rounded-lg border border-stone-200/90 bg-stone-50/60 px-3 py-2.5">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs">
+                  <span className="font-semibold text-stone-800">
+                    {log.操作} · {log.更新者 || "—"}
+                  </span>
+                  <span className="tabular-nums text-stone-400">{formatEditLogTime(log.created_at)}</span>
+                </div>
+                {changes.length > 0 ? (
+                  <ul className="mt-2 space-y-1 text-xs text-stone-600">
+                    {changes.map(([key, newVal]) => {
+                      const label = columnLabels[key] ?? key;
+                      const oldVal = log.變更前快照?.[key];
+                      const oldStr = formatEditLogValue(oldVal);
+                      const newStr = formatEditLogValue(newVal);
+                      return (
+                        <li key={key}>
+                          <span className="font-medium text-stone-500">{label}：</span>
+                          {log.操作 === "新增" ? (
+                            <span>{newStr}</span>
+                          ) : (
+                            <span>
+                              <span className="text-red-600/90">{oldStr}</span>
+                              <span className="mx-1 text-stone-400">→</span>
+                              <span className="text-emerald-700">{newStr}</span>
+                            </span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function PartnerDetailPanel({
   partner,
   columnLabels,
   onEdit,
   onPartnerUpdated,
+  onDelete,
+  canDelete,
+  editLogs,
+  editLogsLoading,
 }: {
   partner: PartnerRow;
   columnLabels: Record<string, string | undefined>;
   onEdit: () => void;
   onPartnerUpdated?: (partner: PartnerRow) => void;
+  onDelete?: () => void;
+  canDelete?: boolean;
+  editLogs: PartnerEditLogItem[];
+  editLogsLoading: boolean;
 }) {
   const name = String(partner.合作夥伴名稱 ?? "—").trim() || "—";
   return (
@@ -131,6 +223,16 @@ function PartnerDetailPanel({
                   </>
                 ) : null}
               </p>
+              <p className="mt-1 text-[11px] text-stone-400">
+                建立：{partner.建立者 ?? "—"}
+                {partner.最後更新者 ? (
+                  <>
+                    {" "}
+                    · 最後儲存：{partner.最後更新者}
+                    {partner.最後更新時間 ? ` · ${formatEditLogTime(partner.最後更新時間)}` : null}
+                  </>
+                ) : null}
+              </p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <PartnerGradePill grade={partner.分級} />
                 {partner.類別一 ? (
@@ -148,6 +250,15 @@ function PartnerDetailPanel({
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <PartnerFolderLink url={partner.資料夾} />
+            {canDelete && onDelete ? (
+              <button
+                type="button"
+                onClick={onDelete}
+                className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 transition hover:bg-red-100"
+              >
+                刪除
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onEdit}
@@ -222,6 +333,7 @@ function PartnerDetailPanel({
             </dl>
           </div>
         ))}
+        <PartnerEditHistory logs={editLogs} loading={editLogsLoading} columnLabels={columnLabels} />
       </div>
     </div>
   );
@@ -295,6 +407,10 @@ export interface PartnersMasterDetailProps {
   columnLabels: Record<string, string | undefined>;
   mobileDetailOpen: boolean;
   onMobileDetailOpenChange: (open: boolean) => void;
+  canDeletePartner?: boolean;
+  onDeletePartner?: (pt: PartnerRow) => void;
+  editLogs?: PartnerEditLogItem[];
+  editLogsLoading?: boolean;
 }
 
 export function PartnersMasterDetail({
@@ -323,6 +439,10 @@ export function PartnersMasterDetail({
   columnLabels,
   mobileDetailOpen,
   onMobileDetailOpenChange,
+  canDeletePartner,
+  onDeletePartner,
+  editLogs = [],
+  editLogsLoading = false,
 }: PartnersMasterDetailProps) {
   const empty = totalCount === 0;
 
@@ -464,6 +584,10 @@ export function PartnersMasterDetail({
               columnLabels={columnLabels}
               onEdit={() => onEditPartner(selectedPartner)}
               onPartnerUpdated={onPartnerUpdated}
+              canDelete={canDeletePartner}
+              onDelete={onDeletePartner ? () => onDeletePartner(selectedPartner) : undefined}
+              editLogs={editLogs}
+              editLogsLoading={editLogsLoading}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center p-8 text-sm text-stone-500">
@@ -490,6 +614,10 @@ export function PartnersMasterDetail({
               columnLabels={columnLabels}
               onEdit={() => onEditPartner(selectedPartner)}
               onPartnerUpdated={onPartnerUpdated}
+              canDelete={canDeletePartner}
+              onDelete={onDeletePartner ? () => onDeletePartner(selectedPartner) : undefined}
+              editLogs={editLogs}
+              editLogsLoading={editLogsLoading}
             />
           </div>
         </div>

@@ -33,12 +33,10 @@ export interface PartnerRow {
   分級?: string;
   /** 正方形形象照公開 URL */
   形象照?: string;
-  /** 待審核 | 已核准 | 已駁回；主列表僅顯示已核准 */
-  審核狀態?: string;
-  /** 送出申請者 email */
+  /** 建立此 KOL 的使用者（姓名或 email） */
   建立者?: string;
-  /** 駁回時填寫 */
-  駁回理由?: string;
-  /** 已核准後再編輯並送審者的 email */
-  待審核送出者?: string;
+  /** 最近一次儲存的使用者（姓名或 email） */
+  最後更新者?: string;
+  /** 最近一次儲存時間（ISO） */
+  最後更新時間?: string;
 }

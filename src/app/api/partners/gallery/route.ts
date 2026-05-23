@@ -4,7 +4,7 @@ import { getPartnersApprovedWithError } from "@/lib/db/partners";
 export const dynamic = "force-dynamic";
 
 /**
- * 公開 KOL 牆資料（僅已核准），供對外前端讀取
+ * 公開 KOL 牆資料，供對外前端讀取
  * GET /api/partners/gallery
  */
 export async function GET() {

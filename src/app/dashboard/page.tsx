@@ -35,10 +35,11 @@ import { SocialLinkIcons } from "@/components/SocialLinkIcons";
 import {
   PartnersMasterDetail,
   partnerGradeKey,
+  type PartnerEditLogItem,
   type PartnersGradeFilter,
   type PartnersListPageSize,
 } from "@/components/partners/PartnersMasterDetail";
-import { PARTNER_STATUS, isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
+import { isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
 import { normalizeDecimalString } from "@/lib/number-normalize";
 import { TASK_DUE_SOON_DAYS } from "@/config/task-due";
 import {
@@ -1205,32 +1206,9 @@ export default function DashboardPage() {
   const [partnerEditError, setPartnerEditError] = useState<string | null>(null);
   const [refreshingFollowers, setRefreshingFollowers] = useState(false);
   const [refreshFollowersMessage, setRefreshFollowersMessage] = useState<string | null>(null);
-  /** 合作夥伴主列表：已上架 | 待審核 */
-  const [partnersTab, setPartnersTab] = useState<"approved" | "pending">("approved");
-  const [partnersPending, setPartnersPending] = useState<PartnerRow[]>([]);
-  /** 已上架 KOL 的變更申請（不從主列表消失） */
-  const [partnerChangeRequests, setPartnerChangeRequests] = useState<
-    Array<{
-      id: string;
-      PartnerID: string;
-      變更內容: Record<string, unknown>;
-      變更前快照?: Record<string, unknown>;
-      審核狀態: string;
-      建立者?: string;
-      駁回理由?: string;
-      created_at?: string;
-    }>
-  >([]);
-  const [partnersPendingLoading, setPartnersPendingLoading] = useState(false);
-  const [showChangeRequestDiff, setShowChangeRequestDiff] = useState<{
-    id: string;
-    PartnerID: string;
-    變更內容: Record<string, unknown>;
-    變更前快照?: Record<string, unknown>;
-    審核狀態: string;
-    駁回理由?: string;
-  } | null>(null);
-  /** 編輯 Modal 開啟時的來源列（判斷可否儲存） */
+  const [partnerEditLogs, setPartnerEditLogs] = useState<PartnerEditLogItem[]>([]);
+  const [partnerEditLogsLoading, setPartnerEditLogsLoading] = useState(false);
+  /** 編輯 Modal 開啟時的來源列 */
   const [editingPartnerSource, setEditingPartnerSource] = useState<PartnerRow | null>(null);
   /** 新增／編輯 KOL 表單：自動 PartnerID、類別與 KOL開發者下拉 */
   const [partnerFormOptions, setPartnerFormOptions] = useState<{
@@ -1679,36 +1657,51 @@ export default function DashboardPage() {
     return null;
   }, []);
 
-  const fetchPartnersPending = useCallback(async () => {
-    setPartnersPendingLoading(true);
+  const fetchPartnerEditLogs = useCallback(async (partnerId: string) => {
+    const pid = String(partnerId ?? "").trim();
+    if (!pid) {
+      setPartnerEditLogs([]);
+      return;
+    }
+    setPartnerEditLogsLoading(true);
     try {
-      const res = await fetch("/api/partners?pending=1", { cache: "no-store" });
-      const data = (await safeResJson(res)) as {
-        partners?: PartnerRow[];
-        changeRequests?: Array<{
-          id: string;
-          PartnerID: string;
-          變更內容: Record<string, unknown>;
-          變更前快照?: Record<string, unknown>;
-          審核狀態: string;
-          建立者?: string;
-          駁回理由?: string;
-          created_at?: string;
-        }>;
-      };
-      if (res.ok && Array.isArray(data.partners)) setPartnersPending(data.partners);
-      if (res.ok && Array.isArray(data.changeRequests)) setPartnerChangeRequests(data.changeRequests);
-      else if (res.ok) setPartnerChangeRequests([]);
+      const res = await fetch(`/api/partners/edit-log?PartnerID=${encodeURIComponent(pid)}`, {
+        cache: "no-store",
+      });
+      const data = (await safeResJson(res)) as { ok?: boolean; logs?: PartnerEditLogItem[] };
+      if (res.ok && Array.isArray(data.logs)) setPartnerEditLogs(data.logs);
+      else setPartnerEditLogs([]);
     } finally {
-      setPartnersPendingLoading(false);
+      setPartnerEditLogsLoading(false);
     }
   }, []);
 
-  /**
-   * 是否顯示儲存／可編輯欄位
-   * - 已核准：任一同登入者可編輯（除 KOL開發者）
-   * - 待審核／已駁回：僅建立者可編輯
-   */
+  const handleDeletePartner = useCallback(
+    async (pt: PartnerRow) => {
+      const pid = String(pt.PartnerID ?? "").trim();
+      const name = String(pt.合作夥伴名稱 ?? pid).trim() || pid;
+      if (!pid) return;
+      if (!window.confirm(`確定要刪除 KOL「${name}」（${pid}）？此操作無法復原。`)) return;
+      try {
+        const res = await fetch(`/api/partners?PartnerID=${encodeURIComponent(pid)}`, {
+          method: "DELETE",
+        });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string };
+        if (!res.ok || !data.ok) {
+          window.alert(data.error ?? "刪除失敗");
+          return;
+        }
+        setPartners((prev) => prev.filter((p) => p.PartnerID !== pid));
+        setPartnerEditLogs([]);
+        if (selectedPartnerId === pid) setSelectedPartnerId(null);
+      } catch (err) {
+        window.alert(err instanceof Error ? err.message : "刪除失敗");
+      }
+    },
+    [selectedPartnerId]
+  );
+
+  /** 是否顯示儲存／可編輯欄位：任一同登入者可編輯（除 KOL開發者） */
   const openPartnerEdit = useCallback((pt: PartnerRow) => {
     const pid = pt.PartnerID ?? "";
     setEditingPartnerSource(pt);
@@ -1738,22 +1731,17 @@ export default function DashboardPage() {
     setShowEditPartner(true);
   }, []);
 
-  const handlePartnerAvatarUpdated = useCallback((updated: PartnerRow) => {
-    const pid = updated.PartnerID;
-    if (!pid) return;
-    setPartners((prev) => prev.map((p) => (p.PartnerID === pid ? { ...p, ...updated } : p)));
-  }, []);
+  const handlePartnerAvatarUpdated = useCallback(
+    (updated: PartnerRow) => {
+      const pid = updated.PartnerID;
+      if (!pid) return;
+      setPartners((prev) => prev.map((p) => (p.PartnerID === pid ? { ...p, ...updated } : p)));
+      fetchPartnerEditLogs(pid);
+    },
+    [fetchPartnerEditLogs]
+  );
 
-  const canPartnerAgentSave = useMemo(() => {
-    if (!me || !editingPartnerSource) return false;
-    const row = editingPartnerSource;
-    const status = row.審核狀態 ?? PARTNER_STATUS.APPROVED;
-    if (status === PARTNER_STATUS.APPROVED) return true;
-    const meEmail = me.email.trim().toLowerCase();
-    const creator = String(row.建立者 ?? "").trim().toLowerCase();
-    if ((status === PARTNER_STATUS.PENDING || status === PARTNER_STATUS.REJECTED) && creator === meEmail) return true;
-    return false;
-  }, [me, editingPartnerSource]);
+  const canPartnerAgentSave = useMemo(() => Boolean(me && editingPartnerSource), [me, editingPartnerSource]);
 
   /** 非董事長／管理者：除 KOL開發者（及審核欄位）外皆可編輯 */
   const partnerFieldEditable = useCallback(
@@ -2427,10 +2415,6 @@ export default function DashboardPage() {
     [partnersFilteredForList, selectedPartnerId]
   );
   const partnersApprovedCount = useMemo(() => filteredPartners.length, [filteredPartners]);
-  const partnersPendingCount = useMemo(
-    () => partnersPending.length + partnerChangeRequests.length,
-    [partnersPending.length, partnerChangeRequests.length]
-  );
   const searchedTasks = useMemo(
     () =>
       filterRowsBySearch(tasksLifecycleFilteredList as unknown as Record<string, unknown>[], tasksVisibleCols, deferredTasksSearch) as unknown as TaskRow[],
@@ -2670,13 +2654,21 @@ export default function DashboardPage() {
   }, [activeSection, searchedMasterList.length]);
 
   useEffect(() => {
-    if (activeSection !== "partners" || partnersTab !== "approved") return;
+    if (activeSection !== "partners") return;
     setPartnersListPage(1);
     setPartnersGradeFilter("all");
     setPartnersCategory1Filter("all");
     setPartnersCategory2Filter("all");
     setPartnerDetailMobileOpen(false);
-  }, [activeSection, partnersTab, deferredPartnersSearch]);
+  }, [activeSection, deferredPartnersSearch]);
+
+  useEffect(() => {
+    if (activeSection !== "partners" || !selectedPartnerId) {
+      setPartnerEditLogs([]);
+      return;
+    }
+    fetchPartnerEditLogs(selectedPartnerId);
+  }, [activeSection, selectedPartnerId, fetchPartnerEditLogs]);
 
   useEffect(() => {
     setPartnersListPage(1);
@@ -2694,7 +2686,6 @@ export default function DashboardPage() {
   }, [partnersListPage, partnersListPageCount]);
 
   useEffect(() => {
-    if (partnersTab !== "approved") return;
     if (partnersFilteredForList.length === 0) {
       setSelectedPartnerId(null);
       return;
@@ -2702,7 +2693,7 @@ export default function DashboardPage() {
     if (!selectedPartnerId || !partnersFilteredForList.some((p) => p.PartnerID === selectedPartnerId)) {
       setSelectedPartnerId(partnersFilteredForList[0].PartnerID ?? null);
     }
-  }, [partnersTab, partnersFilteredForList, selectedPartnerId]);
+  }, [partnersFilteredForList, selectedPartnerId]);
 
   useEffect(() => {
     if (activeSection !== "payout") return;
@@ -5643,7 +5634,7 @@ export default function DashboardPage() {
                       }
                       options={kolPartnerScopeOptions}
                       searchPlaceholder="搜尋編號或 KOL 名稱…"
-                      emptyHint="尚無合作夥伴時請先到「合作夥伴」新增（核准後才會出現）"
+                      emptyHint="尚無合作夥伴時請先到「合作夥伴」新增 KOL"
                     />
                     <p className="mt-1 text-xs leading-relaxed text-stone-500">
                       選填：選取後會寫入 PartnerID，用來對應專案。若不選，則以登入 Email 與合作夥伴表的 Email 一致時仍可對應。
@@ -5699,7 +5690,7 @@ export default function DashboardPage() {
                   setCreatePartnerError("合作夥伴名稱 為必填");
                   return;
                 }
-                const dup = findPartnerDuplicateInList([...partners, ...partnersPending], {
+                const dup = findPartnerDuplicateInList(partners, {
                   合作夥伴名稱: createPartnerForm.合作夥伴名稱,
                   Email: createPartnerForm.Email,
                   excludePartnerId: createPartnerForm.PartnerID,
@@ -5719,21 +5710,10 @@ export default function DashboardPage() {
                     ok?: boolean;
                     error?: string;
                     partner?: PartnerRow;
-                    pending?: boolean;
-                    message?: string;
                   };
                   if (!res.ok || !data.ok || !data.partner) {
                     setCreatePartnerError(data.error ?? "新增失敗");
                     setCreatingPartner(false);
-                    return;
-                  }
-                  if (data.pending) {
-                    setPartnersPending((prev) => [data.partner!, ...prev]);
-                    setPartnersTab("pending");
-                    setCreatePartnerError(null);
-                    setShowCreatePartner(false);
-                    setCreatingPartner(false);
-                    if (data.message) window.alert(data.message);
                     return;
                   }
                   setPartners((prev) => [data.partner!, ...prev]);
@@ -5782,7 +5762,7 @@ export default function DashboardPage() {
                       className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                     <p className="mt-1 text-[11px] text-stone-500">
-                      系統會比對已上架與待審核列表，相同名稱或 Email 無法重複新增。
+                      系統會比對現有 KOL 列表，相同名稱或 Email 無法重複新增。
                     </p>
                   </div>
                   <div>
@@ -5893,7 +5873,7 @@ export default function DashboardPage() {
                       />
                     ) : (
                       <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-500">
-                        核准後由董事長指定
+                        僅董事長／管理者可指定
                       </p>
                     )}
                   </div>
@@ -6041,13 +6021,6 @@ export default function DashboardPage() {
               <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4 text-sm text-stone-800">
                 {partnerEditError && (
                   <p className="mb-2 rounded-lg bg-amber-100/90 px-3 py-2 text-xs font-medium text-amber-800">{partnerEditError}</p>
-                )}
-                {showEditPartner && !canEditVisibility && !canPartnerAgentSave && editingPartnerSource && (
-                  <p className="mb-2 rounded-lg border border-stone-200/90 bg-stone-100/90 px-3 py-2 text-xs text-stone-500">
-                    待審核新申請僅<strong className="text-stone-600">建立者</strong>可編輯；已上架 KOL 修改會送
-                    <strong className="text-amber-800"> 變更審核 </strong>
-                    ，主列表不變，核准後才更新。
-                  </p>
                 )}
                 <div className="grid gap-4 md:grid-cols-2">
                   <div>
@@ -6366,14 +6339,6 @@ export default function DashboardPage() {
               </div>
               {(canEditVisibility || canPartnerAgentSave) && (
                 <footer className="flex flex-col gap-2 border-t border-stone-200/90 bg-stone-100/90 px-6 py-4">
-                  {!canEditVisibility &&
-                    editingPartnerSource &&
-                    (editingPartnerSource.審核狀態 ?? PARTNER_STATUS.APPROVED) === PARTNER_STATUS.APPROVED && (
-                    <p className="text-xs text-amber-800">
-                      儲存後會送出<strong className="text-amber-700"> 變更審核 </strong>
-                      ，主列表資料維持不變；董事長核准後才會套用修改。
-                    </p>
-                  )}
                   <div className="flex justify-end gap-3">
                   <button
                     type="button"
@@ -6391,12 +6356,7 @@ export default function DashboardPage() {
                     disabled={savingPartner}
                     onClick={async () => {
                       setPartnerEditError(null);
-                      const status = editingPartnerSource?.審核狀態 ?? PARTNER_STATUS.APPROVED;
-                      const needName =
-                        canEditVisibility ||
-                        status === PARTNER_STATUS.PENDING ||
-                        status === PARTNER_STATUS.REJECTED;
-                      if (needName && !editPartnerForm.合作夥伴名稱.trim()) {
+                      if (!editPartnerForm.合作夥伴名稱.trim()) {
                         setPartnerEditError("合作夥伴名稱為必填");
                         return;
                       }
@@ -6436,9 +6396,6 @@ export default function DashboardPage() {
                           ok?: boolean;
                           error?: string;
                           partner?: PartnerRow;
-                          changeRequest?: { id: string };
-                          reAudit?: boolean;
-                          message?: string;
                         };
                         if (!res.ok || !data.ok || !data.partner) {
                           setPartnerEditError(data.error ?? "更新失敗");
@@ -6446,27 +6403,10 @@ export default function DashboardPage() {
                           return;
                         }
                         const updated = data.partner!;
-                        if (data.changeRequest && data.reAudit) {
-                          /** 已上架 KOL：變更進審核，主表不變 */
-                          if (data.message) window.alert(data.message);
-                          fetchPartnersPending();
-                          setPartnersTab("pending");
-                        } else if (updated.審核狀態 === PARTNER_STATUS.APPROVED) {
-                          setPartners((prev) => {
-                            const exists = prev.some((p) => p.PartnerID === updated.PartnerID);
-                            if (exists) return prev.map((p) => (p.PartnerID === updated.PartnerID ? updated : p));
-                            return [updated, ...prev];
-                          });
-                          setPartnersPending((prev) => prev.filter((p) => p.PartnerID !== updated.PartnerID));
-                        } else {
-                          setPartnersPending((prev) => {
-                            const exists = prev.some((p) => p.PartnerID === updated.PartnerID);
-                            if (exists) return prev.map((p) => (p.PartnerID === updated.PartnerID ? updated : p));
-                            return [updated, ...prev];
-                          });
-                          if (data.reAudit && data.message) window.alert(data.message);
-                          setPartnersTab("pending");
-                        }
+                        setPartners((prev) =>
+                          prev.map((p) => (p.PartnerID === updated.PartnerID ? updated : p))
+                        );
+                        if (updated.PartnerID) fetchPartnerEditLogs(updated.PartnerID);
                         setShowEditPartner(false);
                         setEditingPartnerSource(null);
                         setSavingPartner(false);
@@ -6487,78 +6427,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 變更申請差異（舊值 / 新值 標色） */}
-      {showChangeRequestDiff && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-xl">
-            <header className="flex items-center justify-between border-b border-stone-200/90 px-4 py-3">
-              <h3 className="text-lg font-bold text-stone-900">
-                變更差異 — {showChangeRequestDiff.PartnerID}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowChangeRequestDiff(null)}
-                className="rounded-lg border border-stone-300 px-3 py-1 text-sm text-stone-600 hover:bg-stone-100"
-              >
-                關閉
-              </button>
-            </header>
-            <div className="max-h-[65vh] overflow-y-auto p-4 text-sm">
-              <p className="mb-3 text-xs text-stone-500">
-                僅<strong className="text-amber-800">有差異</strong>的欄位會以
-                <span className="mx-1 rounded bg-red-500/20 px-1.5 py-0.5 text-red-300">變更前</span>
-                /
-                <span className="mx-1 rounded bg-emerald-500/20 px-1.5 py-0.5 text-emerald-300">變更後</span>
-                標色；其餘未變更的不列入。
-              </p>
-              <table className="w-full border-collapse text-left">
-                <thead>
-                  <tr className="border-b border-stone-200/90 text-xs text-stone-500">
-                    <th className="py-2 pr-2">欄位</th>
-                    <th className="py-2 pr-2">變更前</th>
-                    <th className="py-2">變更後</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(() => {
-                    const rows = Object.entries(showChangeRequestDiff.變更內容)
-                      .map(([key, newVal]) => {
-                        const oldVal = showChangeRequestDiff.變更前快照?.[key];
-                        const label = tableColumnLabels.partners?.[key] ?? key;
-                        const oldStr = oldVal === undefined || oldVal === null ? "—" : String(oldVal);
-                        const newStr = newVal === undefined || newVal === null ? "—" : String(newVal);
-                        const same =
-                          oldStr === newStr ||
-                          (typeof oldVal === "boolean" &&
-                            typeof newVal === "boolean" &&
-                            oldVal === newVal);
-                        return { key, label, oldStr, newStr, same };
-                      })
-                      .filter((r) => !r.same);
-                    if (rows.length === 0) {
-                      return (
-                        <tr>
-                          <td colSpan={3} className="py-6 text-center text-stone-500">
-                            此申請與目前上架資料比對無差異（或僅送出未改動欄位）。
-                          </td>
-                        </tr>
-                      );
-                    }
-                    return rows.map((r) => (
-                      <tr key={r.key} className="border-b border-stone-200/70 align-top">
-                        <td className="py-2 pr-2 font-medium text-stone-600">{r.label}</td>
-                        <td className="py-2 pr-2 rounded bg-red-500/15 text-red-100">{r.oldStr}</td>
-                        <td className="py-2 rounded bg-emerald-500/15 text-emerald-100">{r.newStr}</td>
-                      </tr>
-                    ));
-                  })()}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
         {/* 合作夥伴 / KOL */}
         {activeSection === "partners" && (
         <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
@@ -6572,31 +6440,9 @@ export default function DashboardPage() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3">
               <h2 className="text-xl font-bold tracking-tight text-stone-900">合作夥伴 / KOL</h2>
-              <div className="flex rounded-lg border border-stone-200 bg-white/90 p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setPartnersTab("approved")}
-                  className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
-                    partnersTab === "approved" ? "bg-amber-500 text-slate-900" : "text-stone-500 hover:text-stone-900"
-                  }`}
-                >
-                  已上架
-                  <span className="ml-1 text-[10px] opacity-80">{partnersApprovedCount}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPartnersTab("pending");
-                    fetchPartnersPending();
-                  }}
-                  className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
-                    partnersTab === "pending" ? "bg-amber-500 text-slate-900" : "text-stone-500 hover:text-stone-900"
-                  }`}
-                >
-                  待審核
-                  <span className="ml-1 text-[10px] opacity-80">{partnersPendingCount}</span>
-                </button>
-              </div>
+              <span className="rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-semibold text-stone-600">
+                {partnersApprovedCount} 位
+              </span>
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <input
@@ -6676,318 +6522,49 @@ export default function DashboardPage() {
               <p className="mt-2 text-xs text-amber-800">{refreshFollowersMessage}</p>
             )}
           </div>
-          {/* 已上架：主從式列表 + 分類篩選 */}
-          {partnersTab === "approved" && (
-            partners.length === 0 ? (
-              <p className="rounded-xl border border-stone-200/90 px-4 py-12 text-center text-sm text-stone-500">
-                尚無合作夥伴資料
-              </p>
-            ) : (
-              <PartnersMasterDetail
-                listPartners={partnersListPageRows}
-                totalCount={partnersFilteredForList.length}
-                selectedPartner={selectedPartner}
-                onSelectPartner={(pt) => setSelectedPartnerId(pt.PartnerID ?? null)}
-                onEditPartner={openPartnerEdit}
-                onPartnerUpdated={handlePartnerAvatarUpdated}
-                gradeTabs={partnersGradeTabs}
-                gradeFilter={partnersGradeFilter}
-                onGradeFilterChange={(v) => {
-                  setPartnersGradeFilter(v);
-                  setPartnersCategory1Filter("all");
-                  setPartnersCategory2Filter("all");
-                }}
-                category1Tabs={partnersCategory1Tabs}
-                category1Filter={partnersCategory1Filter}
-                onCategory1FilterChange={(v) => {
-                  setPartnersCategory1Filter(v);
-                  setPartnersCategory2Filter("all");
-                }}
-                category2Tabs={partnersCategory2Tabs}
-                category2Filter={partnersCategory2Filter}
-                onCategory2FilterChange={setPartnersCategory2Filter}
-                showCategory2={partnersCategory1Filter !== "all"}
-                listPage={partnersListPage}
-                listPageCount={partnersListPageCount}
-                listPageSafe={partnersListPageSafe}
-                listPageSize={partnersListPageSize}
-                onListPageChange={setPartnersListPage}
-                onListPageSizeChange={setPartnersListPageSize}
-                columnLabels={tableColumnLabels.partners ?? {}}
-                mobileDetailOpen={partnerDetailMobileOpen}
-                onMobileDetailOpenChange={setPartnerDetailMobileOpen}
-              />
-            )
-          )}
-
-          {/* 待審核 */}
-          {partnersTab === "pending" && (
-            <div className="max-h-[60vh] overflow-y-auto rounded-xl border border-stone-200/90">
-              {partnersPendingLoading ? (
-                <p className="px-4 py-8 text-center text-stone-500">載入中…</p>
-              ) : partnersPending.length === 0 && partnerChangeRequests.length === 0 ? (
-                <p className="px-4 py-8 text-center text-stone-500">目前沒有待審核或已駁回的申請</p>
-              ) : (
-                <>
-                {partnerChangeRequests.length > 0 && (
-                  <div className="mb-6">
-                    <h3 className="mb-2 px-2 text-sm font-bold text-amber-700">已上架 KOL 變更申請（主列表仍為舊資料，核准後才更新）</h3>
-                    <table className="min-w-full divide-y divide-stone-200 rounded-xl border border-amber-200">
-                      <thead className="bg-amber-50/95">
-                        <tr>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-700">類型</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-700">PartnerID</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-700">狀態</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-700">駁回理由</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-amber-700">操作</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-stone-200">
-                        {partnerChangeRequests.map((cr) => (
-                          <tr key={cr.id} className="bg-amber-950/20">
-                            <td className="px-4 py-2 text-xs font-semibold text-amber-800">變更審核</td>
-                            <td className="px-4 py-2 text-sm text-stone-900">{cr.PartnerID}</td>
-                            <td className="px-4 py-2 text-sm">
-                              <span className={cr.審核狀態 === PARTNER_STATUS.REJECTED ? "text-red-400" : "text-amber-800"}>
-                                {cr.審核狀態 === PARTNER_STATUS.REJECTED ? "審核未通過" : cr.審核狀態}
-                              </span>
-                            </td>
-                            <td className="max-w-xs truncate px-4 py-2 text-xs text-stone-500" title={cr.駁回理由}>
-                              {cr.駁回理由 ?? "—"}
-                            </td>
-                            <td className="px-4 py-2">
-                              <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  className="rounded-lg border border-cyan-500/50 bg-cyan-500/10 px-2 py-1 text-xs font-bold text-cyan-300 hover:bg-cyan-500/20"
-                                  onClick={() => setShowChangeRequestDiff(cr)}
-                                >
-                                  查看差異
-                                </button>
-                                {canEditVisibility && cr.審核狀態 === PARTNER_STATUS.PENDING && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      className="rounded-lg bg-emerald-600 px-2 py-1 text-xs font-bold text-stone-900 hover:bg-emerald-500"
-                                      onClick={async () => {
-                                        const res = await fetch("/api/partners/change-requests", {
-                                          method: "PATCH",
-                                          headers: { "Content-Type": "application/json" },
-                                          body: JSON.stringify({ id: cr.id, action: "approve" }),
-                                        });
-                                        const d = (await safeResJson(res)) as { ok?: boolean; partner?: PartnerRow; error?: string };
-                                        if (res.ok && d.ok && d.partner) {
-                                          setPartnerChangeRequests((prev) => prev.filter((r) => r.id !== cr.id));
-                                          setPartners((prev) => {
-                                            const pid = d.partner!.PartnerID;
-                                            return prev.some((p) => p.PartnerID === pid)
-                                              ? prev.map((p) => (p.PartnerID === pid ? d.partner! : p))
-                                              : prev;
-                                          });
-                                        } else window.alert(d.error ?? "核准失敗");
-                                      }}
-                                    >
-                                      核准套用
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="rounded-lg bg-red-600/80 px-2 py-1 text-xs font-bold text-stone-900 hover:bg-red-500"
-                                      onClick={() => {
-                                        const reason = window.prompt("駁回理由（可留空）", "");
-                                        if (reason === null) return;
-                                        fetch("/api/partners/change-requests", {
-                                          method: "PATCH",
-                                          headers: { "Content-Type": "application/json" },
-                                          body: JSON.stringify({
-                                            id: cr.id,
-                                            action: "reject",
-                                            駁回理由: reason.trim() || null,
-                                          }),
-                                        })
-                                          .then((r) => safeResJson(r))
-                                          .then((d) => {
-                                            const x = d as { ok?: boolean; error?: string };
-                                            if (x.ok) fetchPartnersPending();
-                                            else window.alert(x.error ?? "駁回失敗");
-                                          });
-                                      }}
-                                    >
-                                      駁回
-                                    </button>
-                                  </>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                {partnersPending.length > 0 && (
-                <table className="min-w-full divide-y divide-stone-200">
-                  <thead className="sticky top-0 z-10 bg-amber-100/90">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">PartnerID</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">合作夥伴名稱</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">狀態</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">駁回理由</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-amber-700">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-200">
-                    {partnersPending.map((pt) => (
-                      <tr key={pt.PartnerID} className="bg-amber-50/40">
-                        <td className="px-4 py-3 text-sm text-stone-600">{pt.PartnerID}</td>
-                        <td className="px-4 py-3 text-sm text-stone-900">{pt.合作夥伴名稱 ?? "—"}</td>
-                        <td className="px-4 py-3 text-sm">
-                          <span
-                            className={
-                              pt.審核狀態 === PARTNER_STATUS.REJECTED
-                                ? "text-red-400"
-                                : "text-amber-800"
-                            }
-                          >
-                            {pt.審核狀態 ?? PARTNER_STATUS.PENDING}
-                          </span>
-                        </td>
-                        <td className="max-w-xs truncate px-4 py-3 text-xs text-stone-500" title={pt.駁回理由}>
-                          {pt.駁回理由 ?? "—"}
-                        </td>
-                        <td className="px-4 py-3">
-                          {canEditVisibility ? (
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                className="rounded-lg bg-emerald-600 px-2 py-1 text-xs font-bold text-stone-900 hover:bg-emerald-500"
-                                onClick={async () => {
-                                  const res = await fetch("/api/partners", {
-                                    method: "PATCH",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                      PartnerID: pt.PartnerID,
-                                      審核狀態: PARTNER_STATUS.APPROVED,
-                                      駁回理由: null,
-                                      待審核送出者: null,
-                                    }),
-                                  });
-                                  const data = (await safeResJson(res)) as { ok?: boolean; partner?: PartnerRow };
-                                  if (res.ok && data.ok && data.partner) {
-                                    setPartnersPending((prev) => prev.filter((p) => p.PartnerID !== pt.PartnerID));
-                                    setPartners((prev) => [data.partner!, ...prev]);
-                                  } else {
-                                    window.alert((data as { error?: string }).error ?? "核准失敗");
-                                  }
-                                }}
-                              >
-                                核准
-                              </button>
-                              <button
-                                type="button"
-                                className="rounded-lg bg-red-600/80 px-2 py-1 text-xs font-bold text-stone-900 hover:bg-red-500"
-                                onClick={() => {
-                                  const reason = window.prompt("駁回理由（可留空）", "");
-                                  if (reason === null) return;
-                                  fetch("/api/partners", {
-                                    method: "PATCH",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                      PartnerID: pt.PartnerID,
-                                      審核狀態: PARTNER_STATUS.REJECTED,
-                                      駁回理由: reason.trim() || null,
-                                    }),
-                                  })
-                                    .then((r) => safeResJson(r))
-                                    .then((data) => {
-                                      const d = data as { ok?: boolean; partner?: PartnerRow; error?: string };
-                                      if (d.ok && d.partner) {
-                                        setPartnersPending((prev) =>
-                                          prev.map((p) => (p.PartnerID === pt.PartnerID ? d.partner! : p))
-                                        );
-                                      } else window.alert(d.error ?? "駁回失敗");
-                                    });
-                                }}
-                              >
-                                駁回
-                              </button>
-                              <button
-                                type="button"
-                                className="rounded-lg border border-stone-300 px-2 py-1 text-xs text-stone-600 hover:bg-stone-100"
-                                onClick={() => {
-                                  setEditingPartnerSource(pt);
-                                  setEditPartnerForm({
-                                    PartnerID: String(pt.PartnerID ?? ""),
-                                    類別一: String(pt.類別一 ?? ""),
-                                    類別二: String(pt.類別二 ?? ""),
-                                    類別三: String(pt.類別三 ?? ""),
-                                    合作夥伴名稱: String(pt.合作夥伴名稱 ?? ""),
-                                    社群網站: String(pt.社群網站 ?? ""),
-                                    粉絲數: String(pt.粉絲數 ?? ""),
-                                    "頻道｜節目名稱": String(pt["頻道｜節目名稱"] ?? ""),
-                                    "是否有經營 私域群": Boolean(pt["是否有經營 私域群"]),
-                                    資料夾: String(pt.資料夾 ?? ""),
-                                    KOL開發者: String(pt.KOL開發者 ?? ""),
-                                    經銷約開始日: String(pt.經銷約開始日 ?? ""),
-                                    自來件分潤: String(pt.自來件分潤 ?? ""),
-                                    "SDH開發分件分潤": String(pt["SDH開發分件分潤"] ?? ""),
-                                    經銷約結束日: String(pt.經銷約結束日 ?? ""),
-                                    廣告經銷夥伴: Boolean(pt.廣告經銷夥伴),
-                                    節目製作夥伴: Boolean(pt.節目製作夥伴),
-                                    課程製作夥伴: Boolean(pt.課程製作夥伴),
-                                    Email: String(pt.Email ?? ""),
-                                    分級: String(pt.分級 ?? ""),
-                                  });
-                                  setPartnerEditError(null);
-                                  setShowEditPartner(true);
-                                }}
-                              >
-                                編輯
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              className="rounded-lg border border-stone-300 px-2 py-1 text-xs text-stone-600 hover:bg-stone-100"
-                              onClick={() => {
-                                setEditingPartnerSource(pt);
-                                setEditPartnerForm({
-                                  PartnerID: String(pt.PartnerID ?? ""),
-                                  類別一: String(pt.類別一 ?? ""),
-                                  類別二: String(pt.類別二 ?? ""),
-                                  類別三: String(pt.類別三 ?? ""),
-                                  合作夥伴名稱: String(pt.合作夥伴名稱 ?? ""),
-                                  社群網站: String(pt.社群網站 ?? ""),
-                                  粉絲數: String(pt.粉絲數 ?? ""),
-                                  "頻道｜節目名稱": String(pt["頻道｜節目名稱"] ?? ""),
-                                  "是否有經營 私域群": Boolean(pt["是否有經營 私域群"]),
-                                  資料夾: String(pt.資料夾 ?? ""),
-                                  KOL開發者: String(pt.KOL開發者 ?? ""),
-                                  經銷約開始日: String(pt.經銷約開始日 ?? ""),
-                                  自來件分潤: String(pt.自來件分潤 ?? ""),
-                                  "SDH開發分件分潤": String(pt["SDH開發分件分潤"] ?? ""),
-                                  經銷約結束日: String(pt.經銷約結束日 ?? ""),
-                                  廣告經銷夥伴: Boolean(pt.廣告經銷夥伴),
-                                  節目製作夥伴: Boolean(pt.節目製作夥伴),
-                                  課程製作夥伴: Boolean(pt.課程製作夥伴),
-                                  Email: String(pt.Email ?? ""),
-                                  分級: String(pt.分級 ?? ""),
-                                });
-                                setPartnerEditError(null);
-                                setShowEditPartner(true);
-                              }}
-                            >
-                              查看／修改
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                )}
-                </>
-              )}
-            </div>
+          {partners.length === 0 ? (
+            <p className="rounded-xl border border-stone-200/90 px-4 py-12 text-center text-sm text-stone-500">
+              尚無合作夥伴資料
+            </p>
+          ) : (
+            <PartnersMasterDetail
+              listPartners={partnersListPageRows}
+              totalCount={partnersFilteredForList.length}
+              selectedPartner={selectedPartner}
+              onSelectPartner={(pt) => setSelectedPartnerId(pt.PartnerID ?? null)}
+              onEditPartner={openPartnerEdit}
+              onPartnerUpdated={handlePartnerAvatarUpdated}
+              canDeletePartner={Boolean(canEditVisibility)}
+              onDeletePartner={handleDeletePartner}
+              editLogs={partnerEditLogs}
+              editLogsLoading={partnerEditLogsLoading}
+              gradeTabs={partnersGradeTabs}
+              gradeFilter={partnersGradeFilter}
+              onGradeFilterChange={(v) => {
+                setPartnersGradeFilter(v);
+                setPartnersCategory1Filter("all");
+                setPartnersCategory2Filter("all");
+              }}
+              category1Tabs={partnersCategory1Tabs}
+              category1Filter={partnersCategory1Filter}
+              onCategory1FilterChange={(v) => {
+                setPartnersCategory1Filter(v);
+                setPartnersCategory2Filter("all");
+              }}
+              category2Tabs={partnersCategory2Tabs}
+              category2Filter={partnersCategory2Filter}
+              onCategory2FilterChange={setPartnersCategory2Filter}
+              showCategory2={partnersCategory1Filter !== "all"}
+              listPage={partnersListPage}
+              listPageCount={partnersListPageCount}
+              listPageSafe={partnersListPageSafe}
+              listPageSize={partnersListPageSize}
+              onListPageChange={setPartnersListPage}
+              onListPageSizeChange={setPartnersListPageSize}
+              columnLabels={tableColumnLabels.partners ?? {}}
+              mobileDetailOpen={partnerDetailMobileOpen}
+              onMobileDetailOpenChange={setPartnerDetailMobileOpen}
+            />
           )}
         </section>
         )}
@@ -9440,7 +9017,7 @@ export default function DashboardPage() {
                       onChange={(v) => setCreateForm((f) => ({ ...f, KOL名稱: v }))}
                       options={kolNameOptionsFromDb}
                       searchPlaceholder="搜尋 KOL…"
-                      emptyHint="尚無合作夥伴資料時請先至「合作夥伴」新增已核准 KOL"
+                      emptyHint="尚無合作夥伴資料時請先至「合作夥伴」新增 KOL"
                     />
                     <InputField label="廠商名稱" value={createForm.廠商名稱} onChange={(v) => setCreateForm((f) => ({ ...f, 廠商名稱: v }))} />
                     {isPayoutModeB(createForm.專案類型) ? (
@@ -9585,7 +9162,7 @@ export default function DashboardPage() {
                         }
                         options={kolPartnerScopeOptions}
                         searchPlaceholder="搜尋編號或 KOL 名稱…"
-                        emptyHint="尚無合作夥伴時請先到「合作夥伴」新增（核准後才會出現）"
+                        emptyHint="尚無合作夥伴時請先到「合作夥伴」新增 KOL"
                       />
                       <p className="mt-1 text-xs leading-relaxed text-stone-500">
                         選填：選取後寫入 PartnerID。可不選，改以 Email 對應合作夥伴。
@@ -10324,7 +9901,7 @@ export default function DashboardPage() {
                         a.localeCompare(b, "zh-Hant")
                       )}
                       searchPlaceholder="搜尋 KOL…"
-                      emptyHint="尚無合作夥伴資料時請先至「合作夥伴」新增已核准 KOL"
+                      emptyHint="尚無合作夥伴資料時請先至「合作夥伴」新增 KOL"
                     />
                   ) : (
                     <Field label="KOL名稱" value={selectedMaster.KOL名稱} />

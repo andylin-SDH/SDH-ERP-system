@@ -1,5 +1,4 @@
 import type { PartnerRow } from "@/modules/partners/types";
-import { PARTNER_STATUS, normalizePartnerStatus } from "@/lib/db/partner-approval";
 
 /** 比對用：去除空白、不分大小寫 */
 export function normalizePartnerNameKey(name: string): string {
@@ -45,15 +44,8 @@ export function findPartnerDuplicateInList(
 export function formatPartnerDuplicateError(match: PartnerDuplicateMatch): string {
   const id = String(match.existing.PartnerID ?? "—").trim() || "—";
   const name = String(match.existing.合作夥伴名稱 ?? "—").trim() || "—";
-  const st = normalizePartnerStatus(match.existing.審核狀態);
-  const statusHint =
-    st === PARTNER_STATUS.PENDING
-      ? "（待審核）"
-      : st === PARTNER_STATUS.REJECTED
-        ? "（已駁回）"
-        : "";
   if (match.field === "Email") {
-    return `已有相同 Email 的 KOL：${id} ${name}${statusHint}，請勿重複新增`;
+    return `已有相同 Email 的 KOL：${id} ${name}，請勿重複新增`;
   }
-  return `已有相同合作夥伴名稱的 KOL：${id} ${name}${statusHint}，請勿重複新增`;
+  return `已有相同合作夥伴名稱的 KOL：${id} ${name}，請勿重複新增`;
 }

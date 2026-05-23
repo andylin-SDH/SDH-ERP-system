@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/api";
-import { updatePartner } from "@/lib/db/partners";
+import { getPartnerById, updatePartnerWithEditLog } from "@/lib/db/partners";
 import {
   deletePartnerAvatarObject,
   uploadPartnerAvatar,
   validatePartnerAvatarFile,
 } from "@/lib/partners/avatar-storage";
+import { partnerEditorLabel } from "@/lib/partners/editor-label";
 
 export async function POST(request: NextRequest) {
   const auth = await requireAuth(request);
@@ -25,8 +26,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: validationError }, { status: 400 });
     }
 
+    const existing = await getPartnerById(PartnerID);
+    if (!existing) {
+      return NextResponse.json({ ok: false, error: "找不到該合作夥伴" }, { status: 404 });
+    }
+
     const url = await uploadPartnerAvatar(PartnerID, file, file.type || "image/jpeg");
-    const partner = await updatePartner(PartnerID, { 形象照: url });
+    const editor = partnerEditorLabel(auth.user);
+    const { partner } = await updatePartnerWithEditLog(
+      PartnerID,
+      existing,
+      { 形象照: url },
+      editor
+    );
     if (!partner) {
       return NextResponse.json({ ok: false, error: "更新合作夥伴失敗（請確認已執行 migration 050）" }, { status: 500 });
     }
@@ -49,8 +61,18 @@ export async function DELETE(request: NextRequest) {
     if (!PartnerID) {
       return NextResponse.json({ ok: false, error: "PartnerID 為必填" }, { status: 400 });
     }
+    const existing = await getPartnerById(PartnerID);
+    if (!existing) {
+      return NextResponse.json({ ok: false, error: "找不到該合作夥伴" }, { status: 404 });
+    }
     await deletePartnerAvatarObject(PartnerID);
-    const partner = await updatePartner(PartnerID, { 形象照: null });
+    const editor = partnerEditorLabel(auth.user);
+    const { partner } = await updatePartnerWithEditLog(
+      PartnerID,
+      existing,
+      { 形象照: null },
+      editor
+    );
     if (!partner) {
       return NextResponse.json({ ok: false, error: "更新合作夥伴失敗" }, { status: 500 });
     }
