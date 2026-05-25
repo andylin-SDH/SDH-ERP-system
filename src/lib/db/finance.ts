@@ -145,28 +145,73 @@ function mapFinanceDbRow(r: Record<string, unknown>, 專案名稱: string | unde
   };
 }
 
+function normalizeDateOrNull(v: string | null | undefined): string | null {
+  if (v == null || String(v).trim() === "") return null;
+  return String(v).trim();
+}
+
 /**
- * 財務寫入廠商／員工日期後，將同專案所有分潤表列的「廠商付款日期」「分潤匯款日期」與財務對齊。
- * （語意：廠商付款日期 ↔ 財務；員工分潤日 → 分潤已匯出）
+ * 依分潤表逐列匯款日，回寫財務「員工分潤日期」（全列已付 → 最晚匯款日；否則清空）。
  */
-async function syncPayoutRowsFromFinanceDates(
-  專案ID: string,
-  廠商付款日期Val: string | undefined,
-  員工分潤日期Val: string | undefined
-): Promise<void> {
+export async function syncFinanceEmployeeDateFromPayoutRows(專案ID: string): Promise<void> {
   const pid = String(專案ID ?? "").trim();
   if (!pid) return;
-  const vIn =
-    廠商付款日期Val == null || String(廠商付款日期Val).trim() === "" ? null : String(廠商付款日期Val).trim();
-  const pOut =
-    員工分潤日期Val == null || String(員工分潤日期Val).trim() === "" ? null : String(員工分潤日期Val).trim();
-  const { error } = await getSupabase()
+  const supabase = getSupabase();
+  const { data, error } = await (supabase as ReturnType<typeof getSupabase>)
     .from("分潤表")
-    .update({ 廠商付款日期: vIn, 分潤匯款日期: pOut })
+    .select('"分潤匯款日期"')
     .eq("專案ID", pid);
   if (error) {
     if (error.code === "42P01") return;
     throw error;
+  }
+  const rows = (data ?? []) as Record<string, unknown>[];
+  if (rows.length === 0) return;
+
+  const dates = rows
+    .map((r) => String(r["分潤匯款日期"] ?? "").trim())
+    .filter(Boolean);
+  let 員工分潤日期: string | null = null;
+  if (dates.length === rows.length) {
+    員工分潤日期 = [...dates].sort().reverse()[0] ?? null;
+  }
+
+  const { error: upErr } = await supabase.from("財務").update({ 員工分潤日期 }).eq("專案ID", pid);
+  if (upErr && upErr.code !== "42P01") throw upErr;
+}
+
+/**
+ * 財務依專案寫入日期後同步分潤表：
+ * - 廠商付款日期 → 同專案所有列
+ * - 員工分潤日期（僅在專案層新填日期時）→ 僅補上尚未匯款之列，不覆蓋已逐列勾選的日期
+ */
+async function syncPayoutRowsFromFinanceDates(
+  專案ID: string,
+  廠商付款日期Val: string | undefined,
+  員工分潤日期Val: string | undefined,
+  prevFinance?: FinanceRow
+): Promise<void> {
+  const pid = String(專案ID ?? "").trim();
+  if (!pid) return;
+  const supabase = getSupabase();
+  const vIn = normalizeDateOrNull(廠商付款日期Val);
+  const pOut = normalizeDateOrNull(員工分潤日期Val);
+
+  const { error: vendorErr } = await supabase.from("分潤表").update({ 廠商付款日期: vIn }).eq("專案ID", pid);
+  if (vendorErr) {
+    if (vendorErr.code === "42P01") return;
+    throw vendorErr;
+  }
+
+  const prevEmp = normalizeDateOrNull(prevFinance?.員工分潤日期);
+  const employeeDateChanged = prevEmp !== pOut;
+  if (employeeDateChanged && pOut) {
+    const { error: bulkErr } = await supabase
+      .from("分潤表")
+      .update({ 分潤匯款日期: pOut })
+      .eq("專案ID", pid)
+      .is("分潤匯款日期", null);
+    if (bulkErr && bulkErr.code !== "42P01") throw bulkErr;
   }
 }
 
@@ -178,16 +223,23 @@ export async function updateFinanceBy專案ID(專案ID: string, row: FinanceUpda
   const pid = String(專案ID ?? "").trim();
   if (!pid) throw new Error("缺少專案ID");
 
+  const supabase = getSupabase();
+  const { data: prevRaw } = await supabase.from("財務").select("*").eq("專案ID", pid).maybeSingle();
+  const prevFinance = prevRaw
+    ? mapFinanceDbRow(prevRaw as Record<string, unknown>, undefined)
+    : undefined;
+
   const payload = {
     廠商付款日期: trimOrNull(row.廠商付款日期),
     員工分潤日期: trimOrNull(row.員工分潤日期),
   };
 
-  const { data, error } = await getSupabase().from("財務").update(payload).eq("專案ID", pid).select("*").maybeSingle();
+  const { data, error } = await supabase.from("財務").update(payload).eq("專案ID", pid).select("*").maybeSingle();
   if (error) throw error;
   if (!data) throw new Error("找不到該專案之財務列或更新失敗");
   const updated = mapFinanceDbRow(data as Record<string, unknown>, undefined);
-  await syncPayoutRowsFromFinanceDates(pid, updated.廠商付款日期, updated.員工分潤日期);
+  await syncPayoutRowsFromFinanceDates(pid, updated.廠商付款日期, updated.員工分潤日期, prevFinance);
+  await syncFinanceEmployeeDateFromPayoutRows(pid);
   return updated;
 }
 

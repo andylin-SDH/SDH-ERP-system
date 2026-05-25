@@ -1319,7 +1319,13 @@ export default function DashboardPage() {
     return "in_progress";
   });
   /** 財務分頁內：依專案列 vs 發票清冊 vs 付款記錄 */
-  const [financeSubTab, setFinanceSubTab] = useState<"byProject" | "invoices" | "payments">("byProject");
+  const [financeSubTab, setFinanceSubTab] = useState<"byProject" | "employeePayout" | "invoices" | "payments">(
+    "employeePayout"
+  );
+  const [financeEmployeePayoutTab, setFinanceEmployeePayoutTab] = useState<"pending" | "paid">("pending");
+  const [financeEmployeePayoutSearch, setFinanceEmployeePayoutSearch] = useState("");
+  const [financePayoutSavingIds, setFinancePayoutSavingIds] = useState<string[]>([]);
+  const [financePayoutEditError, setFinancePayoutEditError] = useState<string | null>(null);
   /** 發票清冊：點「發票日期」表頭循環：發票號碼序 → 日期新→舊 → 日期舊→新 */
   const [invoiceListDateSortMode, setInvoiceListDateSortMode] = useState<InvoiceListDateSortMode>("default");
   const [showInvoiceCreateModal, setShowInvoiceCreateModal] = useState(false);
@@ -1351,6 +1357,7 @@ export default function DashboardPage() {
   const deferredTasksSearch = useDeferredValue(tasksSearch);
   const deferredPayoutSearch = useDeferredValue(payoutSearch);
   const deferredFinanceSearch = useDeferredValue(financeSearch);
+  const deferredFinanceEmployeePayoutSearch = useDeferredValue(financeEmployeePayoutSearch);
   const deferredInvoicesSearch = useDeferredValue(invoicesSearch);
   const deferredPaymentRecordsSearch = useDeferredValue(paymentRecordsSearch);
 
@@ -2512,6 +2519,56 @@ export default function DashboardPage() {
     return sum;
   }, [dedupedPayoutForDisplay]);
 
+  /** 財務「員工分潤付款」：廠商已付、尚未匯款給員工 */
+  const financeEmployeePayoutPendingRows = useMemo(
+    () => dedupedPayoutForDisplay.filter((r) => payoutRowWorkflowStage(r) === "pending_payout"),
+    [dedupedPayoutForDisplay]
+  );
+  const financeEmployeePayoutPaidRows = useMemo(
+    () => dedupedPayoutForDisplay.filter((r) => String(r.分潤匯款日期 ?? "").trim() !== ""),
+    [dedupedPayoutForDisplay]
+  );
+  const financeEmployeePayoutBaseRows = useMemo(
+    () => (financeEmployeePayoutTab === "pending" ? financeEmployeePayoutPendingRows : financeEmployeePayoutPaidRows),
+    [financeEmployeePayoutTab, financeEmployeePayoutPendingRows, financeEmployeePayoutPaidRows]
+  );
+  const financeEmployeePayoutCounts = useMemo(() => {
+    let pending = 0;
+    let pendingAmount = 0;
+    let paid = 0;
+    let paidAmount = 0;
+    for (const r of dedupedPayoutForDisplay) {
+      const amt = parseNumericField(r.分潤金額);
+      if (payoutRowWorkflowStage(r) === "pending_payout") {
+        pending += 1;
+        pendingAmount += amt;
+      }
+      if (String(r.分潤匯款日期 ?? "").trim()) {
+        paid += 1;
+        paidAmount += amt;
+      }
+    }
+    return { pending, pendingAmount, paid, paidAmount };
+  }, [dedupedPayoutForDisplay]);
+  const financeEmployeePayoutSearchCols = useMemo(
+    () => ["專案ID", "專案名稱", "領取人", "分潤類型", "分潤金額", "分潤匯款日期"] as const,
+    []
+  );
+  const searchedFinanceEmployeePayout = useMemo(
+    () =>
+      filterRowsBySearch(
+        financeEmployeePayoutBaseRows as unknown as Record<string, unknown>[],
+        financeEmployeePayoutSearchCols as unknown as string[],
+        deferredFinanceEmployeePayoutSearch
+      ) as unknown as PayoutRow[],
+    [
+      financeEmployeePayoutBaseRows,
+      financeEmployeePayoutSearchCols,
+      deferredFinanceEmployeePayoutSearch,
+      filterRowsBySearch,
+    ]
+  );
+
   const searchedPayout = useMemo(
     () =>
       filterRowsBySearch(
@@ -3271,6 +3328,39 @@ export default function DashboardPage() {
       }
     }
   }, [refreshDashboardData]);
+
+  /** 財務「員工分潤付款」：勾選已付／取消（寫入分潤匯款日期，並同步專案員工分潤日期） */
+  const persistEmployeePayoutPaid = useCallback(
+    async (row: PayoutRow, paid: boolean) => {
+      const id = String(row.id ?? "").trim();
+      if (!id) {
+        setFinancePayoutEditError("此列缺少 id，無法更新");
+        return;
+      }
+      setFinancePayoutSavingIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+      setFinancePayoutEditError(null);
+      try {
+        const res = await fetch("/api/payout", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(paid ? { id, markPaid: true } : { id, clearPaid: true }),
+        });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string; payout?: PayoutRow };
+        if (!res.ok || !data.ok || !data.payout) {
+          setFinancePayoutEditError(String(data.error ?? "更新失敗"));
+          return;
+        }
+        const updated = data.payout;
+        setPayoutList((prev) => prev.map((r) => (String(r.id ?? "") === id ? { ...r, ...updated } : r)));
+        await refreshDashboardData(["finance", "payout"]);
+      } catch (e) {
+        setFinancePayoutEditError(e instanceof Error ? e.message : "更新失敗");
+      } finally {
+        setFinancePayoutSavingIds((prev) => prev.filter((x) => x !== id));
+      }
+    },
+    [refreshDashboardData]
+  );
 
   const refetchTasksOnly = useCallback(async () => {
     try {
@@ -7405,10 +7495,21 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-xl font-bold tracking-tight text-stone-900">財務</h2>
               <p className="mt-1 text-xs text-stone-500">
-                依專案：金額與指標由大總表同步帶入；發票清冊記錄收款憑證；付款記錄用來管理對外付款與支出。
+                員工分潤付款：逐筆勾選已匯款；依專案：專案級日期；發票清冊：收款憑證；付款記錄：對外支出。
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-stone-200 bg-amber-50/90 p-1">
+              <button
+                type="button"
+                onClick={() => setFinanceSubTab("employeePayout")}
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  financeSubTab === "employeePayout"
+                    ? "bg-amber-500 text-slate-900 shadow shadow-amber-200/40"
+                    : "text-stone-500 hover:text-stone-900"
+                }`}
+              >
+                員工分潤付款
+              </button>
               <button
                 type="button"
                 onClick={() => setFinanceSubTab("byProject")}
@@ -7439,6 +7540,159 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          {financeSubTab === "employeePayout" && (
+            <>
+              <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 px-4 py-3">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-amber-800">待付款</p>
+                  <p className="mt-1 text-lg font-bold tabular-nums text-stone-900">
+                    {financeEmployeePayoutCounts.pending}{" "}
+                    <span className="text-sm font-semibold text-stone-500">筆</span>
+                  </p>
+                  <p className="mt-0.5 text-xs tabular-nums text-stone-600">
+                    合計 {formatAmount(String(Math.round(financeEmployeePayoutCounts.pendingAmount)))}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/50 px-4 py-3">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-800">已付款</p>
+                  <p className="mt-1 text-lg font-bold tabular-nums text-stone-900">
+                    {financeEmployeePayoutCounts.paid}{" "}
+                    <span className="text-sm font-semibold text-stone-500">筆</span>
+                  </p>
+                  <p className="mt-0.5 text-xs tabular-nums text-stone-600">
+                    合計 {formatAmount(String(Math.round(financeEmployeePayoutCounts.paidAmount)))}
+                  </p>
+                </div>
+              </div>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex rounded-lg border border-stone-200 bg-white/90 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setFinanceEmployeePayoutTab("pending")}
+                    className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
+                      financeEmployeePayoutTab === "pending"
+                        ? "bg-amber-500 text-slate-900"
+                        : "text-stone-500 hover:text-stone-900"
+                    }`}
+                  >
+                    待付款
+                    <span className="ml-1 text-[10px] opacity-80">{financeEmployeePayoutCounts.pending}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFinanceEmployeePayoutTab("paid")}
+                    className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
+                      financeEmployeePayoutTab === "paid"
+                        ? "bg-emerald-600 text-white"
+                        : "text-stone-500 hover:text-stone-900"
+                    }`}
+                  >
+                    已付款
+                    <span className="ml-1 text-[10px] opacity-80">{financeEmployeePayoutCounts.paid}</span>
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={financeEmployeePayoutSearch}
+                  onChange={(e) => setFinanceEmployeePayoutSearch(e.target.value)}
+                  placeholder="搜尋專案、領取人、分潤類型…"
+                  className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
+                />
+              </div>
+              {financePayoutEditError && (
+                <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{financePayoutEditError}</p>
+              )}
+              <p className="mb-2 text-[11px] text-stone-500">
+                僅列出<strong className="text-stone-600">廠商已付款</strong>的分潤列。勾選「已付款」會寫入今日為分潤匯款日期，該員工在分潤表歸為「已分潤」；取消勾選可退回待付款。
+              </p>
+              <div className="overflow-x-auto rounded-xl border border-stone-200/90">
+                {searchedFinanceEmployeePayout.length === 0 ? (
+                  <p className="px-4 py-10 text-center text-sm text-stone-500">
+                    {financeEmployeePayoutTab === "pending"
+                      ? "目前沒有待付員工分潤（請先在「依專案」填寫廠商付款日期）"
+                      : "尚無已付款紀錄"}
+                  </p>
+                ) : (
+                  <table className="min-w-full divide-y divide-stone-200">
+                    <thead className="bg-stone-100">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
+                          已付款
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
+                          專案
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
+                          領取人
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
+                          分潤類型
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-stone-600">
+                          分潤金額
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
+                          廠商付款日
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
+                          分潤匯款日
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-200 bg-white">
+                      {searchedFinanceEmployeePayout.map((row) => {
+                        const id = String(row.id ?? "").trim();
+                        const saving = id !== "" && financePayoutSavingIds.includes(id);
+                        const isPaid = String(row.分潤匯款日期 ?? "").trim() !== "";
+                        const pid = String(row.專案ID ?? "").trim();
+                        const pname = String(row.專案名稱 ?? "").trim();
+                        return (
+                          <tr key={id || `${pid}-${row.領取人}-${row.分潤類型}`} className="hover:bg-amber-50/40">
+                            <td className="px-3 py-3 align-middle">
+                              <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-stone-700">
+                                <input
+                                  type="checkbox"
+                                  checked={isPaid}
+                                  disabled={saving || !id}
+                                  onChange={(e) => {
+                                    void persistEmployeePayoutPaid(row, e.target.checked);
+                                  }}
+                                  className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400 disabled:opacity-50"
+                                />
+                                {saving ? "儲存中…" : isPaid ? "已付" : "待付"}
+                              </label>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-stone-800">
+                              <div className="font-medium text-stone-900">{pid || "—"}</div>
+                              {pname ? (
+                                <div className="max-w-[200px] truncate text-xs text-stone-500" title={pname}>
+                                  {pname}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-stone-900">
+                              {row.領取人 ?? "—"}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-600">{row.分潤類型 ?? "—"}</td>
+                            <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold tabular-nums text-stone-900">
+                              {formatAmount(row.分潤金額)}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-stone-600">
+                              {row.廠商付款日期 ?? "—"}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-stone-600">
+                              {row.分潤匯款日期 ?? "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          )}
+
           {financeSubTab === "byProject" && (
             <>
               <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
@@ -7455,7 +7709,7 @@ export default function DashboardPage() {
               )}
               {finance.length > 0 && (
                 <p className="mb-2 text-[11px] text-stone-500">
-                  僅「廠商付款日期」「員工分潤日期」可編輯（日曆選擇）；離開欄位時才會儲存。若儲存失敗，請確認 Supabase 已套用 migration「034_財務_廠商員工欄位改為日期」。
+                  「廠商付款日期」同步至分潤表；員工分潤請至「員工分潤付款」逐筆勾選。此處「員工分潤日期」於該專案全員付清後自動帶入。
                 </p>
               )}
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">

@@ -275,6 +275,41 @@ export async function syncPayoutForProject(
 /**
  * 依目前系統設定，將大總表所有專案重新同步至分潤表（儲存分潤規則／成數後呼叫）
  */
+export function todayDateStringLocal(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** 財務逐列勾選：更新單筆分潤匯款日期，並回寫專案財務「員工分潤日期」 */
+export async function updatePayoutRemitDate(
+  id: string,
+  分潤匯款日期: string | null
+): Promise<PayoutRow | null> {
+  const rowId = String(id ?? "").trim();
+  if (!rowId) return null;
+  const supabase = getSupabase();
+  const remit = 分潤匯款日期 == null || String(分潤匯款日期).trim() === "" ? null : String(分潤匯款日期).trim();
+
+  const { data, error } = await supabase
+    .from("分潤表")
+    .update({ 分潤匯款日期: remit })
+    .eq("id", rowId)
+    .select("*")
+    .maybeSingle();
+  if (error || !data) return null;
+
+  const row = rowToPayout(data as Record<string, unknown>);
+  const pid = String(row.專案ID ?? "").trim();
+  if (pid) {
+    const { syncFinanceEmployeeDateFromPayoutRows } = await import("@/lib/db/finance");
+    await syncFinanceEmployeeDateFromPayoutRows(pid);
+  }
+  return row;
+}
+
 export async function syncAllPayoutsFromMaster(): Promise<void> {
   const { master_payout_defaults, payout_dedupe_rules } = await getSystemConfig();
   const masters = await getMasterList();
