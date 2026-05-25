@@ -7680,11 +7680,16 @@ export default function DashboardPage() {
                                 {saving ? "儲存中…" : isPaid ? "已付" : "待付"}
                               </label>
                             </td>
-                            <td className="px-4 py-3 text-sm text-stone-800">
-                              <div className="font-medium text-stone-900">{pid || "—"}</div>
-                              {pname ? (
-                                <div className="max-w-[200px] truncate text-xs text-stone-500" title={pname}>
-                                  {pname}
+                            <td className="px-4 py-3 text-sm">
+                              <div
+                                className="max-w-xs truncate font-semibold text-stone-900"
+                                title={pname || pid || undefined}
+                              >
+                                {pname || pid || "—"}
+                              </div>
+                              {pname && pid ? (
+                                <div className="max-w-xs truncate text-[11px] text-stone-400" title={pid}>
+                                  {pid}
                                 </div>
                               ) : null}
                             </td>
