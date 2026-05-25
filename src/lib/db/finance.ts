@@ -229,10 +229,10 @@ export async function updateFinanceBy專案ID(專案ID: string, row: FinanceUpda
     ? mapFinanceDbRow(prevRaw as Record<string, unknown>, undefined)
     : undefined;
 
-  const payload = {
-    廠商付款日期: trimOrNull(row.廠商付款日期),
-    員工分潤日期: trimOrNull(row.員工分潤日期),
-  };
+  const payload: { 廠商付款日期?: string | null; 員工分潤日期?: string | null } = {};
+  if (row.廠商付款日期 !== undefined) payload.廠商付款日期 = trimOrNull(row.廠商付款日期);
+  if (row.員工分潤日期 !== undefined) payload.員工分潤日期 = trimOrNull(row.員工分潤日期);
+  if (Object.keys(payload).length === 0) throw new Error("請提供至少一個可更新欄位");
 
   const { data, error } = await supabase.from("財務").update(payload).eq("專案ID", pid).select("*").maybeSingle();
   if (error) throw error;
@@ -241,6 +241,109 @@ export async function updateFinanceBy專案ID(專案ID: string, row: FinanceUpda
   await syncPayoutRowsFromFinanceDates(pid, updated.廠商付款日期, updated.員工分潤日期, prevFinance);
   await syncFinanceEmployeeDateFromPayoutRows(pid);
   return updated;
+}
+
+/** 取某專案所有已存檔發票中最晚的廠商付款日（無則 null） */
+function resolveVendorPaymentDateFromInvoicesForProject(專案ID: string, invoices: InvoiceRow[]): string | null {
+  const dates = invoices
+    .filter((inv) => String(inv.專案ID ?? "").trim() === 專案ID)
+    .map((inv) => normalizeDateOrNull(inv.廠商付款日期))
+    .filter(Boolean) as string[];
+  if (dates.length === 0) return null;
+  return [...dates].sort().reverse()[0] ?? null;
+}
+
+async function buildMasterByProjectIdMap(): Promise<Map<string, MasterRow>> {
+  const masters = await getMasterList();
+  const map = new Map<string, MasterRow>();
+  for (const m of masters) {
+    const pid = String(m.專案ID ?? "").trim();
+    if (pid) map.set(pid, m);
+  }
+  return map;
+}
+
+/**
+ * 將發票清冊「廠商付款日期」彙整至財務依專案，並同步分潤表。
+ * 發票須已綁定專案ID；若財務列不存在會先從大總表建立。
+ * 長期案不自動同步（發票僅作收款紀錄，由財務在依專案手動填寫）。
+ */
+export async function syncFinanceVendorDateFromInvoicesForProject(
+  專案ID: string,
+  invoicesCache?: InvoiceRow[],
+  masterByProjectId?: Map<string, MasterRow>
+): Promise<boolean> {
+  const pid = String(專案ID ?? "").trim();
+  if (!pid) return false;
+
+  const masterMap = masterByProjectId ?? (await buildMasterByProjectIdMap());
+  if (Boolean(masterMap.get(pid)?.長期案)) return false;
+
+  const invoices = invoicesCache ?? (await getInvoices());
+  const nextVendorDate = resolveVendorPaymentDateFromInvoicesForProject(pid, invoices);
+
+  const supabase = getSupabase();
+  let { data: finRow, error: finErr } = await supabase.from("財務").select("*").eq("專案ID", pid).maybeSingle();
+  if (finErr && finErr.code !== "42P01") throw finErr;
+
+  if (!finRow) {
+    const masters = await getMasterList();
+    const master = masters.find((m) => String(m.專案ID ?? "").trim() === pid);
+    if (!master) return false;
+    await syncFinanceForProject(master);
+    ({ data: finRow, error: finErr } = await supabase.from("財務").select("*").eq("專案ID", pid).maybeSingle());
+    if (finErr && finErr.code !== "42P01") throw finErr;
+    if (!finRow) return false;
+  }
+
+  const current = mapFinanceDbRow(finRow as Record<string, unknown>, undefined);
+  const curVendor = normalizeDateOrNull(current.廠商付款日期);
+  if (curVendor === nextVendorDate) return false;
+
+  await updateFinanceBy專案ID(pid, {
+    廠商付款日期: nextVendorDate,
+    員工分潤日期: current.員工分潤日期 ?? null,
+  });
+  return true;
+}
+
+/** 對所有有綁專案的發票，依專案回寫財務廠商付款日（既有資料 backfill 用；略過長期案） */
+export async function syncAllFinanceVendorDatesFromInvoices(): Promise<{
+  updated: number;
+  scanned: number;
+  skippedLongTerm: number;
+}> {
+  const invoices = await getInvoices();
+  const masterByProjectId = await buildMasterByProjectIdMap();
+  const pids = new Set<string>();
+  for (const inv of invoices) {
+    const pid = String(inv.專案ID ?? "").trim();
+    if (pid) pids.add(pid);
+  }
+  let updated = 0;
+  let skippedLongTerm = 0;
+  for (const pid of pids) {
+    if (Boolean(masterByProjectId.get(pid)?.長期案)) {
+      skippedLongTerm += 1;
+      continue;
+    }
+    if (await syncFinanceVendorDateFromInvoicesForProject(pid, invoices, masterByProjectId)) updated += 1;
+  }
+  return { updated, scanned: pids.size, skippedLongTerm };
+}
+
+async function syncFinanceVendorDatesForInvoiceProjectIds(projectIds: Iterable<string>): Promise<void> {
+  const pids = [...new Set([...projectIds].map((id) => String(id ?? "").trim()).filter(Boolean))];
+  if (pids.length === 0) return;
+  const invoices = await getInvoices();
+  const masterByProjectId = await buildMasterByProjectIdMap();
+  for (const pid of pids) {
+    try {
+      await syncFinanceVendorDateFromInvoicesForProject(pid, invoices, masterByProjectId);
+    } catch {
+      /* best effort */
+    }
+  }
 }
 
 /** 發票清冊：固定依「發票號碼」排序（不依建立／更新時間），空白號碼排最後 */
@@ -303,7 +406,11 @@ export async function createInvoicesBatch(rows: InvoiceInsertInput[]): Promise<I
 
   const { data, error } = await getSupabase().from("發票").insert(payload).select("*");
   if (error) throw error;
-  return (data ?? []).map((r: Record<string, unknown>) => mapInvoiceRecord(r));
+  const created = (data ?? []).map((r: Record<string, unknown>) => mapInvoiceRecord(r));
+  await syncFinanceVendorDatesForInvoiceProjectIds(
+    created.map((r) => String(r.專案ID ?? "").trim()).filter(Boolean)
+  );
+  return created;
 }
 
 /**
@@ -315,6 +422,12 @@ export async function updateInvoiceById(id: string, row: InvoiceInsertInput): Pr
 
   const 發票號碼 = trimOrNull(row.發票號碼 ?? undefined);
   if (發票號碼 == null) throw new Error("發票號碼不可空白");
+
+  const { data: prevRaw } = await getSupabase().from("發票").select('"專案ID"').eq("id", pid).maybeSingle();
+  const prevProjectId =
+    prevRaw && typeof prevRaw === "object" && "專案ID" in prevRaw
+      ? String((prevRaw as { 專案ID?: unknown }).專案ID ?? "").trim()
+      : "";
 
   const payload = {
     專案ID: trimOrNull(row.專案ID ?? undefined),
@@ -330,18 +443,27 @@ export async function updateInvoiceById(id: string, row: InvoiceInsertInput): Pr
   const { data, error } = await getSupabase().from("發票").update(payload).eq("id", pid).select("*").maybeSingle();
   if (error) throw error;
   if (!data) throw new Error("找不到該發票或更新失敗");
-  return mapInvoiceRecord(data as Record<string, unknown>);
+  const updated = mapInvoiceRecord(data as Record<string, unknown>);
+  const nextProjectId = String(updated.專案ID ?? "").trim();
+  await syncFinanceVendorDatesForInvoiceProjectIds([prevProjectId, nextProjectId].filter(Boolean));
+  return updated;
 }
 
 export async function deleteInvoicesByIds(ids: string[]): Promise<number> {
   const cleanIds = [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
   if (cleanIds.length === 0) throw new Error("請至少選擇一筆發票");
 
+  const { data: beforeDelete } = await getSupabase().from("發票").select('"專案ID"').in("id", cleanIds);
+  const affectedProjectIds = (beforeDelete ?? [])
+    .map((r) => String((r as { 專案ID?: unknown }).專案ID ?? "").trim())
+    .filter(Boolean);
+
   const { error, count } = await getSupabase()
     .from("發票")
     .delete({ count: "exact" })
     .in("id", cleanIds);
   if (error) throw error;
+  await syncFinanceVendorDatesForInvoiceProjectIds(affectedProjectIds);
   return count ?? cleanIds.length;
 }
 

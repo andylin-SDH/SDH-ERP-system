@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getFinance } from "@/modules/finance";
 import { requireAuth } from "@/lib/auth/api";
-import { updateFinanceBy專案ID, type FinanceUpdateFields } from "@/lib/db/finance";
+import { updateFinanceBy專案ID, syncAllFinanceVendorDatesFromInvoices, type FinanceUpdateFields } from "@/lib/db/finance";
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
@@ -40,6 +40,24 @@ export async function PATCH(request: NextRequest) {
     console.error("PATCH /api/finance error:", error);
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "更新財務失敗" },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * POST：從發票清冊同步「廠商付款日期」至依專案財務，並連動分潤表（backfill／進入財務頁時用）
+ */
+export async function POST(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if (auth instanceof NextResponse) return auth;
+  try {
+    const result = await syncAllFinanceVendorDatesFromInvoices();
+    return NextResponse.json({ ok: true, ...result });
+  } catch (error) {
+    console.error("POST /api/finance sync-vendor-from-invoices error:", error);
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "同步廠商付款日失敗" },
       { status: 500 }
     );
   }

@@ -1261,6 +1261,7 @@ export default function DashboardPage() {
   const financeRef = useRef<FinanceRow[]>([]);
   const financeSaveInflightRef = useRef<Set<string>>(new Set());
   const financeSavePendingRef = useRef<Set<string>>(new Set());
+  const financeVendorSyncDoneRef = useRef(false);
   const [payoutList, setPayoutList] = useState<PayoutRow[]>([]);
   /** Dashboard 分頁搜尋關鍵字（各區塊獨立） */
   const [masterSearch, setMasterSearch] = useState("");
@@ -3174,7 +3175,7 @@ export default function DashboardPage() {
           );
         }
         setInvoiceDirtyIds((prev) => prev.filter((dirtyId) => dirtyId !== id));
-        await refreshDashboardData(["finance"]);
+        await refreshDashboardData(["finance", "payout"]);
       } catch (e) {
         setInvoiceEditError(e instanceof Error ? e.message : "儲存失敗");
       } finally {
@@ -3190,6 +3191,23 @@ export default function DashboardPage() {
     },
     [refreshDashboardData]
   );
+
+  /** 進入財務：從發票清冊 backfill 廠商付款日至依專案／分潤表 */
+  useEffect(() => {
+    if (activeSection !== "finance") return;
+    if (financeVendorSyncDoneRef.current) return;
+    financeVendorSyncDoneRef.current = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/finance", { method: "POST" });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string };
+        if (!res.ok || data.ok === false) return;
+        await refreshDashboardData(["finance", "payout"]);
+      } catch {
+        /* 同步失敗不阻擋瀏覽 */
+      }
+    })();
+  }, [activeSection, refreshDashboardData]);
 
   const deleteInvoicesByIdList = useCallback(
     async (ids: string[]) => {
@@ -3219,7 +3237,7 @@ export default function DashboardPage() {
         setInvoices((prev) => sortInvoicesByInvoiceNumber(prev.filter((inv) => !inv.id || !deletedSet.has(inv.id))));
         setSelectedInvoiceIds((prev) => prev.filter((id) => !deletedSet.has(id)));
         setInvoiceDirtyIds((prev) => prev.filter((id) => !deletedSet.has(id)));
-        await refreshDashboardData(["finance"]);
+        await refreshDashboardData(["finance", "payout"]);
       } catch (e) {
         setInvoiceEditError(e instanceof Error ? e.message : "刪除失敗");
       } finally {
@@ -7603,13 +7621,13 @@ export default function DashboardPage() {
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{financePayoutEditError}</p>
               )}
               <p className="mb-2 text-[11px] text-stone-500">
-                僅列出<strong className="text-stone-600">廠商已付款</strong>的分潤列。勾選「已付款」會寫入今日為分潤匯款日期，該員工在分潤表歸為「已分潤」；取消勾選可退回待付款。
+                僅列出<strong className="text-stone-600">廠商已付款</strong>的分潤列。一般專案：發票入帳後自動帶入廠商付款日；<strong className="text-stone-600">長期案</strong>請至「依專案」手動填寫後才會出現。勾選「已付款」寫入今日分潤匯款日；取消勾選可退回待付款。
               </p>
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
                 {searchedFinanceEmployeePayout.length === 0 ? (
                   <p className="px-4 py-10 text-center text-sm text-stone-500">
                     {financeEmployeePayoutTab === "pending"
-                      ? "目前沒有待付員工分潤（請先在「依專案」填寫廠商付款日期）"
+                      ? "目前沒有待付員工分潤（一般專案請確認發票已入帳且綁定專案；長期案請至「依專案」手動填寫廠商付款日期）"
                       : "尚無已付款紀錄"}
                   </p>
                 ) : (
@@ -7709,7 +7727,7 @@ export default function DashboardPage() {
               )}
               {finance.length > 0 && (
                 <p className="mb-2 text-[11px] text-stone-500">
-                  「廠商付款日期」同步至分潤表；員工分潤請至「員工分潤付款」逐筆勾選。此處「員工分潤日期」於該專案全員付清後自動帶入。
+                  一般專案「廠商付款日期」可由發票清冊已入帳發票自動帶入並同步至分潤表；<strong className="text-stone-600">長期案</strong>發票僅作收款紀錄，請在此手動填寫以開啟員工分潤。員工分潤請至「員工分潤付款」逐筆勾選；「員工分潤日期」於該專案全員付清後自動帶入。
                 </p>
               )}
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
