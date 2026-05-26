@@ -32,6 +32,7 @@ import {
   type OverviewKpiKey,
 } from "@/config/overview-kpi";
 import { SocialLinkIcons } from "@/components/SocialLinkIcons";
+import { ErpLoginPanel, fetchSessionWithRetry } from "@/components/ErpLoginPanel";
 import {
   PartnersMasterDetail,
   partnerGradeKey,
@@ -1078,6 +1079,7 @@ export default function DashboardPage() {
   const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
   const [changePasswordMessage, setChangePasswordMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [needsAuth, setNeedsAuth] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedUserForVisibility, setSelectedUserForVisibility] = useState<User | null>(null);
   const [visibilityTables, setVisibilityTables] = useState<string[]>([]);
@@ -1262,6 +1264,8 @@ export default function DashboardPage() {
   const financeSaveInflightRef = useRef<Set<string>>(new Set());
   const financeSavePendingRef = useRef<Set<string>>(new Set());
   const financeVendorSyncDoneRef = useRef(false);
+  const pendingDeepLinkRef = useRef<{ project?: string; task?: string } | null>(null);
+  const sessionBootstrappedRef = useRef(false);
   const [payoutList, setPayoutList] = useState<PayoutRow[]>([]);
   /** Dashboard 分頁搜尋關鍵字（各區塊獨立） */
   const [masterSearch, setMasterSearch] = useState("");
@@ -3192,6 +3196,54 @@ export default function DashboardPage() {
     [refreshDashboardData]
   );
 
+  /** 郵件深連結：?project=專案ID&task=任務ID → 開啟專案詳情與任務 */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const project = sp.get("project")?.trim();
+    const task = sp.get("task")?.trim();
+    if (project || task) {
+      pendingDeepLinkRef.current = { project: project || undefined, task: task || undefined };
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!me || loading) return;
+    const pending = pendingDeepLinkRef.current;
+    if (!pending) return;
+
+    const projectId = pending.project?.trim();
+    const taskId = pending.task?.trim();
+    let opened = false;
+
+    if (projectId && masterList.length > 0) {
+      const master = masterList.find((m) => String(m.專案ID ?? "").trim() === projectId);
+      if (master) {
+        setActiveSection("master");
+        setSelectedMaster(master);
+        opened = true;
+      }
+    }
+
+    if (taskId && tasks.length > 0) {
+      const task = tasks.find((t) => String(t.任務ID ?? "").trim() === taskId);
+      if (task) {
+        setSelectedTask(task);
+        opened = true;
+        if (!projectId) setActiveSection("tasks");
+      }
+    }
+
+    const masterReady = !projectId || masterList.some((m) => String(m.專案ID ?? "").trim() === projectId);
+    const taskReady = !taskId || tasks.some((t) => String(t.任務ID ?? "").trim() === taskId);
+    if (!masterReady || !taskReady) return;
+
+    pendingDeepLinkRef.current = null;
+    if (opened) {
+      window.history.replaceState({}, "", "/dashboard");
+    }
+  }, [me, loading, masterList, tasks]);
+
   /** 進入財務：從發票清冊 backfill 廠商付款日至依專案／分潤表 */
   useEffect(() => {
     if (activeSection !== "finance") return;
@@ -3419,30 +3471,66 @@ export default function DashboardPage() {
     void fetchPartnerFormOptions();
   }, [showCreatePartner, showEditPartner, refreshDashboardData, fetchPartnerFormOptions]);
 
-  useEffect(() => {
-    fetch("/api/auth/session", { credentials: "include", cache: "no-store" })
-      .then(safeResJson)
-      .then(async (session) => {
-        const sess = session as { ok?: boolean; user?: User };
-        if (!sess.ok || !sess.user) {
-          setError("請先登入");
-          setLoading(false);
-          return;
-        }
-        if (String(sess.user.role ?? "").trim() === "KOL") {
-          window.location.replace("/kol");
-          return;
-        }
-        setMe(sess.user);
+  const bootstrapDashboardSession = useCallback(async (): Promise<boolean> => {
+    try {
+      const sess = await fetchSessionWithRetry();
+      if (!sess.ok || !sess.user) {
+        setNeedsAuth(true);
         setLoading(false);
-        await refreshDashboardData(["users", "master", "tasks", "partners", "myVisibility", "systemConfig"]);
-        void refreshDashboardData(["visibilityRules", "invoices", "finance", "payout"]);
-      })
-      .catch(() => {
-        setError("無法驗證登入狀態，請重新登入");
-        setLoading(false);
-      });
+        return false;
+      }
+      const user = sess.user as unknown as User;
+      if (String(user.role ?? "").trim() === "KOL") {
+        window.location.replace("/kol");
+        return true;
+      }
+      setMe(user);
+      setNeedsAuth(false);
+      setError(null);
+      setLoading(false);
+      await refreshDashboardData(["users", "master", "tasks", "partners", "myVisibility", "systemConfig"]);
+      void refreshDashboardData(["visibilityRules", "invoices", "finance", "payout"]);
+      return true;
+    } catch {
+      setError("無法驗證登入狀態，請稍後再試");
+      setLoading(false);
+      return false;
+    }
   }, [refreshDashboardData]);
+
+  useEffect(() => {
+    if (sessionBootstrappedRef.current) return;
+    sessionBootstrappedRef.current = true;
+    void bootstrapDashboardSession();
+  }, [bootstrapDashboardSession]);
+
+  /** 若已在其他分頁登入，回到此分頁時自動重試 session（免重登） */
+  useEffect(() => {
+    if (!needsAuth || me) return;
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      void bootstrapDashboardSession();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [needsAuth, me, bootstrapDashboardSession]);
+
+  const handleDashboardLoginSuccess = useCallback(
+    async (user: Record<string, unknown>) => {
+      if (String(user.role ?? "").trim() === "KOL") {
+        window.location.replace("/kol");
+        return;
+      }
+      setLoading(true);
+      setNeedsAuth(false);
+      setMe(user as unknown as User);
+      setError(null);
+      setLoading(false);
+      await refreshDashboardData(["users", "master", "tasks", "partners", "myVisibility", "systemConfig"]);
+      void refreshDashboardData(["visibilityRules", "invoices", "finance", "payout"]);
+    },
+    [refreshDashboardData]
+  );
 
   useEffect(() => {
     try {
@@ -3558,16 +3646,36 @@ export default function DashboardPage() {
     );
   }
 
+  if (needsAuth && !me) {
+    const sp = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    const hasTaskLink = Boolean(sp?.get("project") || sp?.get("task"));
+    return (
+      <ErpLoginPanel
+        subtitle={
+          hasTaskLink
+            ? "請登入以查看任務；若您已在其他分頁登入，完成登入後將直接開啟該專案（網址已保留）"
+            : "請登入以使用 Dashboard"
+        }
+        onSuccess={handleDashboardLoginSuccess}
+      />
+    );
+  }
+
   if (error && !me) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-[#faf8f5] p-8">
         <p className="text-lg font-semibold text-amber-800">{error}</p>
-        <Link
-          href="/"
+        <button
+          type="button"
+          onClick={() => {
+            setError(null);
+            setLoading(true);
+            void bootstrapDashboardSession();
+          }}
           className="mt-4 inline-block rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-slate-900 transition hover:bg-amber-400"
         >
-          前往登入
-        </Link>
+          重試
+        </button>
       </div>
     );
   }

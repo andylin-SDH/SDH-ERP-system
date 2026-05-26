@@ -4,6 +4,7 @@
  */
 
 import { Resend } from "resend";
+import { buildDashboardTaskDeepLink } from "@/lib/deep-link";
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? "SDH ERP <onboarding@resend.dev>";
@@ -21,6 +22,7 @@ export async function sendTaskAssignedEmail(params: {
   taskName: string;
   projectId: string;
   projectName?: string;
+  taskId?: string;
   creator?: string;
   note?: string;
 }): Promise<{ ok: boolean; error?: string }> {
@@ -29,11 +31,8 @@ export async function sendTaskAssignedEmail(params: {
     return { ok: false, error: "RESEND_API_KEY 未設定" };
   }
   try {
-    const { to, taskName, projectId, projectName, creator, note } = params;
-    const appUrl =
-      process.env.NEXT_PUBLIC_APP_URL ??
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
-    const loginUrl = `${appUrl}/`;
+    const { to, taskName, projectId, projectName, taskId, creator, note } = params;
+    const loginUrl = buildDashboardTaskDeepLink({ projectId, taskId });
     const taskTitle = taskName || "未命名任務";
     const trimmedCreator = String(creator ?? "").trim();
     const trimmedNote = String(note ?? "").trim();
@@ -100,7 +99,7 @@ export async function sendTaskAssignedEmail(params: {
               <table width="100%" cellpadding="0" cellspacing="0">
                 <tr>
                   <td align="center">
-                    <a href="${loginUrl}" style="display:inline-block;background:#f59e0b;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:8px;box-shadow:0 2px 4px rgba(245,158,11,0.3);">登入系統查看</a>
+                    <a href="${loginUrl}" style="display:inline-block;background:#f59e0b;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:8px;box-shadow:0 2px 4px rgba(245,158,11,0.3);">查看任務</a>
                   </td>
                 </tr>
               </table>
@@ -136,6 +135,7 @@ export async function sendTaskDueSoonEmail(params: {
   taskName: string;
   projectId: string;
   projectName?: string;
+  taskId?: string;
   creator?: string;
   note?: string;
   dueDate: string;
@@ -147,11 +147,8 @@ export async function sendTaskDueSoonEmail(params: {
     return { ok: false, error: "RESEND_API_KEY 未設定" };
   }
   try {
-    const { to, taskName, projectId, projectName, creator, note, dueDate, isOverdue } = params;
-    const appUrl =
-      process.env.NEXT_PUBLIC_APP_URL ??
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
-    const loginUrl = `${appUrl}/`;
+    const { to, taskName, projectId, projectName, taskId, creator, note, dueDate, isOverdue } = params;
+    const loginUrl = buildDashboardTaskDeepLink({ projectId, taskId });
     const taskTitle = taskName || "未命名任務";
     const trimmedCreator = String(creator ?? "").trim();
     const trimmedNote = String(note ?? "").trim();
@@ -202,7 +199,7 @@ export async function sendTaskDueSoonEmail(params: {
               </td></tr>
             </table>
             <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
-              <a href="${loginUrl}" style="display:inline-block;background:#d97706;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:8px;">登入系統查看</a>
+              <a href="${loginUrl}" style="display:inline-block;background:#d97706;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:8px;">查看任務</a>
             </td></tr></table>
           </td>
         </tr>

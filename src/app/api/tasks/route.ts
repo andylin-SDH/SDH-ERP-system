@@ -66,6 +66,7 @@ export async function POST(request: NextRequest) {
             taskName: 任務名稱,
             projectId: 專案ID,
             projectName: 專案名稱 || undefined,
+            taskId: task.任務ID,
             creator: 建立者 || undefined,
             note: body?.備註 ?? undefined,
           }).catch((e) => console.error("POST /api/tasks 寄送通知失敗", e));
@@ -121,6 +122,7 @@ export async function PATCH(request: NextRequest) {
               taskName: task.任務 ?? "",
               projectId: task.專案ID ?? "",
               projectName: task.專案名稱 ?? undefined,
+              taskId: task.任務ID,
               creator: task.建立者 ?? undefined,
               note: task.備註 ?? undefined,
             }).catch((e) => console.error("PATCH /api/tasks 寄送通知失敗", e));

@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
       taskName: task.任務 ?? "",
       projectId: task.專案ID ?? "",
       projectName: task.專案名稱,
+      taskId: 任務ID,
       creator: task.建立者,
       note: task.備註,
     });

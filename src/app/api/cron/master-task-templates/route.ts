@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
       }
 
       try {
-        await createTask({
+        const createdTask = await createTask({
           專案ID: tpl.專案ID,
           專案名稱: master.專案名稱 ?? undefined,
           任務名稱: tpl.任務名稱,
@@ -94,6 +94,7 @@ export async function GET(request: NextRequest) {
               taskName: tpl.任務名稱,
               projectId: tpl.專案ID,
               projectName: master.專案名稱 ?? undefined,
+              taskId: createdTask.任務ID,
               creator: "系統排程",
               note: tpl.備註 ?? undefined,
             });
