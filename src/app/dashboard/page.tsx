@@ -695,7 +695,7 @@ function generateProjectId(): string {
 const OVERVIEW_SCOPE_STORAGE_KEY = "sdh-dashboard-overview-scope";
 
 /** 大總表上與「這個人與專案有關」可能對得上的欄位（姓名／Email 需與 Users 一致） */
-const MASTER_RELATED_FIELD_KEYS = ["專案BDPM", "專案引薦人", "專案開發人", "專案管理員", "執行管理員", "KOL名稱", "經紀人"] as const;
+const MASTER_RELATED_FIELD_KEYS = ["專案BDPM", "專案引薦人", "專案開發人", "專案管理員", "執行管理員", "KOL名稱", "經紀人", "主管", "KOL開發者"] as const;
 
 function fieldMatchesUser(val: string | null | undefined, userName: string, userEmail: string): boolean {
   const v = String(val ?? "").trim();
@@ -719,10 +719,12 @@ function isMasterRowRelatedToUser(
 
   if (isPayoutModeB(String(row.專案類型 ?? ""))) {
     if (fieldMatchesUser(row.經紀人, userName, userEmail)) return true;
-    const p = partnerByKolName.get(String(row.KOL名稱 ?? "").trim());
-    if (p) {
-      for (const key of ["主管", "KOL開發者"] as const) {
-        if (fieldMatchesUser(p[key], userName, userEmail)) return true;
+    for (const key of ["主管", "KOL開發者"] as const) {
+      const cell = row[key];
+      if (fieldMatchesUser(cell, userName, userEmail)) return true;
+      if (!String(cell ?? "").trim()) {
+        const p = partnerByKolName.get(String(row.KOL名稱 ?? "").trim());
+        if (fieldMatchesUser(p?.[key], userName, userEmail)) return true;
       }
     }
   } else {
@@ -799,6 +801,8 @@ function masterTableCellText(
   }
   if (colKey === "主管" || colKey === "KOL開發者") {
     if (!modeB) return "";
+    const fromMaster = String((row as MasterRow)[colKey as keyof MasterRow] ?? "").trim();
+    if (fromMaster) return fromMaster;
     const p = partnerByKolName.get(String(row.KOL名稱 ?? "").trim());
     return String(p?.[colKey as keyof PartnerRow] ?? "").trim();
   }
@@ -987,6 +991,8 @@ export default function DashboardPage() {
     KOL費用未稅: "",
     KOL名稱: "",
     經紀人: "",
+    主管: "",
+    KOL開發者: "",
     專案費用類型: "",
     廠商名稱: "",
     專案資料夾: "",
@@ -1043,6 +1049,8 @@ export default function DashboardPage() {
     專案費用類型: "",
     KOL名稱: "",
     經紀人: "",
+    主管: "",
+    KOL開發者: "",
     廠商名稱: "",
     專案BDPM: "",
     專案BDPM分潤成數: "",
@@ -2877,6 +2885,8 @@ export default function DashboardPage() {
       專案費用類型: selectedMaster.專案費用類型 ?? "",
       KOL名稱: selectedMaster.KOL名稱 ?? "",
       經紀人: selectedMaster.經紀人 ?? "",
+      主管: selectedMaster.主管 ?? "",
+      KOL開發者: selectedMaster.KOL開發者 ?? "",
       廠商名稱: selectedMaster.廠商名稱 ?? "",
       專案BDPM: selectedMaster.專案BDPM ?? "",
       專案BDPM分潤成數: selectedMaster.專案BDPM分潤成數 ?? "",
@@ -4408,6 +4418,8 @@ export default function DashboardPage() {
                       KOL費用未稅: "",
                       KOL名稱: "",
                       經紀人: "",
+                      主管: "",
+                      KOL開發者: "",
                       專案費用類型: "",
                       廠商名稱: "",
                       專案資料夾: "",
@@ -9399,7 +9411,15 @@ export default function DashboardPage() {
                     <SearchableSelectField
                       label="KOL名稱"
                       value={createForm.KOL名稱}
-                      onChange={(v) => setCreateForm((f) => ({ ...f, KOL名稱: v }))}
+                      onChange={(v) => {
+                        const p = partnerByKolName.get(v.trim());
+                        setCreateForm((f) => ({
+                          ...f,
+                          KOL名稱: v,
+                          主管: f.主管.trim() || p?.主管 || "",
+                          KOL開發者: f.KOL開發者.trim() || p?.KOL開發者 || "",
+                        }));
+                      }}
                       options={kolNameOptionsFromDb}
                       searchPlaceholder="搜尋 KOL…"
                       emptyHint="尚無合作夥伴資料時請先至「合作夥伴」新增 KOL"
@@ -9419,8 +9439,18 @@ export default function DashboardPage() {
                           onChange={(v) => setCreateForm((f) => ({ ...f, 經紀人: v }))}
                           options={[...new Set([...userNames, createForm.經紀人].filter(Boolean))]}
                         />
-                        <Field label="主管（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === createForm.KOL名稱)?.主管 ?? "—"} />
-                        <Field label="KOL開發者（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === createForm.KOL名稱)?.KOL開發者 ?? "—"} />
+                        <SelectField
+                          label="主管"
+                          value={createForm.主管}
+                          onChange={(v) => setCreateForm((f) => ({ ...f, 主管: v }))}
+                          options={[...new Set([...userNames, createForm.主管].filter(Boolean))]}
+                        />
+                        <SelectField
+                          label="KOL引薦人"
+                          value={createForm.KOL開發者}
+                          onChange={(v) => setCreateForm((f) => ({ ...f, KOL開發者: v }))}
+                          options={[...new Set([...userNames, createForm.KOL開發者].filter(Boolean))]}
+                        />
                       </>
                     ) : (
                       <>
@@ -9798,6 +9828,8 @@ export default function DashboardPage() {
                       專案費用類型: selectedMaster.專案費用類型 ?? "",
                       KOL名稱: selectedMaster.KOL名稱 ?? "",
                       經紀人: selectedMaster.經紀人 ?? "",
+                      主管: selectedMaster.主管 ?? "",
+                      KOL開發者: selectedMaster.KOL開發者 ?? "",
                       廠商名稱: selectedMaster.廠商名稱 ?? "",
                       專案BDPM: selectedMaster.專案BDPM ?? "",
                       專案BDPM分潤成數: selectedMaster.專案BDPM分潤成數 ?? "",
@@ -10281,7 +10313,15 @@ export default function DashboardPage() {
                     <SearchableSelectField
                       label="KOL名稱"
                       value={editMasterForm.KOL名稱}
-                      onChange={(v) => setEditMasterForm((f) => ({ ...f, KOL名稱: v }))}
+                      onChange={(v) => {
+                        const p = partnerByKolName.get(v.trim());
+                        setEditMasterForm((f) => ({
+                          ...f,
+                          KOL名稱: v,
+                          主管: f.主管.trim() || p?.主管 || "",
+                          KOL開發者: f.KOL開發者.trim() || p?.KOL開發者 || "",
+                        }));
+                      }}
                       options={[...new Set([...kolNameOptionsFromDb, editMasterForm.KOL名稱].filter(Boolean))].sort((a, b) =>
                         a.localeCompare(b, "zh-Hant")
                       )}
@@ -10313,8 +10353,26 @@ export default function DashboardPage() {
                       ) : (
                         <Field label="經紀人" value={selectedMaster.經紀人} />
                       )}
-                      <Field label="主管（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === (isEditingMaster ? editMasterForm.KOL名稱 : selectedMaster.KOL名稱))?.主管 ?? "—"} />
-                      <Field label="KOL開發者（由 KOL 帶出）" value={partners.find((p) => p.合作夥伴名稱 === (isEditingMaster ? editMasterForm.KOL名稱 : selectedMaster.KOL名稱))?.KOL開發者 ?? "—"} />
+                      {isEditingMaster ? (
+                        <SelectField
+                          label="主管"
+                          value={editMasterForm.主管}
+                          onChange={(v) => setEditMasterForm((f) => ({ ...f, 主管: v }))}
+                          options={[...new Set([...userNames, editMasterForm.主管].filter(Boolean))]}
+                        />
+                      ) : (
+                        <Field label="主管" value={selectedMaster.主管 || selectedMasterPartner?.主管} />
+                      )}
+                      {isEditingMaster ? (
+                        <SelectField
+                          label="KOL引薦人"
+                          value={editMasterForm.KOL開發者}
+                          onChange={(v) => setEditMasterForm((f) => ({ ...f, KOL開發者: v }))}
+                          options={[...new Set([...userNames, editMasterForm.KOL開發者].filter(Boolean))]}
+                        />
+                      ) : (
+                        <Field label="KOL引薦人" value={selectedMaster.KOL開發者 || selectedMasterPartner?.KOL開發者} />
+                      )}
                     </>
                   ) : (
                     <>

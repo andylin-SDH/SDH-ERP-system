@@ -54,10 +54,10 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "專案BDPM", label: "專案BDPM（製作／活動）" },
     { key: "專案管理員", label: "專案管理員（製作／活動）" },
     { key: "執行管理員", label: "執行管理員（製作／活動）" },
-    /** 分潤模式 B（廣告業配、團購）：經紀人為專案手填；主管／KOL開發者與合作夥伴同 KOL 名稱對應 */
+    /** 分潤模式 B（廣告業配、團購）：人員欄位皆為專案手填 */
     { key: "經紀人", label: "經紀人（廣告業配／團購）" },
     { key: "主管", label: "主管（廣告業配／團購）" },
-    { key: "KOL開發者", label: "KOL開發者（廣告業配／團購）" },
+    { key: "KOL開發者", label: "KOL引薦人（廣告業配／團購）" },
   ],
   partners: [
     { key: "PartnerID", label: "PartnerID" },

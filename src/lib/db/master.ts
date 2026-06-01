@@ -23,6 +23,10 @@ export interface MasterRow {
   KOL名稱: string | null;
   /** 廣告業配（模式 B）：專案手填；分潤「經紀人」領取人以此為準 */
   經紀人: string | null;
+  /** 模式 B：主管（專案手填；選 KOL 時可預填合作夥伴值） */
+  主管: string | null;
+  /** 模式 B：KOL引薦人（專案手填；DB 欄位名 KOL開發者） */
+  KOL開發者: string | null;
   專案費用類型: string | null;
   廠商名稱: string | null;
   /** 可編輯；同步至財務與分潤表「廠商預計付款日」 */
@@ -63,6 +67,8 @@ function rowToMaster(r: Record<string, unknown>): MasterRow {
     KOL費用未稅: money(r.KOL費用未稅),
     KOL名稱: (r.KOL名稱 as string) ?? null,
     經紀人: (r.經紀人 as string) ?? null,
+    主管: (r.主管 as string) ?? null,
+    KOL開發者: (r.KOL開發者 as string) ?? null,
     專案費用類型: (r.專案費用類型 as string) ?? null,
     廠商名稱: (r.廠商名稱 as string) ?? null,
     廠商預計付款日: (r.廠商預計付款日 as string) ?? null,
@@ -136,6 +142,8 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     KOL費用未稅: normalizeMoneyOrNull(payload.KOL費用未稅),
     KOL名稱: payload.KOL名稱 ?? null,
     經紀人: payload.經紀人 ?? null,
+    主管: payload.主管 ?? null,
+    KOL開發者: payload.KOL開發者 ?? null,
     專案費用類型: payload.專案費用類型 ?? null,
     廠商名稱: payload.廠商名稱 ?? null,
     廠商預計付款日: payload.廠商預計付款日 ?? null,
@@ -191,6 +199,8 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
     KOL費用未稅: normalizeMoneyOrNull(payload.KOL費用未稅),
     KOL名稱: payload.KOL名稱 ?? null,
     經紀人: payload.經紀人 ?? null,
+    主管: payload.主管 ?? null,
+    KOL開發者: payload.KOL開發者 ?? null,
     專案費用類型: payload.專案費用類型 ?? null,
     廠商名稱: payload.廠商名稱 ?? null,
     廠商預計付款日: payload.廠商預計付款日 ?? null,

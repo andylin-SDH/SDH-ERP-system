@@ -215,8 +215,16 @@ export async function syncPayoutForProject(
       : null;
     const roles: Array<{ key: keyof PayoutDefaults; 分潤類型: string; 領取人: string | null }> = [
       { key: "經紀人分潤成數", 分潤類型: "經紀人", 領取人: master.經紀人?.trim() || null },
-      { key: "主管分潤成數", 分潤類型: "主管", 領取人: kol?.主管 ?? null },
-      { key: "KOL開發者分潤成數", 分潤類型: "KOL開發者", 領取人: kol?.KOL開發者 ?? null },
+      {
+        key: "主管分潤成數",
+        分潤類型: "主管",
+        領取人: master.主管?.trim() || kol?.主管?.trim() || null,
+      },
+      {
+        key: "KOL開發者分潤成數",
+        分潤類型: "KOL開發者",
+        領取人: master.KOL開發者?.trim() || kol?.KOL開發者?.trim() || null,
+      },
     ];
     for (const { key, 分潤類型, 領取人 } of roles) {
       if (!領取人) continue;
