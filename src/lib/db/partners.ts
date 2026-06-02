@@ -34,7 +34,7 @@ function rowToPartner(r: Record<string, unknown>): PartnerRow {
     社群網站: (r["社群網站"] as string) || undefined,
     粉絲數: (r["粉絲數"] as string) || undefined,
     "頻道｜節目名稱": (r["頻道｜節目名稱"] as string) || undefined,
-    "是否有經營 私域群": (r["是否有經營 私域群"] as boolean) ?? false,
+    "是否有經營 私域群": normalizePartnerBoolean(r["是否有經營 私域群"]),
     資料夾: (r["資料夾"] as string) || undefined,
     KOL開發者: (r["KOL開發者"] as string) || undefined,
     主管: (r["主管"] as string) || undefined,
@@ -42,9 +42,9 @@ function rowToPartner(r: Record<string, unknown>): PartnerRow {
     自來件分潤: (r["自來件分潤"] as string) || undefined,
     "SDH開發分件分潤": (r["SDH開發分件分潤"] as string) || undefined,
     經銷約結束日: (r["經銷約結束日"] as string) || undefined,
-    廣告經銷夥伴: (r["廣告經銷夥伴"] as boolean) ?? false,
-    節目製作夥伴: (r["節目製作夥伴"] as boolean) ?? false,
-    課程製作夥伴: (r["課程製作夥伴"] as boolean) ?? false,
+    廣告經銷夥伴: normalizePartnerBoolean(r["廣告經銷夥伴"]),
+    節目製作夥伴: normalizePartnerBoolean(r["節目製作夥伴"]),
+    課程製作夥伴: normalizePartnerBoolean(r["課程製作夥伴"]),
     Email: (r.Email as string) || undefined,
     分級: (r["分級"] as string) || undefined,
     形象照: (r["形象照"] as string) || undefined,
@@ -87,6 +87,7 @@ import {
   findPartnerDuplicateInList,
   type PartnerDuplicateMatch,
 } from "@/lib/partners/duplicate";
+import { normalizePartnerBoolean } from "@/lib/partners/boolean";
 
 export {
   findPartnerDuplicateInList,
@@ -128,7 +129,7 @@ export async function createPartner(
     社群網站: payload.社群網站 ?? null,
     粉絲數: payload.粉絲數 ?? null,
     "頻道｜節目名稱": payload["頻道｜節目名稱"] ?? null,
-    "是否有經營 私域群": Boolean(payload["是否有經營 私域群"]),
+    "是否有經營 私域群": normalizePartnerBoolean(payload["是否有經營 私域群"]),
     資料夾: payload.資料夾 ?? null,
     KOL開發者: payload.KOL開發者 ?? null,
     主管: payload.主管 ?? null,
@@ -136,9 +137,9 @@ export async function createPartner(
     自來件分潤: payload.自來件分潤 ?? null,
     "SDH開發分件分潤": payload["SDH開發分件分潤"] ?? null,
     經銷約結束日: payload.經銷約結束日 ?? null,
-    廣告經銷夥伴: Boolean(payload.廣告經銷夥伴),
-    節目製作夥伴: Boolean(payload.節目製作夥伴),
-    課程製作夥伴: Boolean(payload.課程製作夥伴),
+    廣告經銷夥伴: normalizePartnerBoolean(payload.廣告經銷夥伴),
+    節目製作夥伴: normalizePartnerBoolean(payload.節目製作夥伴),
+    課程製作夥伴: normalizePartnerBoolean(payload.課程製作夥伴),
     Email: payload.Email ?? null,
     分級: payload.分級 ?? null,
     建立者: editor,
@@ -203,7 +204,9 @@ export async function updatePartner(PartnerID: string, payload: UpdatePartnerInp
   if (payload.社群網站 !== undefined) update["社群網站"] = payload.社群網站 ?? null;
   if (payload.粉絲數 !== undefined) update["粉絲數"] = payload.粉絲數 ?? null;
   if (payload["頻道｜節目名稱"] !== undefined) update["頻道｜節目名稱"] = payload["頻道｜節目名稱"] ?? null;
-  if (payload["是否有經營 私域群"] !== undefined) update["是否有經營 私域群"] = Boolean(payload["是否有經營 私域群"]);
+  if (payload["是否有經營 私域群"] !== undefined) {
+    update["是否有經營 私域群"] = normalizePartnerBoolean(payload["是否有經營 私域群"]);
+  }
   if (payload.資料夾 !== undefined) update["資料夾"] = payload.資料夾 ?? null;
   if (payload.KOL開發者 !== undefined) update["KOL開發者"] = payload.KOL開發者 ?? null;
   if (payload.主管 !== undefined) update["主管"] = payload.主管 ?? null;
@@ -211,9 +214,9 @@ export async function updatePartner(PartnerID: string, payload: UpdatePartnerInp
   if (payload.自來件分潤 !== undefined) update["自來件分潤"] = payload.自來件分潤 ?? null;
   if (payload["SDH開發分件分潤"] !== undefined) update["SDH開發分件分潤"] = payload["SDH開發分件分潤"] ?? null;
   if (payload.經銷約結束日 !== undefined) update["經銷約結束日"] = payload.經銷約結束日 ?? null;
-  if (payload.廣告經銷夥伴 !== undefined) update["廣告經銷夥伴"] = Boolean(payload.廣告經銷夥伴);
-  if (payload.節目製作夥伴 !== undefined) update["節目製作夥伴"] = Boolean(payload.節目製作夥伴);
-  if (payload.課程製作夥伴 !== undefined) update["課程製作夥伴"] = Boolean(payload.課程製作夥伴);
+  if (payload.廣告經銷夥伴 !== undefined) update["廣告經銷夥伴"] = normalizePartnerBoolean(payload.廣告經銷夥伴);
+  if (payload.節目製作夥伴 !== undefined) update["節目製作夥伴"] = normalizePartnerBoolean(payload.節目製作夥伴);
+  if (payload.課程製作夥伴 !== undefined) update["課程製作夥伴"] = normalizePartnerBoolean(payload.課程製作夥伴);
   if (payload.Email !== undefined) update["Email"] = payload.Email ?? null;
   if (payload.分級 !== undefined) update["分級"] = payload.分級 ?? null;
   if (payload.形象照 !== undefined) update["形象照"] = payload.形象照 ?? null;
@@ -229,7 +232,11 @@ export async function updatePartner(PartnerID: string, payload: UpdatePartnerInp
     .select(PARTNER_SELECT)
     .single();
 
-  if (error || !data) return null;
+  if (error) {
+    log("partners.db", "updatePartner 更新失敗", { PartnerID, error: String(error?.message) });
+    return null;
+  }
+  if (!data) return null;
   return rowToPartner(data as Record<string, unknown>);
 }
 

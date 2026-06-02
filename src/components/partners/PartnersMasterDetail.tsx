@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { SocialLinkIcons } from "@/components/SocialLinkIcons";
 import { PartnerAvatar } from "@/components/partners/PartnerAvatar";
 import type { PartnerRow } from "@/modules/partners";
+import { normalizePartnerBoolean } from "@/lib/partners/boolean";
 
 export type PartnerEditLogItem = {
   id: string;
@@ -317,7 +318,7 @@ function PartnerDetailPanel({
                 }
                 let text: ReactNode;
                 if (isBool) {
-                  text = Boolean(val) ? "是" : "否";
+                  text = normalizePartnerBoolean(val) ? "是" : "否";
                 } else if (key === "經銷約開始日" || key === "經銷約結束日") {
                   text = formatPartnerDateDisplay(val as string);
                 } else {

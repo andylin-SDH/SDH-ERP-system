@@ -14,6 +14,7 @@ import { requireAdmin, requireAuth, ADMIN_ROLES } from "@/lib/auth/api";
 import { isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
 import { partnerEditorLabel } from "@/lib/partners/editor-label";
 import { deletePartnerAvatarObject } from "@/lib/partners/avatar-storage";
+import { normalizePartnerBoolean } from "@/lib/partners/boolean";
 
 function isAdminRole(role: string): boolean {
   return ADMIN_ROLES.includes(role as (typeof ADMIN_ROLES)[number]);
@@ -86,16 +87,16 @@ export async function POST(request: NextRequest) {
         社群網站: body?.社群網站,
         粉絲數: body?.粉絲數,
         "頻道｜節目名稱": body?.["頻道｜節目名稱"],
-        "是否有經營 私域群": Boolean(body?.["是否有經營 私域群"]),
+        "是否有經營 私域群": normalizePartnerBoolean(body?.["是否有經營 私域群"]),
         資料夾: body?.資料夾,
         KOL開發者: admin ? body?.KOL開發者 : undefined,
         經銷約開始日: body?.經銷約開始日,
         自來件分潤: body?.自來件分潤,
         "SDH開發分件分潤": body?.["SDH開發分件分潤"],
         經銷約結束日: body?.經銷約結束日,
-        廣告經銷夥伴: Boolean(body?.廣告經銷夥伴),
-        節目製作夥伴: Boolean(body?.節目製作夥伴),
-        課程製作夥伴: Boolean(body?.課程製作夥伴),
+        廣告經銷夥伴: normalizePartnerBoolean(body?.廣告經銷夥伴),
+        節目製作夥伴: normalizePartnerBoolean(body?.節目製作夥伴),
+        課程製作夥伴: normalizePartnerBoolean(body?.課程製作夥伴),
         Email: body?.Email,
         分級: body?.分級,
       },
@@ -142,7 +143,7 @@ export async function PATCH(request: NextRequest) {
 
     const { partner, noChanges } = await updatePartnerWithEditLog(PartnerID, row, filtered, editor);
     if (!partner) {
-      return NextResponse.json({ ok: false, error: "更新失敗" }, { status: 500 });
+      return NextResponse.json({ ok: false, error: "寫入資料庫失敗，請稍後再試" }, { status: 500 });
     }
     return NextResponse.json({ ok: true, partner, noChanges: Boolean(noChanges) });
   } catch (error) {

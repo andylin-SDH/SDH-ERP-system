@@ -6,6 +6,7 @@ import { getSupabase } from "@/lib/supabase/server";
 import { log } from "@/lib/log";
 import type { PartnerRow } from "@/modules/partners/types";
 import type { UpdatePartnerInput } from "@/lib/db/partners";
+import { isPartnerBooleanFieldKey, normalizePartnerBoolean } from "@/lib/partners/boolean";
 
 export const PARTNER_EDIT_ACTION = {
   CREATE: "新增",
@@ -37,8 +38,10 @@ function rowToEditLog(r: Record<string, unknown>): PartnerEditLogRow {
   };
 }
 
-function valuesEqual(a: unknown, b: unknown): boolean {
-  if (typeof a === "boolean" || typeof b === "boolean") return Boolean(a) === Boolean(b);
+function valuesEqual(key: string, a: unknown, b: unknown): boolean {
+  if (isPartnerBooleanFieldKey(key)) {
+    return normalizePartnerBoolean(a) === normalizePartnerBoolean(b);
+  }
   const sa = a === undefined || a === null ? "" : String(a).trim();
   const sb = b === undefined || b === null ? "" : String(b).trim();
   return sa === sb;
@@ -54,7 +57,7 @@ export function buildPartnerChangeDiff(
   const p = existing as unknown as Record<string, unknown>;
   for (const [key, newVal] of Object.entries(payload)) {
     const oldVal = p[key];
-    if (!valuesEqual(oldVal, newVal)) {
+    if (!valuesEqual(key, oldVal, newVal)) {
       變更內容[key] = newVal;
       變更前快照[key] = oldVal ?? null;
     }

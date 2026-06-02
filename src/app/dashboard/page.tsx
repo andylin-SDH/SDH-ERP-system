@@ -41,6 +41,7 @@ import {
   type PartnersListPageSize,
 } from "@/components/partners/PartnersMasterDetail";
 import { isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
+import { normalizePartnerBoolean } from "@/lib/partners/boolean";
 import { normalizeDecimalString } from "@/lib/number-normalize";
 import { TASK_DUE_SOON_DAYS } from "@/config/task-due";
 import {
@@ -1734,16 +1735,16 @@ export default function DashboardPage() {
       社群網站: String(pt.社群網站 ?? ""),
       粉絲數: String(pt.粉絲數 ?? ""),
       "頻道｜節目名稱": String(pt["頻道｜節目名稱"] ?? ""),
-      "是否有經營 私域群": Boolean(pt["是否有經營 私域群"]),
+      "是否有經營 私域群": normalizePartnerBoolean(pt["是否有經營 私域群"]),
       資料夾: String(pt.資料夾 ?? ""),
       KOL開發者: String(pt.KOL開發者 ?? ""),
       經銷約開始日: String(pt.經銷約開始日 ?? ""),
       自來件分潤: String(pt.自來件分潤 ?? ""),
       "SDH開發分件分潤": String(pt["SDH開發分件分潤"] ?? ""),
       經銷約結束日: String(pt.經銷約結束日 ?? ""),
-      廣告經銷夥伴: Boolean(pt.廣告經銷夥伴),
-      節目製作夥伴: Boolean(pt.節目製作夥伴),
-      課程製作夥伴: Boolean(pt.課程製作夥伴),
+      廣告經銷夥伴: normalizePartnerBoolean(pt.廣告經銷夥伴),
+      節目製作夥伴: normalizePartnerBoolean(pt.節目製作夥伴),
+      課程製作夥伴: normalizePartnerBoolean(pt.課程製作夥伴),
       Email: String(pt.Email ?? ""),
       分級: String(pt.分級 ?? ""),
     });
