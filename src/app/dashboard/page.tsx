@@ -780,6 +780,42 @@ function payoutRowWorkflowStage(row: PayoutRow): PayoutWorkflowTabKey {
   return "pending_vendor";
 }
 
+/** 分潤表去重（與列表顯示相同規則） */
+function dedupePayoutRows(
+  rows: PayoutRow[],
+  masterTypeByProjectId: Map<string, string>,
+  payoutDedupeRules: PayoutDedupeRulesByMode
+): PayoutRow[] {
+  if (!rows.length) return rows;
+  const anyPairwise =
+    (payoutDedupeRules.mode_a?.length ?? 0) + (payoutDedupeRules.mode_b?.length ?? 0) > 0;
+  if (!anyPairwise) return rows;
+
+  const groupByPid = new Map<string, PayoutRow[]>();
+  const pidOrder: string[] = [];
+  for (const r of rows) {
+    const pid = String(r.專案ID ?? "").trim();
+    if (!pid) continue;
+    if (!groupByPid.has(pid)) {
+      groupByPid.set(pid, []);
+      pidOrder.push(pid);
+    }
+    groupByPid.get(pid)!.push(r);
+  }
+
+  const out: PayoutRow[] = [];
+  for (const pid of pidOrder) {
+    const group = groupByPid.get(pid) ?? [];
+    const projectType = masterTypeByProjectId.get(pid) ?? "";
+    const isModeB = isPayoutModeB(projectType);
+    const rulesToApply = isModeB ? payoutDedupeRules.mode_b : payoutDedupeRules.mode_a;
+    let work = group;
+    if (rulesToApply.length) work = applyDedupeRules(work, rulesToApply);
+    out.push(...work);
+  }
+  return out;
+}
+
 /** 大總表儲存格：模式 B 經紀人為大總表手填；主管／KOL開發者由合作夥伴依 KOL 名稱帶出；模式 A 不顯示該三欄（回傳空字串） */
 function masterTableCellText(
   row: MasterRow,
@@ -1340,6 +1376,8 @@ export default function DashboardPage() {
   const [financeEmployeePayoutSearch, setFinanceEmployeePayoutSearch] = useState("");
   const [financePayoutSavingIds, setFinancePayoutSavingIds] = useState<string[]>([]);
   const [financePayoutEditError, setFinancePayoutEditError] = useState<string | null>(null);
+  const [financeVendorResyncing, setFinanceVendorResyncing] = useState(false);
+  const [financeVendorResyncMessage, setFinanceVendorResyncMessage] = useState<string | null>(null);
   /** 發票清冊：點「發票日期」表頭循環：發票號碼序 → 日期新→舊 → 日期舊→新 */
   const [invoiceListDateSortMode, setInvoiceListDateSortMode] = useState<InvoiceListDateSortMode>("default");
   const [showInvoiceCreateModal, setShowInvoiceCreateModal] = useState(false);
@@ -2464,36 +2502,16 @@ export default function DashboardPage() {
     return m;
   }, [masterList]);
 
-  const dedupedPayoutForDisplay = useMemo(() => {
-    if (!filteredPayout.length) return filteredPayout;
-    const anyPairwise =
-      (payoutDedupeRules.mode_a?.length ?? 0) + (payoutDedupeRules.mode_b?.length ?? 0) > 0;
-    if (!anyPairwise) return filteredPayout;
+  const dedupedPayoutForDisplay = useMemo(
+    () => dedupePayoutRows(filteredPayout, masterTypeByProjectId, payoutDedupeRules),
+    [filteredPayout, masterTypeByProjectId, payoutDedupeRules]
+  );
 
-    const groupByPid = new Map<string, PayoutRow[]>();
-    const pidOrder: string[] = [];
-    for (const r of filteredPayout) {
-      const pid = String(r.專案ID ?? "").trim();
-      if (!pid) continue;
-      if (!groupByPid.has(pid)) {
-        groupByPid.set(pid, []);
-        pidOrder.push(pid);
-      }
-      groupByPid.get(pid)!.push(r);
-    }
-
-    const out: PayoutRow[] = [];
-    for (const pid of pidOrder) {
-      const rows = groupByPid.get(pid) ?? [];
-      const projectType = masterTypeByProjectId.get(pid) ?? "";
-      const isModeB = isPayoutModeB(projectType);
-      const rulesToApply = isModeB ? payoutDedupeRules.mode_b : payoutDedupeRules.mode_a;
-      let work = rows;
-      if (rulesToApply.length) work = applyDedupeRules(work, rulesToApply);
-      out.push(...work);
-    }
-    return out;
-  }, [filteredPayout, masterTypeByProjectId, payoutDedupeRules]);
+  /** 財務付款作業：不依「領取人」列級過濾，與會計全公司口徑一致 */
+  const dedupedPayoutForFinanceEmployee = useMemo(
+    () => dedupePayoutRows(payoutList, masterTypeByProjectId, payoutDedupeRules),
+    [payoutList, masterTypeByProjectId, payoutDedupeRules]
+  );
 
   const payoutWorkflowFiltered = useMemo(
     () => dedupedPayoutForDisplay.filter((r) => payoutRowWorkflowStage(r) === payoutWorkflowTab),
@@ -2535,23 +2553,34 @@ export default function DashboardPage() {
 
   /** 財務「員工分潤付款」：廠商已付、尚未匯款給員工 */
   const financeEmployeePayoutPendingRows = useMemo(
-    () => dedupedPayoutForDisplay.filter((r) => payoutRowWorkflowStage(r) === "pending_payout"),
-    [dedupedPayoutForDisplay]
+    () => dedupedPayoutForFinanceEmployee.filter((r) => payoutRowWorkflowStage(r) === "pending_payout"),
+    [dedupedPayoutForFinanceEmployee]
   );
   const financeEmployeePayoutPaidRows = useMemo(
-    () => dedupedPayoutForDisplay.filter((r) => String(r.分潤匯款日期 ?? "").trim() !== ""),
-    [dedupedPayoutForDisplay]
+    () => dedupedPayoutForFinanceEmployee.filter((r) => String(r.分潤匯款日期 ?? "").trim() !== ""),
+    [dedupedPayoutForFinanceEmployee]
   );
   const financeEmployeePayoutBaseRows = useMemo(
     () => (financeEmployeePayoutTab === "pending" ? financeEmployeePayoutPendingRows : financeEmployeePayoutPaidRows),
     [financeEmployeePayoutTab, financeEmployeePayoutPendingRows, financeEmployeePayoutPaidRows]
   );
+  const financeEmployeeWorkflowCounts = useMemo(() => {
+    let pending_vendor = 0;
+    let pending_payout = 0;
+    for (const r of dedupedPayoutForFinanceEmployee) {
+      const s = payoutRowWorkflowStage(r);
+      if (s === "pending_vendor") pending_vendor += 1;
+      else if (s === "pending_payout") pending_payout += 1;
+    }
+    return { pending_vendor, pending_payout };
+  }, [dedupedPayoutForFinanceEmployee]);
+
   const financeEmployeePayoutCounts = useMemo(() => {
     let pending = 0;
     let pendingAmount = 0;
     let paid = 0;
     let paidAmount = 0;
-    for (const r of dedupedPayoutForDisplay) {
+    for (const r of dedupedPayoutForFinanceEmployee) {
       const amt = parseNumericField(r.分潤金額);
       if (payoutRowWorkflowStage(r) === "pending_payout") {
         pending += 1;
@@ -2563,7 +2592,7 @@ export default function DashboardPage() {
       }
     }
     return { pending, pendingAmount, paid, paidAmount };
-  }, [dedupedPayoutForDisplay]);
+  }, [dedupedPayoutForFinanceEmployee]);
   const financeEmployeePayoutSearchCols = useMemo(
     () => ["專案ID", "專案名稱", "領取人", "分潤類型", "分潤金額", "分潤匯款日期"] as const,
     []
@@ -3286,6 +3315,37 @@ export default function DashboardPage() {
       }
     })();
   }, [activeSection, refreshDashboardData]);
+
+  /** 依發票已入帳日，補寫分潤表「廠商付款日期」（修復財務已同步但分潤漏寫） */
+  const resyncFinanceVendorFromInvoices = useCallback(async () => {
+    setFinanceVendorResyncing(true);
+    setFinanceVendorResyncMessage(null);
+    setFinancePayoutEditError(null);
+    try {
+      const res = await fetch("/api/finance", { method: "POST", cache: "no-store" });
+      const data = (await safeResJson(res)) as {
+        ok?: boolean;
+        error?: string;
+        updated?: number;
+        scanned?: number;
+        skippedLongTerm?: number;
+      };
+      if (!res.ok || !data.ok) {
+        setFinanceVendorResyncMessage(data.error ?? "同步失敗");
+        return;
+      }
+      await refreshDashboardData(["finance", "payout"]);
+      setFinanceVendorResyncMessage(
+        `已依發票入帳日補同步分潤表（掃描 ${data.scanned ?? 0} 個專案，更新財務 ${data.updated ?? 0} 筆${
+          data.skippedLongTerm ? `；略過長期案 ${data.skippedLongTerm} 個` : ""
+        }）`
+      );
+    } catch (e) {
+      setFinanceVendorResyncMessage(e instanceof Error ? e.message : "同步失敗");
+    } finally {
+      setFinanceVendorResyncing(false);
+    }
+  }, [refreshDashboardData]);
 
   const deleteInvoicesByIdList = useCallback(
     async (ids: string[]) => {
@@ -7745,25 +7805,38 @@ export default function DashboardPage() {
                     <span className="ml-1 text-[10px] opacity-80">{financeEmployeePayoutCounts.paid}</span>
                   </button>
                 </div>
-                <input
-                  type="text"
-                  value={financeEmployeePayoutSearch}
-                  onChange={(e) => setFinanceEmployeePayoutSearch(e.target.value)}
-                  placeholder="搜尋專案、領取人、分潤類型…"
-                  className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
-                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={financeVendorResyncing}
+                    onClick={() => void resyncFinanceVendorFromInvoices()}
+                    className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 transition hover:border-amber-400 hover:bg-amber-50 disabled:opacity-60"
+                  >
+                    {financeVendorResyncing ? "同步中…" : "同步入帳至分潤"}
+                  </button>
+                  <input
+                    type="text"
+                    value={financeEmployeePayoutSearch}
+                    onChange={(e) => setFinanceEmployeePayoutSearch(e.target.value)}
+                    placeholder="搜尋專案、領取人、分潤類型…"
+                    className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
+                  />
+                </div>
               </div>
+              {financeVendorResyncMessage && (
+                <p className="mb-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900">{financeVendorResyncMessage}</p>
+              )}
               {financePayoutEditError && (
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{financePayoutEditError}</p>
               )}
               <p className="mb-2 text-[11px] text-stone-500">
-                僅列出<strong className="text-stone-600">廠商已付款</strong>的分潤列。一般專案：發票入帳後自動帶入廠商付款日；<strong className="text-stone-600">長期案</strong>請至「依專案」手動填寫後才會出現。勾選「已付款」寫入今日分潤匯款日；取消勾選可退回待付款。
+                僅列出分潤表上<strong className="text-stone-600">廠商付款日已有值</strong>的列。發票在「已入帳」後，若此處仍空，請按「同步入帳至分潤」；<strong className="text-stone-600">長期案</strong>不從發票自動同步，請至「依專案」填寫。
               </p>
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
                 {searchedFinanceEmployeePayout.length === 0 ? (
                   <p className="px-4 py-10 text-center text-sm text-stone-500">
                     {financeEmployeePayoutTab === "pending"
-                      ? "目前沒有待付員工分潤（一般專案請確認發票已入帳且綁定專案；長期案請至「依專案」手動填寫廠商付款日期）"
+                      ? `目前沒有待付員工分潤。發票若在「已入帳」仍為空，請按上方「同步入帳至分潤」。全公司分潤：待結帳 ${financeEmployeeWorkflowCounts.pending_vendor} 筆、待分潤 ${financeEmployeeWorkflowCounts.pending_payout} 筆。`
                       : "尚無已付款紀錄"}
                   </p>
                 ) : (

@@ -137,7 +137,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "收款對象", label: "收款對象" },
     { key: "發票金額含稅", label: "發票金額含稅" },
     { key: "廠商預計付款日", label: "廠商預計付款日" },
-    { key: "廠商付款日期", label: "廠商付款日期" },
+    { key: "廠商付款日期", label: "廠商實際付款日（入帳）" },
     { key: "備註", label: "備註" },
   ],
 };

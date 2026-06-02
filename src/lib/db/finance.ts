@@ -298,13 +298,20 @@ export async function syncFinanceVendorDateFromInvoicesForProject(
 
   const current = mapFinanceDbRow(finRow as Record<string, unknown>, undefined);
   const curVendor = normalizeDateOrNull(current.廠商付款日期);
-  if (curVendor === nextVendorDate) return false;
 
-  await updateFinanceBy專案ID(pid, {
-    廠商付款日期: nextVendorDate,
-    員工分潤日期: current.員工分潤日期 ?? null,
-  });
-  return true;
+  if (curVendor !== nextVendorDate) {
+    await updateFinanceBy專案ID(pid, {
+      廠商付款日期: nextVendorDate,
+      員工分潤日期: current.員工分潤日期 ?? null,
+    });
+    return true;
+  }
+
+  /** 財務日期已與發票一致時仍補寫分潤表，避免「發票已入帳但員工分潤付款為空」的歷史漏同步 */
+  if (nextVendorDate) {
+    await syncPayoutRowsFromFinanceDates(pid, nextVendorDate, undefined, current);
+  }
+  return false;
 }
 
 /** 對所有有綁專案的發票，依專案回寫財務廠商付款日（既有資料 backfill 用；略過長期案） */
