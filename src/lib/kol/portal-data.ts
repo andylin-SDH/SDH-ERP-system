@@ -1,5 +1,5 @@
 /**
- * KOL 專用只讀總覽：依 partners 對應大總表 KOL 名稱，串財務／發票（不修改既有 ERP 流程）
+ * KOL（老師）專用只讀總覽：依 partners 對應大總表 KOL 名稱，串依專案財務／發票
  */
 
 import type { User } from "@/lib/types";
@@ -9,6 +9,7 @@ import { getMasterList } from "@/lib/db/master";
 import { getPartnersApprovedWithError } from "@/lib/db/partners";
 import { getFinance, getInvoices } from "@/modules/finance";
 import { kolFinanceProgressShort } from "@/lib/kol/finance-status";
+import { formatKolAmountInt, parseKolAmount, sumKolInvoiceAmount含稅 } from "@/lib/kol/format";
 import type { KolPortalProject } from "@/lib/kol/types";
 
 export type { KolPortalProject } from "@/lib/kol/types";
@@ -29,7 +30,7 @@ export async function buildKolPortalData(user: User): Promise<
   if (fromScope) {
     const p = partners.find((x) => String(x.PartnerID ?? "").trim() === fromScope);
     if (!p) {
-      return { ok: false, error: `找不到 PartnerID「${fromScope}」的已核准 KOL，請確認帳號 scope 是否正確。` };
+      return { ok: false, error: `找不到 PartnerID「${fromScope}」的 KOL，請確認帳號 scope 是否正確。` };
     }
     partnerId = String(p.PartnerID ?? "").trim();
     partnerName = String(p.合作夥伴名稱 ?? "").trim();
@@ -39,7 +40,8 @@ export async function buildKolPortalData(user: User): Promise<
     if (!p) {
       return {
         ok: false,
-        error: "此帳號尚未綁定 KOL：請在「使用者」將角色設為 KOL，scope 填 PartnerID（如 KOL-001），或將 partners 的 Email 設為此登入信箱。",
+        error:
+          "此帳號尚未綁定 KOL：請在「使用者」將角色設為 KOL，scope 填 PartnerID（如 KOL-001），或將 partners 的 Email 設為此登入信箱。",
       };
     }
     partnerId = String(p.PartnerID ?? "").trim();
@@ -76,13 +78,12 @@ export async function buildKolPortalData(user: User): Promise<
     projects.push({
       專案ID: pid,
       專案名稱: String(row.專案名稱 ?? "—"),
-      專案狀態: String(row.專案狀態 ?? "—"),
-      專案總金額未稅: String(row.專案總金額未稅 ?? "").trim() || "—",
-      KOL費用未稅: String(row.KOL費用未稅 ?? "").trim() || "—",
-      款項進度: kolFinanceProgressShort(f?.廠商付款日期, f?.員工分潤日期),
+      專案狀態: String(row.專案狀態 ?? "—").trim() || "—",
+      專案總金額未稅: formatKolAmountInt(parseKolAmount(row.專案總金額未稅)),
+      KOL費用未稅: formatKolAmountInt(parseKolAmount(row.KOL費用未稅)),
+      結帳狀態: kolFinanceProgressShort(f?.廠商付款日期, f?.員工分潤日期),
       廠商付款日期: String(f?.廠商付款日期 ?? "").trim() || "—",
-      員工分潤日期: String(f?.員工分潤日期 ?? "").trim() || "—",
-      發票已開未稅合計: "—",
+      發票已開含稅合計: sumKolInvoiceAmount含稅(invs),
       發票筆數: invs.length,
     });
   }

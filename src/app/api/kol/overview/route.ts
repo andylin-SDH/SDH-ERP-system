@@ -5,7 +5,7 @@ import { buildKolPortalData } from "@/lib/kol/portal-data";
 export const dynamic = "force-dynamic";
 
 /**
- * KOL 專用只讀總覽：專案、款項進度（財務日期）、發票已開未稅合計
+ * KOL（老師）專用只讀總覽：專案、結帳狀態（依財務入帳日期）、發票含稅合計
  */
 export async function GET(request: NextRequest) {
   const auth = await requireKol(request);

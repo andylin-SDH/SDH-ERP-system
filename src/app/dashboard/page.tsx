@@ -203,6 +203,23 @@ const INVOICE_DRAFT_KEYS = [
 /** 發票清冊／批次表單以 HTML date 編輯的欄位 */
 const INVOICE_DATE_INPUT_KEYS = new Set<string>(["發票日期", "廠商預計付款日", "廠商付款日期"]);
 
+function invoiceListThClass(colKey: string): string {
+  if (INVOICE_DATE_INPUT_KEYS.has(colKey)) {
+    return "w-[7.25rem] min-w-[6.75rem] max-w-[7.75rem] px-1.5 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600";
+  }
+  if (colKey === "收款對象") {
+    return "min-w-[13rem] max-w-[22rem] px-3 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600";
+  }
+  if (colKey === "專案ID") {
+    return "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800";
+  }
+  return "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600";
+}
+
+const INVOICE_DATE_CELL_CLS = "w-[7.25rem] min-w-[6.75rem] max-w-[7.75rem] px-1.5 py-2 align-middle";
+const INVOICE_DATE_INPUT_CLS =
+  "w-full min-w-0 max-w-[7.25rem] rounded border border-stone-200 bg-white px-1 py-1 text-xs font-sans tabular-nums text-stone-800 focus:border-amber-500/60 focus:outline-none disabled:opacity-60 [color-scheme:light]";
+
 /** 發票金額含稅：較醒目的數字輸入（右對齊、等寬數字、琥珀邊框與淺底） */
 const INVOICE_AMOUNT_INPUT_CLS =
   "w-full min-w-[7.5rem] max-w-[13rem] rounded-lg border-2 border-amber-400/75 bg-amber-50/90 px-2.5 py-1.5 text-right text-sm font-semibold tabular-nums tracking-tight text-stone-900 shadow-sm shadow-amber-200/20 placeholder:text-stone-400 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-400/35 disabled:opacity-60 [color-scheme:light]";
@@ -8211,10 +8228,7 @@ export default function DashboardPage() {
                           />
                         </th>
                         {invoicesVisibleCols.map((k) => {
-                          const thCls =
-                            k === "專案ID"
-                              ? "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800"
-                              : "px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600";
+                          const thCls = invoiceListThClass(k);
                           if (k === "發票日期") {
                             const sort = invoiceListDateSortMode;
                             const ariaSort = sort === "dateDesc" ? "descending" : sort === "dateAsc" ? "ascending" : "none";
@@ -8351,10 +8365,8 @@ export default function DashboardPage() {
                                 if (INVOICE_DATE_INPUT_KEYS.has(k)) {
                                   const rawDateVal = val;
                                   const dateInputVal = normalizeDateForInput(rawDateVal);
-                                  const invoiceDateInputCls =
-                                    "w-full min-w-[9.5rem] max-w-[11rem] rounded border border-stone-200 bg-white px-1.5 py-1 text-xs font-sans tabular-nums text-stone-800 focus:border-amber-500/60 focus:outline-none disabled:opacity-60 [color-scheme:light]";
                                   return (
-                                    <td key={k} className="min-w-[9.5rem] max-w-[11rem] px-2 py-2 align-middle">
+                                    <td key={k} className={INVOICE_DATE_CELL_CLS}>
                                       <input
                                         type="date"
                                         value={dateInputVal}
@@ -8373,7 +8385,26 @@ export default function DashboardPage() {
                                             )
                                           );
                                         }}
-                                        className={invoiceDateInputCls}
+                                        className={INVOICE_DATE_INPUT_CLS}
+                                      />
+                                    </td>
+                                  );
+                                }
+                                if (k === "收款對象") {
+                                  return (
+                                    <td key={k} className="min-w-[13rem] max-w-[22rem] px-3 py-2 align-middle">
+                                      <input
+                                        type="text"
+                                        value={val}
+                                        disabled={saving}
+                                        onChange={(e) => {
+                                          setInvoiceEditError(null);
+                                          setInvoiceDirtyIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
+                                          setInvoices((prev) =>
+                                            prev.map((r) => (r.id === rowId ? { ...r, 收款對象: e.target.value } : r))
+                                          );
+                                        }}
+                                        className="w-full min-w-[11rem] rounded border border-stone-200 bg-white px-2.5 py-1 text-xs text-stone-800 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none disabled:opacity-60"
                                       />
                                     </td>
                                   );
@@ -8400,7 +8431,10 @@ export default function DashboardPage() {
                                 }
                                 const wide = k === "發票號碼";
                                 return (
-                                  <td key={k} className={`px-2 py-2 align-middle ${wide ? "min-w-[7rem] max-w-[11rem]" : "min-w-[4.5rem] max-w-[8rem]"}`}>
+                                  <td
+                                    key={k}
+                                    className={`px-2 py-2 align-middle ${wide ? "min-w-[7rem] max-w-[11rem]" : "min-w-[4.5rem] max-w-[9rem]"}`}
+                                  >
                                     <input
                                       type="text"
                                       value={val}
