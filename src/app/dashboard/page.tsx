@@ -2981,7 +2981,14 @@ export default function DashboardPage() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (showChangePassword) {
+      if (showEditPartner) {
+        setShowEditPartner(false);
+        setPartnerEditError(null);
+        setEditingPartnerSource(null);
+      } else if (showCreatePartner) {
+        setShowCreatePartner(false);
+        setCreatePartnerError(null);
+      } else if (showChangePassword) {
         setShowChangePassword(false);
         setChangePasswordError(null);
         setChangePasswordMessage(null);
@@ -3004,7 +3011,15 @@ export default function DashboardPage() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedMaster, selectedTask, showDeleteMasterConfirm, showChangePassword, workloadDrill]);
+  }, [
+    selectedMaster,
+    selectedTask,
+    showDeleteMasterConfirm,
+    showChangePassword,
+    workloadDrill,
+    showEditPartner,
+    showCreatePartner,
+  ]);
 
   const refreshDashboardData = useCallback(
     async (
