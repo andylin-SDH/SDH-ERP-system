@@ -3,21 +3,26 @@ export const dynamic = "force-dynamic";
 
 /**
  * 簡易 Session：以 Cookie 儲存目前登入者 email
- * GET：取得目前使用者
- * POST：登入（傳入 email + password，與 Users 試算表 密碼 欄比對）
+ * GET：取得目前使用者與到期時間
+ * POST：登入
+ * PATCH：延長登入（重設 cookie 有效期限）
  * DELETE：登出
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { getUserByEmail, verifyCredentials } from "@/modules/users";
 import { log } from "@/lib/log";
-
-const COOKIE_NAME = "erp_email";
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 天
+import { SESSION_EMAIL_COOKIE } from "@/lib/auth/session-config";
+import {
+  applySessionCookies,
+  clearSessionCookies,
+  computeSessionExpiresAtEpoch,
+  getSessionExpiresAtFromCookieHeader,
+} from "@/lib/auth/session-cookie";
 
 function getEmailFromCookie(cookieHeader: string | null): string | null {
   if (!cookieHeader) return null;
-  const match = cookieHeader.match(new RegExp(`${COOKIE_NAME}=([^;]+)`));
+  const match = cookieHeader.match(new RegExp(`${SESSION_EMAIL_COOKIE}=([^;]+)`));
   if (!match) return null;
   let value = match[1].trim();
   try {
@@ -30,10 +35,18 @@ function getEmailFromCookie(cookieHeader: string | null): string | null {
 
 const noCache = { "Cache-Control": "no-store, no-cache, must-revalidate" };
 
+function sessionPayload(expiresAt: number) {
+  return { expiresAt };
+}
+
 export async function GET(request: NextRequest) {
   const cookieHeader = request.headers.get("cookie");
   const email = getEmailFromCookie(cookieHeader);
-  log("auth.session", "GET session", { hasCookie: !!cookieHeader?.includes(COOKIE_NAME), email: email ? `${email.slice(0, 25)}` : null, decoded: !!email });
+  log("auth.session", "GET session", {
+    hasCookie: !!cookieHeader?.includes(SESSION_EMAIL_COOKIE),
+    email: email ? `${email.slice(0, 25)}` : null,
+    decoded: !!email,
+  });
   if (!email) {
     log("auth.session", "GET 無 cookie，回傳 ok:false", {});
     return NextResponse.json({ ok: false, user: null }, { headers: noCache });
@@ -42,11 +55,19 @@ export async function GET(request: NextRequest) {
   if (!user) {
     log("auth.session", "GET getUserByEmail 無此人，清除 cookie 並回傳 ok:false", { email: email.slice(0, 25) });
     const res = NextResponse.json({ ok: false, user: null }, { headers: noCache });
-    res.cookies.set(COOKIE_NAME, "", { maxAge: 0, path: "/" });
+    clearSessionCookies(res);
     return res;
   }
-  log("auth.session", "GET 成功", { email: user.email, role: user.role });
-  return NextResponse.json({ ok: true, user }, { headers: noCache });
+
+  const cookieExpiresAt = getSessionExpiresAtFromCookieHeader(cookieHeader);
+  const needsExpiryBackfill = cookieExpiresAt == null;
+  const expiresAt = cookieExpiresAt ?? computeSessionExpiresAtEpoch();
+
+  const res = NextResponse.json({ ok: true, user, session: sessionPayload(expiresAt) }, { headers: noCache });
+  if (needsExpiryBackfill) applySessionCookies(res, email);
+
+  log("auth.session", "GET 成功", { email: user.email, role: user.role, expiresAt });
+  return res;
 }
 
 export async function POST(request: NextRequest) {
@@ -69,19 +90,34 @@ export async function POST(request: NextRequest) {
   }
 
   log("auth.session", "POST 登入成功，設定 cookie", { email: user.email, role: user.role });
-  const res = NextResponse.json({ ok: true, user }, { headers: noCache });
-  res.cookies.set(COOKIE_NAME, user.email, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: COOKIE_MAX_AGE,
-    path: "/",
-  });
+  const expiresAt = computeSessionExpiresAtEpoch();
+  const res = NextResponse.json({ ok: true, user, session: sessionPayload(expiresAt) }, { headers: noCache });
+  applySessionCookies(res, user.email);
+  return res;
+}
+
+/** 延長登入：重設 cookie 有效期限（須仍為有效 session） */
+export async function PATCH(request: NextRequest) {
+  const cookieHeader = request.headers.get("cookie");
+  const email = getEmailFromCookie(cookieHeader);
+  if (!email) {
+    return NextResponse.json({ ok: false, error: "未登入" }, { status: 401, headers: noCache });
+  }
+  const user = await getUserByEmail(email);
+  if (!user) {
+    const res = NextResponse.json({ ok: false, error: "未登入" }, { status: 401, headers: noCache });
+    clearSessionCookies(res);
+    return res;
+  }
+  const expiresAt = computeSessionExpiresAtEpoch();
+  const res = NextResponse.json({ ok: true, user, session: sessionPayload(expiresAt) }, { headers: noCache });
+  applySessionCookies(res, user.email);
+  log("auth.session", "PATCH 延長登入", { email: user.email, expiresAt });
   return res;
 }
 
 export async function DELETE() {
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(COOKIE_NAME, "", { maxAge: 0, path: "/" });
+  clearSessionCookies(res);
   return res;
 }

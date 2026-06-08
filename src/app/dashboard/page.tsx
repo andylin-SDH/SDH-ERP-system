@@ -33,6 +33,7 @@ import {
 } from "@/config/overview-kpi";
 import { SocialLinkIcons } from "@/components/SocialLinkIcons";
 import { ErpLoginPanel, fetchSessionWithRetry } from "@/components/ErpLoginPanel";
+import { SessionExpiryMonitor } from "@/components/SessionExpiryMonitor";
 import {
   PartnersMasterDetail,
   partnerGradeKey,
@@ -1142,6 +1143,7 @@ export default function DashboardPage() {
   const [changePasswordMessage, setChangePasswordMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [needsAuth, setNeedsAuth] = useState(false);
+  const [sessionEndNotice, setSessionEndNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedUserForVisibility, setSelectedUserForVisibility] = useState<User | null>(null);
   const [visibilityTables, setVisibilityTables] = useState<string[]>([]);
@@ -1537,6 +1539,20 @@ export default function DashboardPage() {
   /** 使用者姓名列表（對應 DB Users：姓名優先，無則帳號 email；新增／刪除使用者後會隨 refreshDashboardData(['users']) 更新） */
   const userNames = useMemo(
     () => [...new Set(users.map((u) => (u.name && u.name.trim()) || u.email || "").filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-TW")),
+    [users]
+  );
+
+  /** 任務負責人選單：僅員工帳號，排除 KOL 訪客入口 */
+  const taskAssigneeUserNames = useMemo(
+    () =>
+      [
+        ...new Set(
+          users
+            .filter((u) => String(u.role ?? "").trim() !== "KOL")
+            .map((u) => (u.name && u.name.trim()) || u.email || "")
+            .filter(Boolean)
+        ),
+      ].sort((a, b) => a.localeCompare(b, "zh-TW")),
     [users]
   );
 
@@ -3578,6 +3594,13 @@ export default function DashboardPage() {
     try {
       const sess = await fetchSessionWithRetry();
       if (!sess.ok || !sess.user) {
+        if (typeof document !== "undefined") {
+          const m = document.cookie.match(/(?:^|;\s*)erp_session_exp=([^;]+)/);
+          const exp = m ? Number(decodeURIComponent(m[1]).trim()) : 0;
+          if (exp > 0 && exp * 1000 <= Date.now()) {
+            setSessionEndNotice("您的登入已過期，請重新登入後再繼續操作。");
+          }
+        }
         setNeedsAuth(true);
         setLoading(false);
         return false;
@@ -3589,6 +3612,7 @@ export default function DashboardPage() {
       }
       setMe(user);
       setNeedsAuth(false);
+      setSessionEndNotice(null);
       setError(null);
       setLoading(false);
       await refreshDashboardData(["users", "master", "tasks", "partners", "myVisibility", "systemConfig"]);
@@ -3600,6 +3624,17 @@ export default function DashboardPage() {
       return false;
     }
   }, [refreshDashboardData]);
+
+  const handleSessionEnd = useCallback((reason: "expired" | "invalid") => {
+    setMe(null);
+    setNeedsAuth(true);
+    setLoading(false);
+    setSessionEndNotice(
+      reason === "invalid"
+        ? "登入狀態已失效，請重新登入後再繼續操作。"
+        : "您的登入已過期，請重新登入後再繼續操作。"
+    );
+  }, []);
 
   useEffect(() => {
     if (sessionBootstrappedRef.current) return;
@@ -3626,6 +3661,7 @@ export default function DashboardPage() {
       }
       setLoading(true);
       setNeedsAuth(false);
+      setSessionEndNotice(null);
       setMe(user as unknown as User);
       setError(null);
       setLoading(false);
@@ -3759,6 +3795,7 @@ export default function DashboardPage() {
             ? "請登入以查看任務；若您已在其他分頁登入，完成登入後將直接開啟該專案（網址已保留）"
             : "請登入以使用 Dashboard"
         }
+        sessionNotice={sessionEndNotice}
         onSuccess={handleDashboardLoginSuccess}
       />
     );
@@ -3837,6 +3874,7 @@ export default function DashboardPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-[#faf8f5]">
+      <SessionExpiryMonitor active={!!me} onSessionEnd={handleSessionEnd} />
       {/* Logo 獨立頂列（不包在深色側欄內） */}
       {me && tabSections.length > 0 && (
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-stone-200/90 bg-[#faf8f5] px-4 py-3 md:px-8">
@@ -5226,7 +5264,7 @@ export default function DashboardPage() {
                                           className="w-40 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
                                         >
                                           <option value="">— 未指定 —</option>
-                                          {userNames.map((name) => (
+                                          {taskAssigneeUserNames.map((name) => (
                                             <option key={name} value={name}>
                                               {name}
                                             </option>
@@ -10171,7 +10209,7 @@ export default function DashboardPage() {
                             label="負責人（可選）"
                             value={newMasterTaskTemplateForm.負責人}
                             onChange={(v) => setNewMasterTaskTemplateForm((f) => ({ ...f, 負責人: v }))}
-                            options={[...new Set(["", ...userNames])]}
+                            options={[...new Set(["", ...taskAssigneeUserNames])]}
                           />
                           <div className="grid grid-cols-2 gap-2">
                             <NumberField
@@ -10270,7 +10308,16 @@ export default function DashboardPage() {
                                       [tpl.id]: { ...(prev[tpl.id] ?? masterTaskTemplateDrafts[tpl.id]), 負責人: v },
                                     }))
                                   }
-                                  options={[...new Set(["", ...userNames])]}
+                                  options={[
+                                    ...new Set([
+                                      "",
+                                      ...taskAssigneeUserNames,
+                                      ...(masterTaskTemplateDrafts[tpl.id]?.負責人 &&
+                                      !taskAssigneeUserNames.includes(masterTaskTemplateDrafts[tpl.id]?.負責人 ?? "")
+                                        ? [masterTaskTemplateDrafts[tpl.id]!.負責人]
+                                        : []),
+                                    ]),
+                                  ]}
                                 />
                                 <div className="grid grid-cols-2 gap-2">
                                   <NumberField
@@ -10818,9 +10865,13 @@ export default function DashboardPage() {
                     className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
                   >
                     <option value="">— 未指定 —</option>
-                    {userNames.map((name) => (
+                    {taskAssigneeUserNames.map((name) => (
                       <option key={name} value={name}>{name}</option>
                     ))}
+                    {editTaskForm.任務負責人 &&
+                    !taskAssigneeUserNames.includes(editTaskForm.任務負責人) ? (
+                      <option value={editTaskForm.任務負責人}>{editTaskForm.任務負責人}（請改派員工）</option>
+                    ) : null}
                   </select>
                 </div>
                 <div>

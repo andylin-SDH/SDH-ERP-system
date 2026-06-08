@@ -15,11 +15,13 @@ async function safeResJson(r: Response): Promise<Record<string, unknown>> {
 
 type ErpLoginPanelProps = {
   subtitle?: string;
+  /** 登入過期後顯示於表單上方 */
+  sessionNotice?: string | null;
   onSuccess: (user: Record<string, unknown>) => void | Promise<void>;
 };
 
 /** 登入表單（首頁／Dashboard 共用） */
-export function ErpLoginPanel({ subtitle, onSuccess }: ErpLoginPanelProps) {
+export function ErpLoginPanel({ subtitle, sessionNotice, onSuccess }: ErpLoginPanelProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +68,11 @@ export function ErpLoginPanel({ subtitle, onSuccess }: ErpLoginPanelProps) {
           <h1 className="mt-4 text-center text-2xl font-bold tracking-tight text-stone-800">SDH ERP 系統</h1>
         </div>
         {subtitle ? <p className="mt-2 text-center text-sm text-stone-600">{subtitle}</p> : null}
+        {sessionNotice ? (
+          <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center text-sm font-medium text-amber-950">
+            {sessionNotice}
+          </p>
+        ) : null}
         {error ? <p className="mt-3 text-center text-sm font-medium text-amber-800">{error}</p> : null}
         <form
           onSubmit={(e) => void handleSubmit(e)}

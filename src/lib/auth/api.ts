@@ -8,7 +8,9 @@ import { NextResponse } from "next/server";
 import { getUserByEmail } from "@/modules/users";
 import type { User } from "@/lib/types";
 
-const COOKIE_NAME = "erp_email";
+import { SESSION_EMAIL_COOKIE } from "@/lib/auth/session-config";
+
+const COOKIE_NAME = SESSION_EMAIL_COOKIE;
 export const ADMIN_ROLES = ["董事長", "管理者"] as const;
 
 /** KOL 專用入口（與員工後台分離） */

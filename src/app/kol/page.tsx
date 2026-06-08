@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { parseKolAmount } from "@/lib/kol/format";
 import { isKolProjectInProgress } from "@/lib/kol/project-lifecycle";
+import { SessionExpiryMonitor } from "@/components/SessionExpiryMonitor";
 import type { KolPortalProject } from "@/lib/kol/types";
 
 async function safeResJson(r: Response): Promise<Record<string, unknown>> {
@@ -32,6 +33,7 @@ export default function KolHomePage() {
   const [partnerId, setPartnerId] = useState<string>("");
   const [projects, setProjects] = useState<KolPortalProject[]>([]);
   const [lifecycleTab, setLifecycleTab] = useState<LifecycleTab>("in_progress");
+  const [sessionActive, setSessionActive] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,7 +63,13 @@ export default function KolHomePage() {
     setPartnerName(data.partnerName ?? "");
     setPartnerId(data.partnerId ?? "");
     setProjects(Array.isArray(data.projects) ? data.projects : []);
+    setSessionActive(true);
     setLoading(false);
+  }, []);
+
+  const handleSessionEnd = useCallback(() => {
+    setSessionActive(false);
+    window.location.href = "/";
   }, []);
 
   useEffect(() => {
@@ -100,6 +108,7 @@ export default function KolHomePage() {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-4 py-8 sm:px-6">
+      <SessionExpiryMonitor active={sessionActive && !loading && !error} onSessionEnd={handleSessionEnd} />
       <header className="mb-8 flex flex-col gap-4 border-b border-amber-200/80 pb-6 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <Image src="/logo.png" alt="SDH" width={200} height={48} className="h-10 w-auto object-contain" />
