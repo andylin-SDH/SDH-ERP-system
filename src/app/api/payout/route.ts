@@ -6,12 +6,12 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getPayoutList, updatePayoutRemitDate, todayDateStringLocal } from "@/lib/db/payout";
-import { requireAuth } from "@/lib/auth/api";
+import { requireEmployee } from "@/lib/auth/api";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const list = await getPayoutList();
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as {

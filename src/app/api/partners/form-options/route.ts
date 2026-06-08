@@ -5,12 +5,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth/api";
+import { requireEmployee } from "@/lib/auth/api";
 import { getNextPartnerId, getPartnerCategoryOptions } from "@/lib/db/partners";
 import { getUsers } from "@/lib/db/users";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const [nextPartnerId, categories, users] = await Promise.all([

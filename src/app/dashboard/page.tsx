@@ -34,6 +34,7 @@ import {
 import { SocialLinkIcons } from "@/components/SocialLinkIcons";
 import { ErpLoginPanel, fetchSessionWithRetry } from "@/components/ErpLoginPanel";
 import { SessionExpiryMonitor } from "@/components/SessionExpiryMonitor";
+import { buildEmployeeUserNames } from "@/lib/users/employee-users";
 import {
   PartnersMasterDetail,
   partnerGradeKey,
@@ -1536,25 +1537,8 @@ export default function DashboardPage() {
     };
   }, [displayRoles, systemConfig]);
 
-  /** 使用者姓名列表（對應 DB Users：姓名優先，無則帳號 email；新增／刪除使用者後會隨 refreshDashboardData(['users']) 更新） */
-  const userNames = useMemo(
-    () => [...new Set(users.map((u) => (u.name && u.name.trim()) || u.email || "").filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-TW")),
-    [users]
-  );
-
-  /** 任務負責人選單：僅員工帳號，排除 KOL 訪客入口 */
-  const taskAssigneeUserNames = useMemo(
-    () =>
-      [
-        ...new Set(
-          users
-            .filter((u) => String(u.role ?? "").trim() !== "KOL")
-            .map((u) => (u.name && u.name.trim()) || u.email || "")
-            .filter(Boolean)
-        ),
-      ].sort((a, b) => a.localeCompare(b, "zh-TW")),
-    [users]
-  );
+  /** 員工後台人員姓名（排除角色 KOL；KOL 僅使用 /kol 老師入口） */
+  const employeeUserNames = useMemo(() => buildEmployeeUserNames(users), [users]);
 
   /** 董事長／管理者可為使用者設定可見範圍、調整系統設定 */
   const canEditVisibility = me && ["董事長", "管理者"].includes(me.role);
@@ -5264,7 +5248,7 @@ export default function DashboardPage() {
                                           className="w-40 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
                                         >
                                           <option value="">— 未指定 —</option>
-                                          {taskAssigneeUserNames.map((name) => (
+                                          {employeeUserNames.map((name) => (
                                             <option key={name} value={name}>
                                               {name}
                                             </option>
@@ -9592,47 +9576,47 @@ export default function DashboardPage() {
                           label="專案開發人"
                           value={createForm.專案開發人}
                           onChange={(v) => setCreateForm((f) => ({ ...f, 專案開發人: v }))}
-                          options={userNames}
+                          options={employeeUserNames}
                         />
                         <SelectField
                           label="經紀人"
                           value={createForm.經紀人}
                           onChange={(v) => setCreateForm((f) => ({ ...f, 經紀人: v }))}
-                          options={[...new Set([...userNames, createForm.經紀人].filter(Boolean))]}
+                          options={[...new Set([...employeeUserNames, createForm.經紀人].filter(Boolean))]}
                         />
                         <SelectField
                           label="主管"
                           value={createForm.主管}
                           onChange={(v) => setCreateForm((f) => ({ ...f, 主管: v }))}
-                          options={[...new Set([...userNames, createForm.主管].filter(Boolean))]}
+                          options={[...new Set([...employeeUserNames, createForm.主管].filter(Boolean))]}
                         />
                         <SelectField
                           label="KOL引薦人"
                           value={createForm.KOL開發者}
                           onChange={(v) => setCreateForm((f) => ({ ...f, KOL開發者: v }))}
-                          options={[...new Set([...userNames, createForm.KOL開發者].filter(Boolean))]}
+                          options={[...new Set([...employeeUserNames, createForm.KOL開發者].filter(Boolean))]}
                         />
                       </>
                     ) : (
                       <>
-                        <SelectField label="專案BDPM" value={createForm.專案BDPM} onChange={(v) => setCreateForm((f) => ({ ...f, 專案BDPM: v }))} options={userNames} />
+                        <SelectField label="專案BDPM" value={createForm.專案BDPM} onChange={(v) => setCreateForm((f) => ({ ...f, 專案BDPM: v }))} options={employeeUserNames} />
                         <SelectField
                           label="專案引薦人"
                           value={createForm.專案引薦人}
                           onChange={(v) => setCreateForm((f) => ({ ...f, 專案引薦人: v }))}
-                          options={userNames}
+                          options={employeeUserNames}
                         />
                         <SelectField
                           label="專案管理員"
                           value={createForm.專案管理員}
                           onChange={(v) => setCreateForm((f) => ({ ...f, 專案管理員: v }))}
-                          options={userNames}
+                          options={employeeUserNames}
                         />
                         <SelectField
                           label="執行管理員"
                           value={createForm.執行管理員}
                           onChange={(v) => setCreateForm((f) => ({ ...f, 執行管理員: v }))}
-                          options={userNames}
+                          options={employeeUserNames}
                         />
                       </>
                     )}
@@ -10209,7 +10193,7 @@ export default function DashboardPage() {
                             label="負責人（可選）"
                             value={newMasterTaskTemplateForm.負責人}
                             onChange={(v) => setNewMasterTaskTemplateForm((f) => ({ ...f, 負責人: v }))}
-                            options={[...new Set(["", ...taskAssigneeUserNames])]}
+                            options={[...new Set(["", ...employeeUserNames])]}
                           />
                           <div className="grid grid-cols-2 gap-2">
                             <NumberField
@@ -10311,9 +10295,9 @@ export default function DashboardPage() {
                                   options={[
                                     ...new Set([
                                       "",
-                                      ...taskAssigneeUserNames,
+                                      ...employeeUserNames,
                                       ...(masterTaskTemplateDrafts[tpl.id]?.負責人 &&
-                                      !taskAssigneeUserNames.includes(masterTaskTemplateDrafts[tpl.id]?.負責人 ?? "")
+                                      !employeeUserNames.includes(masterTaskTemplateDrafts[tpl.id]?.負責人 ?? "")
                                         ? [masterTaskTemplateDrafts[tpl.id]!.負責人]
                                         : []),
                                     ]),
@@ -10509,7 +10493,7 @@ export default function DashboardPage() {
                   {isPayoutModeB(isEditingMaster ? editMasterForm.專案類型 : selectedMaster.專案類型 ?? "") ? (
                     <>
                       {isEditingMaster ? (
-                        <SelectField label="專案開發人" value={editMasterForm.專案開發人} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案開發人: v }))} options={userNames} />
+                        <SelectField label="專案開發人" value={editMasterForm.專案開發人} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案開發人: v }))} options={employeeUserNames} />
                       ) : (
                         <Field label="專案開發人" value={selectedMaster.專案開發人} />
                       )}
@@ -10518,7 +10502,7 @@ export default function DashboardPage() {
                           label="經紀人"
                           value={editMasterForm.經紀人}
                           onChange={(v) => setEditMasterForm((f) => ({ ...f, 經紀人: v }))}
-                          options={[...new Set([...userNames, editMasterForm.經紀人].filter(Boolean))]}
+                          options={[...new Set([...employeeUserNames, editMasterForm.經紀人].filter(Boolean))]}
                         />
                       ) : (
                         <Field label="經紀人" value={selectedMaster.經紀人} />
@@ -10528,7 +10512,7 @@ export default function DashboardPage() {
                           label="主管"
                           value={editMasterForm.主管}
                           onChange={(v) => setEditMasterForm((f) => ({ ...f, 主管: v }))}
-                          options={[...new Set([...userNames, editMasterForm.主管].filter(Boolean))]}
+                          options={[...new Set([...employeeUserNames, editMasterForm.主管].filter(Boolean))]}
                         />
                       ) : (
                         <Field label="主管" value={selectedMaster.主管 || selectedMasterPartner?.主管} />
@@ -10538,7 +10522,7 @@ export default function DashboardPage() {
                           label="KOL引薦人"
                           value={editMasterForm.KOL開發者}
                           onChange={(v) => setEditMasterForm((f) => ({ ...f, KOL開發者: v }))}
-                          options={[...new Set([...userNames, editMasterForm.KOL開發者].filter(Boolean))]}
+                          options={[...new Set([...employeeUserNames, editMasterForm.KOL開發者].filter(Boolean))]}
                         />
                       ) : (
                         <Field label="KOL引薦人" value={selectedMaster.KOL開發者 || selectedMasterPartner?.KOL開發者} />
@@ -10551,23 +10535,23 @@ export default function DashboardPage() {
                           label="專案BDPM"
                           value={editMasterForm.專案BDPM}
                           onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案BDPM: v }))}
-                          options={[...new Set([...userNames, editMasterForm.專案BDPM].filter(Boolean))]}
+                          options={[...new Set([...employeeUserNames, editMasterForm.專案BDPM].filter(Boolean))]}
                         />
                       ) : (
                         <Field label="專案BDPM" value={selectedMaster.專案BDPM} />
                       )}
                       {isEditingMaster ? (
-                        <SelectField label="專案引薦人" value={editMasterForm.專案引薦人} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案引薦人: v }))} options={userNames} />
+                        <SelectField label="專案引薦人" value={editMasterForm.專案引薦人} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案引薦人: v }))} options={employeeUserNames} />
                       ) : (
                         <Field label="專案引薦人" value={selectedMaster.專案引薦人} />
                       )}
                       {isEditingMaster ? (
-                        <SelectField label="專案管理員" value={editMasterForm.專案管理員} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案管理員: v }))} options={userNames} />
+                        <SelectField label="專案管理員" value={editMasterForm.專案管理員} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案管理員: v }))} options={employeeUserNames} />
                       ) : (
                         <Field label="專案管理員" value={selectedMaster.專案管理員} />
                       )}
                       {isEditingMaster ? (
-                        <SelectField label="執行管理員" value={editMasterForm.執行管理員} onChange={(v) => setEditMasterForm((f) => ({ ...f, 執行管理員: v }))} options={userNames} />
+                        <SelectField label="執行管理員" value={editMasterForm.執行管理員} onChange={(v) => setEditMasterForm((f) => ({ ...f, 執行管理員: v }))} options={employeeUserNames} />
                       ) : (
                         <Field label="執行管理員" value={selectedMaster.執行管理員} />
                       )}
@@ -10865,11 +10849,11 @@ export default function DashboardPage() {
                     className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
                   >
                     <option value="">— 未指定 —</option>
-                    {taskAssigneeUserNames.map((name) => (
+                    {employeeUserNames.map((name) => (
                       <option key={name} value={name}>{name}</option>
                     ))}
                     {editTaskForm.任務負責人 &&
-                    !taskAssigneeUserNames.includes(editTaskForm.任務負責人) ? (
+                    !employeeUserNames.includes(editTaskForm.任務負責人) ? (
                       <option value={editTaskForm.任務負責人}>{editTaskForm.任務負責人}（請改派員工）</option>
                     ) : null}
                   </select>

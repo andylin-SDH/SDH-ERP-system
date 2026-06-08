@@ -6,10 +6,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readSheet, getSpreadsheetId } from "@/lib/sheets";
 import { SHEET_NAMES } from "@/lib/sheets";
-import { requireAuth } from "@/lib/auth/api";
+import { requireEmployee } from "@/lib/auth/api";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const spreadsheetId = getSpreadsheetId();

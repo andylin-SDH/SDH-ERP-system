@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTasks, createTask, updateTask } from "@/lib/db/tasks";
 import { getEmailByNameOrEmail } from "@/modules/users";
 import { sendTaskAssignedEmail } from "@/lib/email";
-import { requireAuth } from "@/lib/auth/api";
+import { requireEmployee } from "@/lib/auth/api";
 
 function taskCreatorLabel(user: { name?: string | null; email?: string | null }): string {
   return String(user.name ?? "").trim() || String(user.email ?? "").trim();
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const tasks = await getTasks();
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as {
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as {

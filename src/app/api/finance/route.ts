@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getFinance } from "@/modules/finance";
-import { requireAuth } from "@/lib/auth/api";
+import { requireEmployee } from "@/lib/auth/api";
 import { updateFinanceBy專案ID, syncAllFinanceVendorDatesFromInvoices, type FinanceUpdateFields } from "@/lib/db/finance";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const finance = await getFinance();
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
  * Body: { 專案ID: string, 廠商付款日期?, 員工分潤日期? }（僅此二欄可寫）
  */
 export async function PATCH(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as ({ 專案ID?: string } & FinanceUpdateFields) | null;
@@ -49,7 +49,7 @@ export async function PATCH(request: NextRequest) {
  * POST：從發票清冊同步「廠商付款日期」至依專案財務，並連動分潤表（backfill／進入財務頁時用）
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const result = await syncAllFinanceVendorDatesFromInvoices();

@@ -4,12 +4,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, requireAdmin } from "@/lib/auth/api";
+import { requireAdmin, requireEmployee } from "@/lib/auth/api";
 import { getSystemConfig, updateSystemConfig } from "@/lib/db/system-config";
 import { syncAllPayoutsFromMaster } from "@/lib/db/payout";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const config = await getSystemConfig();

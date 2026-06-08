@@ -37,6 +37,12 @@ export async function GET(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ ok: false, error: "找不到使用者" }, { status: 404 });
   }
+  if (String(user.role ?? "").trim() === "KOL") {
+    return NextResponse.json(
+      { ok: false, error: "KOL 帳號僅可使用老師專屬入口（/kol）" },
+      { status: 403 }
+    );
+  }
 
   const visibility = await getUserVisibility(email);
   if (visibility && visibility.tables.length > 0) {

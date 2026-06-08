@@ -7,10 +7,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUsers, createUser, updateUser } from "@/modules/users";
 import type { CreateUserInput, UpdateUserInput } from "@/lib/db/users";
-import { requireAdmin, requireAuth } from "@/lib/auth/api";
+import { requireAdmin, requireEmployee } from "@/lib/auth/api";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const users = await getUsers();

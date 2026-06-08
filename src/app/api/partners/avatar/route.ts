@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth/api";
+import { requireEmployee } from "@/lib/auth/api";
 import { getPartnerById, updatePartnerWithEditLog } from "@/lib/db/partners";
 import {
   deletePartnerAvatarObject,
@@ -9,7 +9,7 @@ import {
 import { partnerEditorLabel } from "@/lib/partners/editor-label";
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const formData = await request.formData();
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const { searchParams } = new URL(request.url);

@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase/server";
 import { getEmailByNameOrEmail } from "@/modules/users";
 import { sendTaskAssignedEmail } from "@/lib/email";
-import { requireAuth } from "@/lib/auth/api";
+import { requireEmployee } from "@/lib/auth/api";
 
 function rowToTask(r: Record<string, unknown>) {
   return {
@@ -21,7 +21,7 @@ function rowToTask(r: Record<string, unknown>) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as { 任務ID?: string } | null;

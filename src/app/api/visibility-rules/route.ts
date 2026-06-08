@@ -8,10 +8,10 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { getVisibilityRules, updateVisibilityRules } from "@/lib/db/visibility-rules";
-import { requireAdmin, requireAuth } from "@/lib/auth/api";
+import { requireAdmin, requireEmployee } from "@/lib/auth/api";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const rules = await getVisibilityRules();

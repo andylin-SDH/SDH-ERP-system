@@ -17,10 +17,10 @@ import { DEFAULT_PAYOUT_DEDUPE_RULES } from "@/config/payout-dedupe-defaults";
 import { getSystemConfig } from "@/lib/db/system-config";
 import { syncPayoutForProject } from "@/lib/db/payout";
 import { syncFinanceForProject } from "@/lib/db/finance";
-import { requireAdmin, requireAuth } from "@/lib/auth/api";
+import { requireAdmin, requireEmployee } from "@/lib/auth/api";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const list = await getMasterList();
@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as Partial<NewMasterInput> | null;
@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as Partial<UpdateMasterInput> | null;
@@ -176,7 +176,7 @@ export async function PATCH(request: NextRequest) {
 
 /** 刪除專案（僅董事長）；連動刪除任務、分潤表、財務之該專案資料 */
 export async function DELETE(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   if (auth.user.role !== "董事長") {
     return NextResponse.json({ ok: false, error: "僅董事長可刪除專案" }, { status: 403 });

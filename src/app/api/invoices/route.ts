@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getInvoices } from "@/modules/finance";
 import { createInvoicesBatch, deleteInvoicesByIds, updateInvoiceById, type InvoiceInsertInput } from "@/lib/db/finance";
-import { requireAuth } from "@/lib/auth/api";
+import { requireEmployee } from "@/lib/auth/api";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const invoices = await getInvoices();
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
  * Body: { invoices: InvoiceInsertInput[] }（至少一筆須含發票號碼；專案ID 可省略）
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as { invoices?: InvoiceInsertInput[] } | null;
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
  * Body: { id: string } & InvoiceInsertInput（須含發票號碼等完整可編輯欄位）
  */
 export async function PATCH(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as ({ id?: string } & InvoiceInsertInput) | null;
@@ -73,7 +73,7 @@ export async function PATCH(request: NextRequest) {
  * Body: { ids: string[] }
  */
 export async function DELETE(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as { ids?: string[] } | null;

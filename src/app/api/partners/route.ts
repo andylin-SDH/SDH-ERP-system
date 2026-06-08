@@ -10,7 +10,7 @@ import {
   type NewPartnerInput,
   type UpdatePartnerInput,
 } from "@/lib/db/partners";
-import { requireAdmin, requireAuth, ADMIN_ROLES } from "@/lib/auth/api";
+import { requireAdmin, requireEmployee, ADMIN_ROLES } from "@/lib/auth/api";
 import { isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
 import { partnerEditorLabel } from "@/lib/partners/editor-label";
 import { deletePartnerAvatarObject } from "@/lib/partners/avatar-storage";
@@ -30,7 +30,7 @@ function filterAgentPatchPayload(rest: Record<string, unknown>): UpdatePartnerIn
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const { partners, error: partnersError, usedFallback } = await getPartnersApprovedWithError();
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as Partial<NewPartnerInput> | null;
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as { PartnerID?: string } & Partial<UpdatePartnerInput> | null;

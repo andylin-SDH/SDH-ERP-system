@@ -46,9 +46,22 @@ export async function requireAuth(request: NextRequest | Request): Promise<{ use
   return { user };
 }
 
+/** 必須為員工後台帳號（KOL 老師入口不可呼叫員工 API） */
+export async function requireEmployee(request: NextRequest | Request): Promise<{ user: User } | NextResponse> {
+  const result = await requireAuth(request);
+  if (result instanceof NextResponse) return result;
+  if (String(result.user.role ?? "").trim() === KOL_ROLE) {
+    return NextResponse.json(
+      { ok: false, error: "KOL 帳號僅可使用老師專屬入口（/kol）" },
+      { status: 403 }
+    );
+  }
+  return result;
+}
+
 /** 必須為董事長或管理者，否則回傳 403 */
 export async function requireAdmin(request: NextRequest | Request): Promise<{ user: User } | NextResponse> {
-  const result = await requireAuth(request);
+  const result = await requireEmployee(request);
   if (result instanceof NextResponse) return result;
   const role = result.user.role as (typeof ADMIN_ROLES)[number] | string;
   if (!ADMIN_ROLES.includes(role as (typeof ADMIN_ROLES)[number])) {
