@@ -6825,6 +6825,14 @@ export default function DashboardPage() {
                     {refreshingFollowers ? "更新粉絲數中…" : "更新粉絲數"}
                   </button>
                   )}
+                  <Link
+                    href="/kol-catalog"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-full border border-stone-300 bg-white px-4 py-1.5 text-xs font-bold text-stone-700 transition hover:bg-stone-50"
+                  >
+                    KOL 提案型錄
+                  </Link>
                   <button
                     type="button"
                     onClick={async () => {
