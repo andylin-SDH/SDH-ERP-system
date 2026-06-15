@@ -648,6 +648,28 @@ function parseNumericField(v: string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function sumNumericColumn(rows: Array<Record<string, unknown>>, key: string): number {
+  let sum = 0;
+  for (const r of rows) sum += parseNumericField(r[key] as string | null | undefined);
+  return sum;
+}
+
+function ListAmountSummary({ count, amount, label }: { count: number; amount: number; label: string }) {
+  if (count <= 0) return null;
+  return (
+    <p className="mb-2 flex flex-wrap items-center justify-end gap-x-2 text-xs text-stone-600">
+      <span>
+        目前列表 <span className="font-semibold tabular-nums text-stone-900">{count}</span> 筆
+      </span>
+      <span className="hidden text-stone-300 sm:inline">|</span>
+      <span>
+        {label}{" "}
+        <span className="text-sm font-bold tabular-nums text-amber-800">{formatAmount(String(Math.round(amount)))}</span>
+      </span>
+    </p>
+  );
+}
+
 type InvoiceSummary = {
   rows: InvoiceRow[];
   count: number;
@@ -2670,6 +2692,10 @@ export default function DashboardPage() {
       filterRowsBySearch,
     ]
   );
+  const financeEmployeePayoutListTotal = useMemo(
+    () => sumNumericColumn(searchedFinanceEmployeePayout as unknown as Record<string, unknown>[], "分潤金額"),
+    [searchedFinanceEmployeePayout]
+  );
 
   const searchedPayout = useMemo(
     () =>
@@ -2679,6 +2705,10 @@ export default function DashboardPage() {
         deferredPayoutSearch
       ) as unknown as PayoutRow[],
     [payoutWorkflowFiltered, payoutVisibleCols, deferredPayoutSearch, filterRowsBySearch]
+  );
+  const payoutListTotal = useMemo(
+    () => sumNumericColumn(searchedPayout as unknown as Record<string, unknown>[], "分潤金額"),
+    [searchedPayout]
   );
   const searchedFinance = useMemo(
     () => filterRowsBySearch(finance as unknown as Record<string, unknown>[], financeVisibleCols, deferredFinanceSearch),
@@ -2692,6 +2722,10 @@ export default function DashboardPage() {
     () => applyInvoiceListSort(searchedInvoices as unknown as InvoiceRow[], invoiceListDateSortMode),
     [searchedInvoices, invoiceListDateSortMode]
   );
+  const invoicesListTotal = useMemo(
+    () => sumNumericColumn(invoicesSortedForDisplay as unknown as Record<string, unknown>[], "發票金額含稅"),
+    [invoicesSortedForDisplay]
+  );
   const searchedPaymentRecords = useMemo(
     () =>
       filterRowsBySearch(
@@ -2700,6 +2734,10 @@ export default function DashboardPage() {
         deferredPaymentRecordsSearch
       ) as unknown as PaymentRecordRow[],
     [paymentRecords, paymentRecordsVisibleCols, deferredPaymentRecordsSearch, filterRowsBySearch]
+  );
+  const paymentRecordsListTotal = useMemo(
+    () => sumNumericColumn(searchedPaymentRecords as unknown as Record<string, unknown>[], "付款金額"),
+    [searchedPaymentRecords]
   );
   const visibleMasterRows = useMemo(
     () => searchedMasterList.slice(0, masterRenderCount),
@@ -7634,6 +7672,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
               </div>
+              <ListAmountSummary count={searchedPayout.length} amount={payoutListTotal} label="分潤金額合計" />
               {/* 小螢幕：卡片式收納顯示（分潤金額為主、次要資訊、其他可摺疊） */}
               <div className="space-y-3 md:hidden">
                 {searchedPayout.length === 0 ? (
@@ -7938,6 +7977,11 @@ export default function DashboardPage() {
               <p className="mb-2 text-[11px] text-stone-500">
                 僅列出分潤表上<strong className="text-stone-600">廠商付款日已有值</strong>的列。發票在「已入帳」後，若此處仍空，請按「同步入帳至分潤」；<strong className="text-stone-600">長期案</strong>不從發票自動同步，請至「依專案」填寫。
               </p>
+              <ListAmountSummary
+                count={searchedFinanceEmployeePayout.length}
+                amount={financeEmployeePayoutListTotal}
+                label="分潤金額合計"
+              />
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
                 {searchedFinanceEmployeePayout.length === 0 ? (
                   <p className="px-4 py-10 text-center text-sm text-stone-500">
@@ -8289,6 +8333,11 @@ export default function DashboardPage() {
                   各欄可直接編輯；系統不會自動儲存，填好後請按該列「存檔」。發票號碼不可空白。
                 </p>
               )}
+              <ListAmountSummary
+                count={invoicesSortedForDisplay.length}
+                amount={invoicesListTotal}
+                label="發票金額合計"
+              />
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
                 {invoices.length === 0 ? (
                   <p className="px-4 py-8 text-center text-stone-500">尚無發票資料</p>
@@ -8688,6 +8737,11 @@ export default function DashboardPage() {
                   各欄可直接編輯；系統不會自動儲存，填好後請按該列「存檔」。欄位比照付款表：發票號碼、付款日期、付款專案、付款對象、付款金額。
                 </p>
               )}
+              <ListAmountSummary
+                count={searchedPaymentRecords.length}
+                amount={paymentRecordsListTotal}
+                label="付款金額合計"
+              />
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
                 {paymentRecords.length === 0 ? (
                   <p className="px-4 py-8 text-center text-stone-500">尚無付款記錄</p>
