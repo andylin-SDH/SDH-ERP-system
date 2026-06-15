@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -47,32 +48,30 @@ function KolCatalogCard({ item }: { item: KolCatalogItem }) {
           {categories.length > 0 ? (
             <p className="mt-2 text-xs font-medium text-amber-900/80">{categories.join(" · ")}</p>
           ) : null}
-          <div className="mt-3 flex flex-wrap gap-2 text-xs">
-            {item.followers ? (
+          {item.followers ? (
+            <div className="mt-3 text-xs">
               <span className="rounded-lg bg-stone-100 px-2 py-1 font-semibold tabular-nums text-stone-800">
                 粉絲 {item.followers}
               </span>
-            ) : null}
-            {item.hasPrivateCommunity ? (
-              <span className="rounded-lg bg-violet-100 px-2 py-1 font-semibold text-violet-900">私域經營</span>
-            ) : null}
-          </div>
-          {item.capabilities.length > 0 ? (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {item.capabilities.map((c) => (
-                <span
-                  key={c}
-                  className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-950"
-                >
-                  {c}
-                </span>
-              ))}
             </div>
           ) : null}
-          {item.platforms.length > 0 ? (
-            <p className="mt-2 text-[11px] text-stone-500">
-              平台：{item.platforms.join(" · ")}
-            </p>
+          {item.socialLinks.length > 0 ? (
+            <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px]">
+              <span className="text-stone-500">平台：</span>
+              {item.socialLinks.map((link, i) => (
+                <Fragment key={link.url}>
+                  {i > 0 ? <span className="text-stone-300">·</span> : null}
+                  <a
+                    href={link.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold text-amber-800 underline decoration-amber-300/70 underline-offset-2 transition hover:text-amber-600"
+                  >
+                    {link.label}
+                  </a>
+                </Fragment>
+              ))}
+            </div>
           ) : null}
         </div>
       </div>

@@ -1,5 +1,4 @@
 import type { PartnerRow } from "@/modules/partners";
-import { normalizePartnerBoolean } from "@/lib/partners/boolean";
 import { parseSocialUrls, getPlatform } from "@/lib/utils/social-urls";
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -12,6 +11,11 @@ const PLATFORM_LABEL: Record<string, string> = {
   link: "連結",
 };
 
+export type KolCatalogSocialLink = {
+  url: string;
+  label: string;
+};
+
 export type KolCatalogItem = {
   id: string;
   name: string;
@@ -21,9 +25,7 @@ export type KolCatalogItem = {
   avatarUrl: string;
   channelName: string;
   followers: string;
-  platforms: string[];
-  capabilities: string[];
-  hasPrivateCommunity: boolean;
+  socialLinks: KolCatalogSocialLink[];
 };
 
 function formatFollowers(raw: string | null | undefined): string {
@@ -34,23 +36,25 @@ function formatFollowers(raw: string | null | undefined): string {
   return s;
 }
 
+function buildSocialLinks(raw: string | null | undefined): KolCatalogSocialLink[] {
+  const seen = new Set<string>();
+  const links: KolCatalogSocialLink[] = [];
+  for (const url of parseSocialUrls(raw)) {
+    if (seen.has(url)) continue;
+    seen.add(url);
+    const platform = getPlatform(url);
+    links.push({
+      url,
+      label: PLATFORM_LABEL[platform] ?? "社群",
+    });
+  }
+  return links;
+}
+
 export function partnerToCatalogItem(row: PartnerRow): KolCatalogItem | null {
   const name = String(row.合作夥伴名稱 ?? "").trim();
   const id = String(row.PartnerID ?? "").trim();
   if (!name) return null;
-
-  const capabilities: string[] = [];
-  if (normalizePartnerBoolean(row.廣告經銷夥伴)) capabilities.push("廣告業配");
-  if (normalizePartnerBoolean(row.節目製作夥伴)) capabilities.push("節目製作");
-  if (normalizePartnerBoolean(row.課程製作夥伴)) capabilities.push("課程製作");
-
-  const platforms = [
-    ...new Set(
-      parseSocialUrls(row.社群網站)
-        .map((url) => PLATFORM_LABEL[getPlatform(url)] ?? "社群")
-        .filter(Boolean)
-    ),
-  ];
 
   return {
     id: id || name,
@@ -61,9 +65,7 @@ export function partnerToCatalogItem(row: PartnerRow): KolCatalogItem | null {
     avatarUrl: String(row.形象照 ?? "").trim(),
     channelName: String(row["頻道｜節目名稱"] ?? "").trim(),
     followers: formatFollowers(row.粉絲數),
-    platforms,
-    capabilities,
-    hasPrivateCommunity: normalizePartnerBoolean(row["是否有經營 私域群"]),
+    socialLinks: buildSocialLinks(row.社群網站),
   };
 }
 
