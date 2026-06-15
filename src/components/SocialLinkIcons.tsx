@@ -46,9 +46,17 @@ interface SocialLinkIconsProps {
   /** 社群網站字串（換行或逗號分隔） */
   value: string | null | undefined;
   className?: string;
+  /** dark：深色底（預設）；light：型錄／白底卡片 */
+  variant?: "dark" | "light";
 }
 
-export function SocialLinkIcons({ value, className = "" }: SocialLinkIconsProps) {
+const LINK_BUTTON_CLASS = {
+  dark: "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/20 bg-white/5 text-slate-300 transition hover:border-amber-500/50 hover:bg-amber-500/10 hover:text-amber-400",
+  light:
+    "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-stone-200 bg-stone-50 text-stone-500 transition hover:border-amber-400/70 hover:bg-amber-50 hover:text-amber-700",
+} as const;
+
+export function SocialLinkIcons({ value, className = "", variant = "dark" }: SocialLinkIconsProps) {
   const urls = parseSocialUrls(value);
   if (urls.length === 0) return <span className="text-slate-500">—</span>;
 
@@ -63,7 +71,7 @@ export function SocialLinkIcons({ value, className = "" }: SocialLinkIconsProps)
             href={url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/20 bg-white/5 text-slate-300 transition hover:border-amber-500/50 hover:bg-amber-500/10 hover:text-amber-400"
+            className={LINK_BUTTON_CLASS[variant]}
             title={url}
           >
             {icon}

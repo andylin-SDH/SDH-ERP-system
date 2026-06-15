@@ -1,10 +1,10 @@
 "use client";
 
-import { Fragment } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchSessionWithRetry } from "@/components/ErpLoginPanel";
+import { SocialLinkIcons } from "@/components/SocialLinkIcons";
 import type { PartnerRow } from "@/modules/partners";
 import {
   buildKolCatalogItems,
@@ -55,22 +55,9 @@ function KolCatalogCard({ item }: { item: KolCatalogItem }) {
               </span>
             </div>
           ) : null}
-          {item.socialLinks.length > 0 ? (
-            <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px]">
-              <span className="text-stone-500">平台：</span>
-              {item.socialLinks.map((link, i) => (
-                <Fragment key={link.url}>
-                  {i > 0 ? <span className="text-stone-300">·</span> : null}
-                  <a
-                    href={link.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-semibold text-amber-800 underline decoration-amber-300/70 underline-offset-2 transition hover:text-amber-600"
-                  >
-                    {link.label}
-                  </a>
-                </Fragment>
-              ))}
+          {item.socialUrls ? (
+            <div className="mt-2">
+              <SocialLinkIcons value={item.socialUrls} variant="light" />
             </div>
           ) : null}
         </div>

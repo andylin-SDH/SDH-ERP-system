@@ -1,20 +1,4 @@
 import type { PartnerRow } from "@/modules/partners";
-import { parseSocialUrls, getPlatform } from "@/lib/utils/social-urls";
-
-const PLATFORM_LABEL: Record<string, string> = {
-  facebook: "Facebook",
-  instagram: "Instagram",
-  youtube: "YouTube",
-  line: "LINE",
-  linkedin: "LinkedIn",
-  twitter: "X",
-  link: "連結",
-};
-
-export type KolCatalogSocialLink = {
-  url: string;
-  label: string;
-};
 
 export type KolCatalogItem = {
   id: string;
@@ -25,7 +9,7 @@ export type KolCatalogItem = {
   avatarUrl: string;
   channelName: string;
   followers: string;
-  socialLinks: KolCatalogSocialLink[];
+  socialUrls: string;
 };
 
 function formatFollowers(raw: string | null | undefined): string {
@@ -34,21 +18,6 @@ function formatFollowers(raw: string | null | undefined): string {
   const n = Number(s.replace(/,/g, ""));
   if (Number.isFinite(n) && n >= 10000) return `${(n / 10000).toFixed(n >= 100000 ? 0 : 1)} 萬`;
   return s;
-}
-
-function buildSocialLinks(raw: string | null | undefined): KolCatalogSocialLink[] {
-  const seen = new Set<string>();
-  const links: KolCatalogSocialLink[] = [];
-  for (const url of parseSocialUrls(raw)) {
-    if (seen.has(url)) continue;
-    seen.add(url);
-    const platform = getPlatform(url);
-    links.push({
-      url,
-      label: PLATFORM_LABEL[platform] ?? "社群",
-    });
-  }
-  return links;
 }
 
 export function partnerToCatalogItem(row: PartnerRow): KolCatalogItem | null {
@@ -65,7 +34,7 @@ export function partnerToCatalogItem(row: PartnerRow): KolCatalogItem | null {
     avatarUrl: String(row.形象照 ?? "").trim(),
     channelName: String(row["頻道｜節目名稱"] ?? "").trim(),
     followers: formatFollowers(row.粉絲數),
-    socialLinks: buildSocialLinks(row.社群網站),
+    socialUrls: String(row.社群網站 ?? "").trim(),
   };
 }
 
