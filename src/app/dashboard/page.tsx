@@ -15,7 +15,7 @@ import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, Pa
 import { sortInvoicesByInvoiceNumber } from "@/modules/finance";
 import type { FinanceUpdateFields } from "@/lib/db/finance";
 import type { PayoutRow } from "@/lib/db/payout";
-import { applyDedupeRules } from "@/lib/payout-dedupe";
+import { applyHighestRatePerRecipient } from "@/lib/payout-dedupe";
 import { canEditMasterNumericFields } from "@/config/master-permissions";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
 import { PROJECT_TYPES, costFromTotalByProjectType } from "@/config/project-types";
@@ -23,7 +23,7 @@ import { DEFAULT_PROJECT_STATUS_OPTIONS } from "@/config/project-status-defaults
 import { DEFAULT_PROJECT_EXPENSE_TYPE_OPTIONS } from "@/config/project-expense-type-defaults";
 import { DEFAULT_TASK_TYPE_OPTIONS } from "@/config/task-type-defaults";
 import { MASTER_PAYOUT_DEFAULTS, isPayoutModeB } from "@/config/master-payout-defaults";
-import { DEFAULT_PAYOUT_DEDUPE_RULES, type PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
+import type { PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
 import { TABLE_KEYS, TABLE_LABELS, TABLE_COLUMNS, ROLE_SECTION_KEYS_FOR_UI } from "@/config/table-columns";
 import {
   OVERVIEW_KPI_KEYS,
@@ -847,17 +847,9 @@ function payoutRowWorkflowStage(row: PayoutRow): PayoutWorkflowTabKey {
   return "pending_vendor";
 }
 
-/** 分潤表去重（與列表顯示相同規則） */
-function dedupePayoutRows(
-  rows: PayoutRow[],
-  masterTypeByProjectId: Map<string, string>,
-  payoutDedupeRules: PayoutDedupeRulesByMode
-): PayoutRow[] {
+/** 分潤表去重：同專案同一人只保留分潤成數最高的一列 */
+function dedupePayoutRows(rows: PayoutRow[]): PayoutRow[] {
   if (!rows.length) return rows;
-  const anyPairwise =
-    (payoutDedupeRules.mode_a?.length ?? 0) + (payoutDedupeRules.mode_b?.length ?? 0) > 0;
-  if (!anyPairwise) return rows;
-
   const groupByPid = new Map<string, PayoutRow[]>();
   const pidOrder: string[] = [];
   for (const r of rows) {
@@ -872,13 +864,7 @@ function dedupePayoutRows(
 
   const out: PayoutRow[] = [];
   for (const pid of pidOrder) {
-    const group = groupByPid.get(pid) ?? [];
-    const projectType = masterTypeByProjectId.get(pid) ?? "";
-    const isModeB = isPayoutModeB(projectType);
-    const rulesToApply = isModeB ? payoutDedupeRules.mode_b : payoutDedupeRules.mode_a;
-    let work = group;
-    if (rulesToApply.length) work = applyDedupeRules(work, rulesToApply);
-    out.push(...work);
+    out.push(...applyHighestRatePerRecipient(groupByPid.get(pid) ?? []));
   }
   return out;
 }
@@ -1543,20 +1529,6 @@ export default function DashboardPage() {
     }
     return byTable;
   }, []);
-
-  /** 分潤規則：分模式 A/B；與後端預設合併，避免只更新單一欄位時遺失 mode_a / mode_b */
-  const payoutDedupeRules = useMemo(() => {
-    const raw = systemConfig?.payout_dedupe_rules;
-    if (!raw) return DEFAULT_PAYOUT_DEDUPE_RULES;
-    return {
-      mode_a: raw.mode_a ?? DEFAULT_PAYOUT_DEDUPE_RULES.mode_a,
-      mode_b: raw.mode_b ?? DEFAULT_PAYOUT_DEDUPE_RULES.mode_b,
-      mode_a_merge_same_recipient: raw.mode_a_merge_same_recipient ?? DEFAULT_PAYOUT_DEDUPE_RULES.mode_a_merge_same_recipient,
-      mode_b_merge_same_recipient: raw.mode_b_merge_same_recipient ?? DEFAULT_PAYOUT_DEDUPE_RULES.mode_b_merge_same_recipient,
-      mode_a_priority: raw.mode_a_priority?.length ? raw.mode_a_priority : DEFAULT_PAYOUT_DEDUPE_RULES.mode_a_priority,
-      mode_b_priority: raw.mode_b_priority?.length ? raw.mode_b_priority : DEFAULT_PAYOUT_DEDUPE_RULES.mode_b_priority,
-    };
-  }, [systemConfig?.payout_dedupe_rules]);
 
   /** 角色列表：優先使用系統設定（DB），無則用 config 預設；一律附帶 KOL（訪客入口），避免舊 DB 未列而選不到 */
   const displayRoles = useMemo(() => {
@@ -2584,14 +2556,14 @@ export default function DashboardPage() {
   }, [masterList]);
 
   const dedupedPayoutForDisplay = useMemo(
-    () => dedupePayoutRows(filteredPayout, masterTypeByProjectId, payoutDedupeRules),
-    [filteredPayout, masterTypeByProjectId, payoutDedupeRules]
+    () => dedupePayoutRows(filteredPayout),
+    [filteredPayout]
   );
 
   /** 財務付款作業：不依「領取人」列級過濾，與會計全公司口徑一致 */
   const dedupedPayoutForFinanceEmployee = useMemo(
-    () => dedupePayoutRows(payoutList, masterTypeByProjectId, payoutDedupeRules),
-    [payoutList, masterTypeByProjectId, payoutDedupeRules]
+    () => dedupePayoutRows(payoutList),
+    [payoutList]
   );
 
   const payoutWorkflowFiltered = useMemo(
@@ -5480,116 +5452,17 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* 分潤規則：同一人不重複計算（分模式 A / B） */}
+              {/* 分潤規則：同專案同一人只保留最高成數 */}
               <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="font-semibold text-amber-800">分潤規則（同一人不重複計算）</h3>
-                  <button
-                    type="button"
-                    disabled={savingConfig === "payout_dedupe_rules"}
-                    onClick={async () => {
-                      setSavingConfig("payout_dedupe_rules");
-                      try {
-                        const res = await fetch("/api/system-config", {
-                          method: "PUT",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ key: "payout_dedupe_rules", value: payoutDedupeRules }),
-                        });
-                        const data = (await safeResJson(res)) as { ok?: boolean; config?: { payout_dedupe_rules?: PayoutDedupeRulesByMode } };
-                        if (res.ok && data.ok && data.config) {
-                          setSystemConfig((c) => (c ? { ...c, payout_dedupe_rules: data.config!.payout_dedupe_rules } : null));
-                          await refreshDashboardData(["systemConfig", "payout"]);
-                        }
-                      } catch {}
-                      setSavingConfig(null);
-                    }}
-                    className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
-                  >
-                    {savingConfig === "payout_dedupe_rules" ? "儲存中" : "儲存"}
-                  </button>
-                </div>
-                <p className="mb-4 text-xs text-stone-500">
-                  設定「成對角色」規則：當指定角色為同一人時，只保留你選擇的角色（例如「專案BDPM、專案管理員同一人時只計算專案BDPM」）。
-                  點「儲存」後會依目前大總表<strong className="text-stone-500">自動重算並更新所有專案的分潤表</strong>。
+                <h3 className="font-semibold text-amber-800">分潤規則</h3>
+                <p className="mt-2 text-sm text-stone-600">
+                  同一專案內，若同一人擔任多個分潤角色，系統會自動只保留
+                  <strong className="text-stone-800">分潤成數最高</strong>的那一筆（成數相同則取金額較大者）。
+                  不需再手動設定成對角色規則。
                 </p>
-
-                {[
-                  {
-                    mode: "mode_a" as const,
-                    label: "模式 A（製作案、活動案）",
-                    roles: ["專案BDPM", "專案引薦人", "專案管理員", "執行管理員"] as const,
-                  },
-                  {
-                    mode: "mode_b" as const,
-                    label: "模式 B（廣告業配、團購）",
-                    roles: ["專案開發人", "經紀人", "主管", "KOL開發者"] as const,
-                  },
-                ].map(({ mode, label, roles }) => (
-                  <div key={mode} className="mb-4 last:mb-0">
-                    <p className="mb-2 text-xs font-medium text-stone-500">{label}</p>
-                    <div className="space-y-2">
-                      {payoutDedupeRules[mode].map((rule, idx) => (
-                        <div key={idx} className="flex flex-wrap items-center gap-2 rounded-lg border border-stone-200/90 bg-white/90 px-3 py-2">
-                          <span className="text-xs text-stone-500">當</span>
-                          <span className="font-medium text-stone-600">{rule.roles.join("、")}</span>
-                          <span className="text-xs text-stone-500">為同一人時 → 只計算</span>
-                          <span className="font-semibold text-amber-800">{rule.keep}</span>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setSystemConfig((c) => {
-                                const base = c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} };
-                                const next = { ...payoutDedupeRules, [mode]: payoutDedupeRules[mode].filter((_, i) => i !== idx) };
-                                return { ...base, payout_dedupe_rules: next };
-                              })
-                            }
-                            className="ml-auto text-stone-500 hover:text-red-400"
-                            title="刪除此規則"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-stone-500">新增：</span>
-                      <select id={`new-dedupe-keep-${mode}`} className="rounded border border-stone-300 bg-stone-50 px-2 py-1 text-xs text-stone-900">
-                        {roles.map((r) => (
-                          <option key={r} value={r}>只計算 {r}</option>
-                        ))}
-                      </select>
-                      <span className="text-xs text-stone-500">當</span>
-                      {roles.map((r) => (
-                        <label key={r} className="flex items-center gap-1 text-xs text-stone-600">
-                          <input type="checkbox" className="rounded border-stone-300" id={`new-dedupe-role-${mode}-${r}`} />
-                          {r}
-                        </label>
-                      ))}
-                      <span className="text-xs text-stone-500">為同一人時</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const keepSelect = document.getElementById(`new-dedupe-keep-${mode}`) as HTMLSelectElement | null;
-                          const selectedRoles = roles.filter((r) => (document.getElementById(`new-dedupe-role-${mode}-${r}`) as HTMLInputElement | null)?.checked);
-                          const keep = (keepSelect?.value ?? roles[0]) as (typeof roles)[number];
-                          if (selectedRoles.length < 2 || !selectedRoles.includes(keep)) return;
-                          setSystemConfig((c) => {
-                            const base = c ?? { master_payout_defaults: { ...MASTER_PAYOUT_DEFAULTS }, project_types: [...PROJECT_TYPES], role_visibility: {} };
-                            const next = { ...payoutDedupeRules, [mode]: [...payoutDedupeRules[mode], { roles: selectedRoles, keep }] };
-                            return { ...base, payout_dedupe_rules: next };
-                          });
-                          roles.forEach((r) => {
-                            const el = document.getElementById(`new-dedupe-role-${mode}-${r}`) as HTMLInputElement | null;
-                            if (el) el.checked = false;
-                          });
-                        }}
-                        className="rounded bg-amber-100/90 px-2 py-1 text-xs font-medium text-amber-800 transition hover:bg-amber-200/60"
-                      >
-                        新增
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                <p className="mt-2 text-xs text-stone-500">
+                  調整上方「分潤預設成數」並儲存後，會依目前大總表自動重算並更新所有專案的分潤表。
+                </p>
               </div>
 
               {/* 3. 專案類型 */}

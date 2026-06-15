@@ -10,9 +10,8 @@ import { isPayoutModeB } from "@/config/master-payout-defaults";
 import type { MasterRow } from "@/lib/db/master";
 import { getMasterList } from "@/lib/db/master";
 import { getPartners } from "@/lib/db/partners";
-import { DEFAULT_PAYOUT_DEDUPE_RULES, type PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
 import { getSystemConfig } from "@/lib/db/system-config";
-import { applyDedupeRules } from "@/lib/payout-dedupe";
+import { applyHighestRatePerRecipient } from "@/lib/payout-dedupe";
 import { normalizeDecimalString } from "@/lib/number-normalize";
 
 export interface PayoutRow {
@@ -75,10 +74,10 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
 
   const list = (data ?? []).map((r) => rowToPayout(r as Record<string, unknown>));
 
-  // 為了確保「系統設定分潤規則（同一人不重複）」立刻在分潤表 UI 生效，
+  // 為了確保「同專案同一人只保留最高成數分潤」立刻在分潤表 UI 生效，
   // 讀取時就先做兩件事：
-  // 1) 用 專案ID 從大總表補回 專案營收 + 專案類型（決定模式 A/B）
-  // 2) 依模式套用 dedupe 規則後回傳結果（避免前端剛刷新仍看到舊資料）
+  // 1) 用 專案ID 從大總表補回 專案營收
+  // 2) 依專案分組後套用去重規則
 
   const projectIds = [...new Set(list.map((r) => String(r.專案ID ?? "").trim()).filter(Boolean))];
   if (projectIds.length === 0) return list;
@@ -92,14 +91,11 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
   if (masterErr) return list;
 
   const revenueByProjectId = new Map<string, string>();
-  const modeBByProjectId = new Map<string, boolean>();
   for (const m of masters ?? []) {
     const pid = String(m?.專案ID ?? "").trim();
     const revenue = String(m?.專案營收 ?? "").trim();
-    const projectType = String(m?.專案類型 ?? "").trim();
     if (!pid) continue;
     if (revenue) revenueByProjectId.set(pid, revenue);
-    modeBByProjectId.set(pid, isPayoutModeB(projectType));
   }
 
   const listWithRevenue = list.map((r) => ({
@@ -107,10 +103,6 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
     專案營收: r.專案營收 ?? (r.專案ID ? revenueByProjectId.get(String(r.專案ID).trim()) : undefined),
   }));
 
-  const { payout_dedupe_rules } = await getSystemConfig();
-  const dedupeRulesByMode = payout_dedupe_rules ?? DEFAULT_PAYOUT_DEDUPE_RULES;
-
-  // 依「專案」分組後套用規則
   const groupByPid = new Map<string, PayoutRow[]>();
   const pidOrder: string[] = [];
   for (const r of listWithRevenue) {
@@ -126,10 +118,7 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
   const out: PayoutRow[] = [];
   for (const pid of pidOrder) {
     const rows = groupByPid.get(pid) ?? [];
-    const isModeB = modeBByProjectId.get(pid) ?? false;
-    const rulesToApply = isModeB ? dedupeRulesByMode.mode_b : dedupeRulesByMode.mode_a;
-    const filtered = applyDedupeRules(rows as unknown as any, rulesToApply) as unknown as PayoutRow[];
-    out.push(...filtered);
+    out.push(...applyHighestRatePerRecipient(rows));
   }
 
   return out;
@@ -172,11 +161,7 @@ type PayoutDefaults = Record<string, string>;
 /**
  * 依大總表一筆專案與成數預設，產生分潤列並同步至分潤表（先刪該專案舊列再插入）
  */
-export async function syncPayoutForProject(
-  master: MasterRow,
-  defaults: PayoutDefaults,
-  dedupeRules: PayoutDedupeRulesByMode = DEFAULT_PAYOUT_DEDUPE_RULES
-): Promise<void> {
+export async function syncPayoutForProject(master: MasterRow, defaults: PayoutDefaults): Promise<void> {
   const 專案ID = master.專案ID ?? "";
   const 專案名稱 = master.專案名稱 ?? null;
   const 專案總金額未稅 = master.專案總金額未稅 ?? null;
@@ -275,8 +260,7 @@ export async function syncPayoutForProject(
     }
   }
 
-  const rulesToApply = isPayoutModeB(專案類型) ? dedupeRules.mode_b : dedupeRules.mode_a;
-  const filteredRows = applyDedupeRules(rows, rulesToApply);
+  const filteredRows = applyHighestRatePerRecipient(rows);
   if (filteredRows.length > 0) await insertPayoutRows(filteredRows);
 }
 
@@ -319,12 +303,11 @@ export async function updatePayoutRemitDate(
 }
 
 export async function syncAllPayoutsFromMaster(): Promise<void> {
-  const { master_payout_defaults, payout_dedupe_rules } = await getSystemConfig();
+  const { master_payout_defaults } = await getSystemConfig();
   const masters = await getMasterList();
-  const dedupe = payout_dedupe_rules ?? DEFAULT_PAYOUT_DEDUPE_RULES;
   for (const master of masters) {
     try {
-      await syncPayoutForProject(master, master_payout_defaults, dedupe);
+      await syncPayoutForProject(master, master_payout_defaults);
     } catch (e) {
       log("payout.syncAll", "syncPayoutForProject 失敗", { 專案ID: master.專案ID, error: String(e) });
     }

@@ -1,6 +1,6 @@
 /**
- * 分潤去重規則預設（前後端共用，不依賴 Supabase）
- * 實際儲存：system_config.key = payout_dedupe_rules（JSON）
+ * 分潤去重（system_config 歷史欄位；邏輯已固定為「同一人取最高成數」）
+ * 實際儲存：system_config.key = payout_dedupe_rules（JSON，已不再使用手動規則）
  */
 
 export type PayoutDedupeRule = { roles: string[]; keep: string };
@@ -22,7 +22,7 @@ export const DEFAULT_MODE_B_PRIORITY = ["專案開發人", "經紀人", "主管"
 /** 與 lib/db/system-config 的 DEFAULT 一致 */
 export const DEFAULT_PAYOUT_DEDUPE_RULES: PayoutDedupeRulesByMode = {
   mode_a: [],
-  mode_b: [{ roles: ["經紀人", "主管"], keep: "經紀人" }],
+  mode_b: [],
   mode_a_merge_same_recipient: false,
   mode_b_merge_same_recipient: false,
   mode_a_priority: [...DEFAULT_MODE_A_PRIORITY],

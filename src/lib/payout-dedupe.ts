@@ -1,8 +1,8 @@
 /**
  * 分潤「同一人不重複計算」：與 sync / 讀取 API 共用，避免前後端字串不一致。
- * 舊資料可能用「角色」欄、或僅寫 BDPM／管理員，需與系統設定規則內的正式名稱對齊。
  */
 
+import { parseAmount, parsePayoutRate } from "@/lib/payout-utils";
 import type { PayoutDedupeRule } from "@/config/payout-dedupe-defaults";
 
 /** 去除空白後比對用的鍵（中英混合：只壓縮空白，不改變大小寫以外的中文） */
@@ -51,9 +51,46 @@ export function normalizeRecipientForDedupe(s: string | null | undefined): strin
 }
 
 /**
- * 套用「同一人不重複計算」：多角色同一人時只保留 keep 所指角色。
- * 領取人可為空字串：多列皆空時仍視為同一「空白身分」嘗試去重（舊資料常缺領取人）
+ * 同一專案內，同一領取人僅保留一列：取分潤成數最高者；成數相同則取分潤金額較大者。
  */
+export function applyHighestRatePerRecipient<
+  T extends { 分潤成數?: string | null; 分潤金額?: string | null; 領取人?: string | null },
+>(rows: T[]): T[] {
+  if (rows.length <= 1) return rows;
+
+  const byRecipient = new Map<string, number[]>();
+  rows.forEach((row, i) => {
+    const key = normalizeRecipientForDedupe(row.領取人) || "__empty__";
+    if (!byRecipient.has(key)) byRecipient.set(key, []);
+    byRecipient.get(key)!.push(i);
+  });
+
+  const keep = new Set<number>();
+  for (const indices of byRecipient.values()) {
+    if (indices.length <= 1) {
+      indices.forEach((idx) => keep.add(idx));
+      continue;
+    }
+    let best = indices[0];
+    let bestRate = parsePayoutRate(rows[best].分潤成數);
+    let bestAmount = parseAmount(rows[best].分潤金額);
+    for (let k = 1; k < indices.length; k++) {
+      const idx = indices[k];
+      const rate = parsePayoutRate(rows[idx].分潤成數);
+      const amount = parseAmount(rows[idx].分潤金額);
+      if (rate > bestRate || (rate === bestRate && amount > bestAmount)) {
+        best = idx;
+        bestRate = rate;
+        bestAmount = amount;
+      }
+    }
+    keep.add(best);
+  }
+
+  return rows.filter((_, i) => keep.has(i));
+}
+
+/** @deprecated 改為 applyHighestRatePerRecipient；保留供舊資料遷移參考 */
 export function applyDedupeRules<T extends { 分潤類型?: string | null; 領取人?: string | null }>(
   rows: T[],
   rules: PayoutDedupeRule[]

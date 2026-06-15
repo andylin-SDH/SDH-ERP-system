@@ -13,7 +13,6 @@ import {
 } from "@/config/master-permissions";
 import { createMaster, getMasterById, getMasterList, updateMaster, type NewMasterInput, type UpdateMasterInput } from "@/lib/db/master";
 import { deleteMasterProjectByRowId } from "@/lib/db/master-project-delete";
-import { DEFAULT_PAYOUT_DEDUPE_RULES } from "@/config/payout-dedupe-defaults";
 import { getSystemConfig } from "@/lib/db/system-config";
 import { syncPayoutForProject } from "@/lib/db/payout";
 import { syncFinanceForProject } from "@/lib/db/finance";
@@ -43,7 +42,7 @@ export async function POST(request: NextRequest) {
     if (!專案ID) {
       return NextResponse.json({ ok: false, error: "專案ID 為必填" }, { status: 400 });
     }
-    const { master_payout_defaults, role_permissions, payout_dedupe_rules } = await getSystemConfig();
+    const { master_payout_defaults, role_permissions } = await getSystemConfig();
     const role = auth.user.role;
     const canCreate = role_permissions.master.create.includes(role);
     if (!canCreate) {
@@ -86,7 +85,7 @@ export async function POST(request: NextRequest) {
 
     const master = await createMaster(payload);
     try {
-      await syncPayoutForProject(master, master_payout_defaults, payout_dedupe_rules ?? DEFAULT_PAYOUT_DEDUPE_RULES);
+      await syncPayoutForProject(master, master_payout_defaults);
       await syncFinanceForProject(master);
     } catch (e) {
       console.error("syncPayoutForProject after POST /api/master", e);
@@ -156,9 +155,9 @@ export async function PATCH(request: NextRequest) {
 
     const master = await updateMaster(payload);
     if (master) {
-      const { master_payout_defaults, payout_dedupe_rules } = await getSystemConfig();
+      const { master_payout_defaults } = await getSystemConfig();
       try {
-        await syncPayoutForProject(master, master_payout_defaults, payout_dedupe_rules ?? DEFAULT_PAYOUT_DEDUPE_RULES);
+        await syncPayoutForProject(master, master_payout_defaults);
         await syncFinanceForProject(master);
       } catch (e) {
         console.error("syncPayoutForProject after PATCH /api/master", e);

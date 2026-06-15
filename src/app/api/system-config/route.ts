@@ -49,8 +49,8 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "不允許的 key" }, { status: 400 });
     }
     await updateSystemConfig(key, body.value);
-    // 分潤規則或成數變更後，重新同步所有專案的分潤表（否則僅在編輯大總表時才會套用）
-    if (key === "payout_dedupe_rules" || key === "master_payout_defaults") {
+    // 分潤成數變更後，重新同步所有專案的分潤表（否則僅在編輯大總表時才會套用）
+    if (key === "master_payout_defaults") {
       try {
         await syncAllPayoutsFromMaster();
       } catch (e) {
