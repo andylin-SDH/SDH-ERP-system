@@ -517,6 +517,32 @@ function InvoiceProjectSearchSelect({
   );
 }
 
+function ClickableProjectName({
+  name,
+  projectId,
+  onOpen,
+}: {
+  name: string;
+  projectId: string;
+  onOpen: (projectId: string) => void;
+}) {
+  const label = name.trim() || "—";
+  const pid = projectId.trim();
+  if (!pid || label === "—") {
+    return <span className="truncate">{label}</span>;
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(pid)}
+      className="max-w-full truncate text-left font-medium text-amber-900 underline decoration-amber-300/80 underline-offset-2 transition hover:text-amber-700 hover:decoration-amber-500"
+      title={`查看專案內容：${label}`}
+    >
+      {label}
+    </button>
+  );
+}
+
 function TaskProjectInfoButton({ project }: { project: MasterRow | undefined }) {
   if (!project) return null;
   const fields = [
@@ -2346,6 +2372,22 @@ export default function DashboardPage() {
     }
     return m;
   }, [masterList]);
+
+  const openProjectDetailById = useCallback(
+    (projectId: string) => {
+      const master = masterByProjectId.get(projectId.trim());
+      if (!master) return;
+      setSelectedMaster(master);
+      setIsEditingMaster(false);
+      setSaveMasterError(null);
+      setShowDeleteMasterConfirm(false);
+      setPendingDeleteMasterTaskTemplate(null);
+      window.setTimeout(() => {
+        document.getElementById("master-project-content")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 80);
+    },
+    [masterByProjectId]
+  );
 
   /**
    * KOL 區塊主列表欄位（③ 可見欄位交集；主從式 UI 改由 PartnersMasterDetail 呈現）
@@ -7631,8 +7673,13 @@ export default function DashboardPage() {
                               </p>
                             )}
                             {showTitle && (
-                              <p className="truncate text-sm text-stone-600" title={String(r.專案名稱 ?? "")}>
-                                <span className="text-stone-500">專案</span> {String(r.專案名稱 ?? "—")}
+                              <p className="truncate text-sm text-stone-600">
+                                <span className="text-stone-500">專案</span>{" "}
+                                <ClickableProjectName
+                                  name={String(r.專案名稱 ?? "")}
+                                  projectId={String(r.專案ID ?? "")}
+                                  onOpen={openProjectDetailById}
+                                />
                               </p>
                             )}
                           </div>
@@ -7717,8 +7764,20 @@ export default function DashboardPage() {
                       visiblePayoutRows.map((row, i) => (
                         <tr key={row.id ?? i} className="hover:bg-amber-50/80">
                           {payoutColsForActiveWorkflowTab.map((k) => {
-                            const val = (row as unknown as Record<string, unknown>)[k];
+                            const r = row as unknown as Record<string, unknown>;
+                            const val = r[k];
                             const str = k === "分潤金額" ? formatAmount(String(val ?? "")) : String(val ?? "—");
+                            if (k === "專案名稱") {
+                              return (
+                                <td key={k} className="max-w-[220px] px-4 py-3.5 text-sm">
+                                  <ClickableProjectName
+                                    name={String(val ?? "")}
+                                    projectId={String(r.專案ID ?? "")}
+                                    onOpen={openProjectDetailById}
+                                  />
+                                </td>
+                              );
+                            }
                             return (
                               <td
                                 key={k}
@@ -10568,7 +10627,7 @@ export default function DashboardPage() {
                 </div>
               </section>
 
-              <section>
+              <section id="master-project-content">
                 <h3 className="mb-3 text-base font-bold text-amber-800">內容與備註</h3>
                 {isEditingMaster ? (
                   <div className="space-y-4">
