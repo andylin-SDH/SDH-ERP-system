@@ -47,6 +47,7 @@ export function normalizeRecipientForDedupe(s: string | null | undefined): strin
     .normalize("NFKC")
     .replace(/[\u200B-\u200D\uFEFF]/g, "")
     .replace(/\s+/g, "")
+    .toLowerCase()
     .trim();
 }
 

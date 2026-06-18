@@ -88,14 +88,15 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
     .from("大總表")
     .select("專案ID, 專案營收, 專案類型")
     .in("專案ID", projectIds);
-  if (masterErr) return list;
 
   const revenueByProjectId = new Map<string, string>();
-  for (const m of masters ?? []) {
-    const pid = String(m?.專案ID ?? "").trim();
-    const revenue = String(m?.專案營收 ?? "").trim();
-    if (!pid) continue;
-    if (revenue) revenueByProjectId.set(pid, revenue);
+  if (!masterErr) {
+    for (const m of masters ?? []) {
+      const pid = String(m?.專案ID ?? "").trim();
+      const revenue = String(m?.專案營收 ?? "").trim();
+      if (!pid) continue;
+      if (revenue) revenueByProjectId.set(pid, revenue);
+    }
   }
 
   const listWithRevenue = list.map((r) => ({
