@@ -619,8 +619,8 @@ function financeRowToUpdatePayload(row: FinanceRow): FinanceUpdateFields {
   };
 }
 
-function isFinanceByProjectEditableColumn(k: string): boolean {
-  return k === "廠商付款日期" || k === "員工分潤日期";
+function isFinanceByProjectEditableColumn(_k: string): boolean {
+  return false;
 }
 
 const LS_INVOICE_PREFIX = "sdh-invoice-seq-prefix";
@@ -1108,6 +1108,7 @@ export default function DashboardPage() {
   const [masterTaskTemplates, setMasterTaskTemplates] = useState<MasterTaskTemplate[]>([]);
   const [masterTaskTemplatesLoading, setMasterTaskTemplatesLoading] = useState(false);
   const [masterTaskTemplatesSaving, setMasterTaskTemplatesSaving] = useState(false);
+  const [masterTaskTemplatesRunning, setMasterTaskTemplatesRunning] = useState(false);
   const [masterTaskTemplatesError, setMasterTaskTemplatesError] = useState<string | null>(null);
   const [deletingMasterTaskTemplateId, setDeletingMasterTaskTemplateId] = useState<number | null>(null);
   const [pendingDeleteMasterTaskTemplate, setPendingDeleteMasterTaskTemplate] = useState<MasterTaskTemplate | null>(null);
@@ -3264,6 +3265,38 @@ export default function DashboardPage() {
     []
   );
 
+  const runMasterTaskTemplatesNow = useCallback(async () => {
+    setMasterTaskTemplatesRunning(true);
+    setMasterTaskTemplatesError(null);
+    try {
+      const res = await fetch("/api/master/task-templates/run", { method: "POST", cache: "no-store" });
+      const data = (await safeResJson(res)) as {
+        ok?: boolean;
+        error?: string;
+        created?: number;
+        skipped?: number;
+        errors?: string[];
+      };
+      if (!res.ok || !data.ok) {
+        setMasterTaskTemplatesError(data.error ?? "執行排程失敗");
+        return;
+      }
+      const pid = String(selectedMaster?.專案ID ?? "").trim();
+      if (pid) await loadMasterTaskTemplates(pid);
+      await refreshDashboardData(["tasks"]);
+      const errHint = data.errors?.length ? `（${data.errors[0]}）` : "";
+      setMasterTaskTemplatesError(
+        data.created
+          ? `已建立 ${data.created} 筆任務${errHint}`
+          : `本次未建立新任務（略過 ${data.skipped ?? 0} 筆）${errHint}`
+      );
+    } catch (e) {
+      setMasterTaskTemplatesError(e instanceof Error ? e.message : "執行排程失敗");
+    } finally {
+      setMasterTaskTemplatesRunning(false);
+    }
+  }, [loadMasterTaskTemplates, refreshDashboardData, selectedMaster?.專案ID]);
+
   useLayoutEffect(() => {
     invoicesRef.current = invoices;
   }, [invoices]);
@@ -3405,9 +3438,7 @@ export default function DashboardPage() {
       }
       await refreshDashboardData(["finance", "payout"]);
       setFinanceVendorResyncMessage(
-        `已依發票入帳日補同步分潤表（掃描 ${data.scanned ?? 0} 個專案，更新財務 ${data.updated ?? 0} 筆${
-          data.skippedLongTerm ? `；略過長期案 ${data.skippedLongTerm} 個` : ""
-        }）`
+        `已依發票入帳日補同步分潤表（掃描 ${data.scanned ?? 0} 個專案，更新財務 ${data.updated ?? 0} 筆）`
       );
     } catch (e) {
       setFinanceVendorResyncMessage(e instanceof Error ? e.message : "同步失敗");
@@ -5458,7 +5489,7 @@ export default function DashboardPage() {
                 <p className="mt-2 text-sm text-stone-600">
                   同一專案內，若同一人擔任多個分潤角色，系統會自動只保留
                   <strong className="text-stone-800">分潤成數最高</strong>的那一筆（成數相同則取金額較大者）。
-                  不需再手動設定成對角色規則。
+                  分潤金額以專案關聯發票的<strong className="text-stone-800">發票金額含稅加總</strong>為基準；尚無綁定發票則不產生分潤列。
                 </p>
                 <p className="mt-2 text-xs text-stone-500">
                   調整上方「分潤預設成數」並儲存後，會依目前大總表自動重算並更新所有專案的分潤表。
@@ -7848,7 +7879,7 @@ export default function DashboardPage() {
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{financePayoutEditError}</p>
               )}
               <p className="mb-2 text-[11px] text-stone-500">
-                僅列出分潤表上<strong className="text-stone-600">廠商付款日已有值</strong>的列。發票在「已入帳」後，若此處仍空，請按「同步入帳至分潤」；<strong className="text-stone-600">長期案</strong>不從發票自動同步，請至「依專案」填寫。
+                僅列出分潤表上<strong className="text-stone-600">廠商付款日已有值</strong>的列（由發票入帳自動同步）。若發票已入帳仍為空，請按「同步入帳至分潤」。
               </p>
               <ListAmountSummary
                 count={searchedFinanceEmployeePayout.length}
@@ -7964,7 +7995,7 @@ export default function DashboardPage() {
               )}
               {finance.length > 0 && (
                 <p className="mb-2 text-[11px] text-stone-500">
-                  一般專案「廠商付款日期」可由發票清冊已入帳發票自動帶入並同步至分潤表；<strong className="text-stone-600">長期案</strong>發票僅作收款紀錄，請在此手動填寫以開啟員工分潤。員工分潤請至「員工分潤付款」逐筆勾選；「員工分潤日期」於該專案全員付清後自動帶入。
+                  廠商付款日期由發票清冊入帳後自動帶入並同步至分潤表。員工分潤請至「員工分潤付款」逐筆勾選；員工分潤日期於該專案全員付清後自動帶入。此處日期欄位不可手動填寫。
                 </p>
               )}
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
@@ -10158,7 +10189,11 @@ export default function DashboardPage() {
 
               {(selectedMaster.長期案 || isEditingMaster) && (
                 <section>
-                  <h3 className="mb-3 text-base font-bold text-amber-800">長期案排程任務（MVP）</h3>
+                  <h3 className="mb-3 text-base font-bold text-amber-800">長期案排程任務</h3>
+                  <p className="mb-3 text-xs text-stone-500">
+                    長期案用於定期請款追蹤：系統會在指定日期（提前 N 天）自動建立任務提醒開立發票。
+                    分潤仍須等發票入帳後才會產生，與一般專案相同。
+                  </p>
                   {!selectedMaster.長期案 && (
                     <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">請先將此專案儲存為「長期案」，再設定固定排程任務。</p>
                   )}
@@ -10167,7 +10202,15 @@ export default function DashboardPage() {
                   )}
                   {selectedMaster.長期案 && (
                     <div className="space-y-3">
-                      <div className="flex justify-end">
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          disabled={masterTaskTemplatesRunning}
+                          onClick={() => void runMasterTaskTemplatesNow()}
+                          className="rounded-xl border border-stone-300 bg-white px-3 py-1.5 text-sm font-semibold text-stone-700 transition hover:bg-stone-50 disabled:opacity-60"
+                        >
+                          {masterTaskTemplatesRunning ? "執行中…" : "立即執行排程"}
+                        </button>
                         <button
                           type="button"
                           onClick={() => setShowCreateMasterTaskTemplateForm((v) => !v)}

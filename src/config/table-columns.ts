@@ -99,7 +99,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "專案ID", label: "專案ID" },
     { key: "專案名稱", label: "專案名稱" },
     { key: "專案總金額未稅", label: "專案總金額未稅" },
-    { key: "專案營收", label: "專案營收" },
+    { key: "專案營收", label: "分潤基準金額" },
     { key: "廠商預計付款日", label: "廠商預計付款日" },
     { key: "廠商付款日期", label: "廠商付款日期" },
     { key: "分潤匯款日期", label: "分潤匯款日期" },

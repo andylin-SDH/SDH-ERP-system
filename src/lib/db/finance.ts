@@ -216,10 +216,9 @@ async function syncPayoutRowsFromFinanceDates(
 }
 
 /**
- * 依專案ID 更新財務列（僅廠商付款日期、員工分潤日期）。migration 需已將欄位更名。
- * 成功後會同步更新該專案所有分潤表列之廠商付款日期／分潤匯款日。
+ * 系統內部：由發票同步或分潤回寫更新財務日期（非手動 API）
  */
-export async function updateFinanceBy專案ID(專案ID: string, row: FinanceUpdateFields): Promise<FinanceRow> {
+async function applyFinanceDatesInternal(專案ID: string, row: FinanceUpdateFields): Promise<FinanceRow> {
   const pid = String(專案ID ?? "").trim();
   if (!pid) throw new Error("缺少專案ID");
 
@@ -243,6 +242,19 @@ export async function updateFinanceBy專案ID(專案ID: string, row: FinanceUpda
   return updated;
 }
 
+/**
+ * 依專案ID 更新財務列（僅供 API；日期欄位不可手動填寫）
+ */
+export async function updateFinanceBy專案ID(專案ID: string, row: FinanceUpdateFields): Promise<FinanceRow> {
+  if (row.廠商付款日期 !== undefined) {
+    throw new Error("廠商付款日期請由發票清冊入帳後自動同步，不可手動填寫");
+  }
+  if (row.員工分潤日期 !== undefined) {
+    throw new Error("員工分潤日期請至「員工分潤付款」勾選後自動帶入，不可手動填寫");
+  }
+  throw new Error("目前無可手動更新的財務欄位");
+}
+
 /** 取某專案所有已存檔發票中最晚的廠商付款日（無則 null） */
 function resolveVendorPaymentDateFromInvoicesForProject(專案ID: string, invoices: InvoiceRow[]): string | null {
   const dates = invoices
@@ -253,20 +265,9 @@ function resolveVendorPaymentDateFromInvoicesForProject(專案ID: string, invoic
   return [...dates].sort().reverse()[0] ?? null;
 }
 
-async function buildMasterByProjectIdMap(): Promise<Map<string, MasterRow>> {
-  const masters = await getMasterList();
-  const map = new Map<string, MasterRow>();
-  for (const m of masters) {
-    const pid = String(m.專案ID ?? "").trim();
-    if (pid) map.set(pid, m);
-  }
-  return map;
-}
-
 /**
  * 將發票清冊「廠商付款日期」彙整至財務依專案，並同步分潤表。
  * 發票須已綁定專案ID；若財務列不存在會先從大總表建立。
- * 長期案不自動同步（發票僅作收款紀錄，由財務在依專案手動填寫）。
  */
 export async function syncFinanceVendorDateFromInvoicesForProject(
   專案ID: string,
@@ -276,11 +277,9 @@ export async function syncFinanceVendorDateFromInvoicesForProject(
   const pid = String(專案ID ?? "").trim();
   if (!pid) return false;
 
-  const masterMap = masterByProjectId ?? (await buildMasterByProjectIdMap());
-  if (Boolean(masterMap.get(pid)?.長期案)) return false;
-
   const invoices = invoicesCache ?? (await getInvoices());
   const nextVendorDate = resolveVendorPaymentDateFromInvoicesForProject(pid, invoices);
+  if (!nextVendorDate) return false;
 
   const supabase = getSupabase();
   let { data: finRow, error: finErr } = await supabase.from("財務").select("*").eq("專案ID", pid).maybeSingle();
@@ -300,7 +299,7 @@ export async function syncFinanceVendorDateFromInvoicesForProject(
   const curVendor = normalizeDateOrNull(current.廠商付款日期);
 
   if (curVendor !== nextVendorDate) {
-    await updateFinanceBy專案ID(pid, {
+    await applyFinanceDatesInternal(pid, {
       廠商付款日期: nextVendorDate,
       員工分潤日期: current.員工分潤日期 ?? null,
     });
@@ -314,39 +313,32 @@ export async function syncFinanceVendorDateFromInvoicesForProject(
   return false;
 }
 
-/** 對所有有綁專案的發票，依專案回寫財務廠商付款日（既有資料 backfill 用；略過長期案） */
+/** 對所有有綁專案的發票，依專案回寫財務廠商付款日（既有資料 backfill 用） */
 export async function syncAllFinanceVendorDatesFromInvoices(): Promise<{
   updated: number;
   scanned: number;
-  skippedLongTerm: number;
 }> {
   const invoices = await getInvoices();
-  const masterByProjectId = await buildMasterByProjectIdMap();
   const pids = new Set<string>();
   for (const inv of invoices) {
     const pid = String(inv.專案ID ?? "").trim();
     if (pid) pids.add(pid);
   }
   let updated = 0;
-  let skippedLongTerm = 0;
   for (const pid of pids) {
-    if (Boolean(masterByProjectId.get(pid)?.長期案)) {
-      skippedLongTerm += 1;
-      continue;
-    }
-    if (await syncFinanceVendorDateFromInvoicesForProject(pid, invoices, masterByProjectId)) updated += 1;
+    if (await syncFinanceVendorDateFromInvoicesForProject(pid, invoices)) updated += 1;
   }
-  return { updated, scanned: pids.size, skippedLongTerm };
+  return { updated, scanned: pids.size };
 }
 
 async function syncFinanceVendorDatesForInvoiceProjectIds(projectIds: Iterable<string>): Promise<void> {
   const pids = [...new Set([...projectIds].map((id) => String(id ?? "").trim()).filter(Boolean))];
   if (pids.length === 0) return;
   const invoices = await getInvoices();
-  const masterByProjectId = await buildMasterByProjectIdMap();
+  const { recalculatePayoutAmountsForProject } = await import("@/lib/db/payout");
   for (const pid of pids) {
     try {
-      await syncFinanceVendorDateFromInvoicesForProject(pid, invoices, masterByProjectId);
+      await recalculatePayoutAmountsForProject(pid, invoices);
     } catch {
       /* best effort */
     }
