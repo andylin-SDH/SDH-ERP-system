@@ -1334,6 +1334,9 @@ export default function DashboardPage() {
   } | null>(null);
   const [newRoleName, setNewRoleName] = useState("");
   const [savingConfig, setSavingConfig] = useState<string | null>(null);
+  const [configSaveNotice, setConfigSaveNotice] = useState<string | null>(null);
+  const [payoutResyncNotice, setPayoutResyncNotice] = useState<string | null>(null);
+  const [payoutResyncing, setPayoutResyncing] = useState(false);
   const [savingRoles, setSavingRoles] = useState(false);
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
@@ -3256,7 +3259,15 @@ export default function DashboardPage() {
             .then(safeResJson)
             .then((res) => {
               if (!(res as { ok?: boolean }).ok) return;
-              setPayoutList(((res as { list?: PayoutRow[] }).list) ?? []);
+              const data = res as { list?: PayoutRow[]; payoutResyncQueued?: boolean };
+              setPayoutList(data.list ?? []);
+              if (data.payoutResyncQueued) {
+                setPayoutResyncNotice("分潤金額正在依「專案營收」背景重算，約十秒後會自動更新…");
+                window.setTimeout(() => {
+                  void refreshDashboardData(["payout", "finance"]);
+                  setPayoutResyncNotice(null);
+                }, 10000);
+              }
             })
         );
       }
@@ -3444,6 +3455,29 @@ export default function DashboardPage() {
       setFinanceVendorResyncMessage(e instanceof Error ? e.message : "同步失敗");
     } finally {
       setFinanceVendorResyncing(false);
+    }
+  }, [refreshDashboardData]);
+
+  /** 依大總表「專案營收」重算全部分潤金額（修復舊版依發票金額的殘留資料） */
+  const resyncAllPayoutAmounts = useCallback(async () => {
+    setPayoutResyncing(true);
+    setPayoutResyncNotice(null);
+    try {
+      const res = await fetch("/api/payout/sync-all", { method: "POST", cache: "no-store" });
+      const data = (await safeResJson(res)) as { ok?: boolean; error?: string; queued?: boolean };
+      if (!res.ok || !data.ok) {
+        setPayoutResyncNotice(data.error ?? "重算失敗");
+        return;
+      }
+      setPayoutResyncNotice("已開始重算全部分潤金額（依專案營收 × 成數），約十秒後自動更新…");
+      window.setTimeout(() => {
+        void refreshDashboardData(["payout", "finance"]);
+        setPayoutResyncNotice(null);
+      }, 10000);
+    } catch (e) {
+      setPayoutResyncNotice(e instanceof Error ? e.message : "重算失敗");
+    } finally {
+      setPayoutResyncing(false);
     }
   }, [refreshDashboardData]);
 
@@ -5424,21 +5458,49 @@ export default function DashboardPage() {
                     disabled={savingConfig === "payout"}
                     onClick={async () => {
                       setSavingConfig("payout");
+                      setConfigSaveNotice(null);
                       try {
-                        const res = await fetch("/api/system-config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "master_payout_defaults", value: payoutDefaults }) });
-                        const data = (await safeResJson(res)) as { ok?: boolean; config?: { master_payout_defaults: Record<string, string> } };
+                        const res = await fetch("/api/system-config", {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ key: "master_payout_defaults", value: payoutDefaults }),
+                        });
+                        const data = (await safeResJson(res)) as {
+                          ok?: boolean;
+                          error?: string;
+                          config?: { master_payout_defaults: Record<string, string> };
+                          payoutSyncQueued?: boolean;
+                        };
                         if (res.ok && data.ok && data.config) {
-                          setSystemConfig((c) => c ? { ...c, master_payout_defaults: data.config!.master_payout_defaults } : null);
-                          await refreshDashboardData(["systemConfig", "master", "payout", "finance"]);
+                          setSystemConfig((c) =>
+                            c ? { ...c, master_payout_defaults: data.config!.master_payout_defaults } : null
+                          );
+                          if (data.payoutSyncQueued) {
+                            setConfigSaveNotice("已儲存。全專案分潤表正在背景重算，約數十秒後請重新整理分潤表。");
+                            void refreshDashboardData(["systemConfig"]);
+                            window.setTimeout(() => {
+                              void refreshDashboardData(["payout", "finance"]);
+                            }, 8000);
+                          } else {
+                            await refreshDashboardData(["systemConfig", "master", "payout", "finance"]);
+                          }
+                        } else {
+                          setConfigSaveNotice(String(data.error ?? "儲存失敗"));
                         }
-                      } catch {}
-                      setSavingConfig(null);
+                      } catch {
+                        setConfigSaveNotice("儲存失敗，請稍後再試");
+                      } finally {
+                        setSavingConfig(null);
+                      }
                     }}
                     className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60 disabled:opacity-60"
                   >
                     {savingConfig === "payout" ? "儲存中" : "儲存"}
                   </button>
                 </div>
+                {configSaveNotice && savingConfig !== "payout" && (
+                  <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900">{configSaveNotice}</p>
+                )}
                 <div className="space-y-4">
                   <div>
                     <p className="mb-2 text-xs font-medium text-stone-500">分潤模式 A（製作案、活動案）</p>
@@ -5492,7 +5554,7 @@ export default function DashboardPage() {
                   分潤金額以<strong className="text-stone-800">專案營收</strong>（未填則用專案總金額未稅）× 分潤成數計算；與發票金額無關，請每個專案各開一張發票。
                 </p>
                 <p className="mt-2 text-xs text-stone-500">
-                  調整上方「分潤預設成數」並儲存後，會依目前大總表自動重算並更新所有專案的分潤表。
+                  調整上方「分潤預設成數」並儲存後，會在背景依目前大總表重算分潤表；若金額仍不對，請至「分潤表」按「重算分潤金額」。
                 </p>
               </div>
 
@@ -7525,7 +7587,20 @@ export default function DashboardPage() {
               ))}
             </div>
           </div>
+          {payoutResyncNotice && (
+            <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900">{payoutResyncNotice}</p>
+          )}
           <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
+            {canEditVisibility && (
+              <button
+                type="button"
+                disabled={payoutResyncing}
+                onClick={() => void resyncAllPayoutAmounts()}
+                className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:opacity-60"
+              >
+                {payoutResyncing ? "重算中…" : "重算分潤金額"}
+              </button>
+            )}
             <input
               type="text"
               value={payoutSearch}

@@ -10,7 +10,8 @@ import { isPayoutModeB } from "@/config/master-payout-defaults";
 import type { MasterRow } from "@/lib/db/master";
 import { getMasterList } from "@/lib/db/master";
 import { getPartners } from "@/lib/db/partners";
-import { getSystemConfig } from "@/lib/db/system-config";
+import type { PartnerRow } from "@/modules/partners/types";
+import { getSystemConfig, updateSystemConfig } from "@/lib/db/system-config";
 import { applyHighestRatePerRecipient, normalizeRecipientForDedupe } from "@/lib/payout-dedupe";
 import { normalizeDecimalString } from "@/lib/number-normalize";
 
@@ -191,7 +192,11 @@ async function restoreRemitDatesByRecipient(專案ID: string, snapshots: Map<str
   }
 }
 
-async function buildPayoutRowsForMaster(master: MasterRow, defaults: PayoutDefaults): Promise<PayoutInsertRow[]> {
+async function buildPayoutRowsForMaster(
+  master: MasterRow,
+  defaults: PayoutDefaults,
+  partners?: PartnerRow[]
+): Promise<PayoutInsertRow[]> {
   const 專案ID = master.專案ID ?? "";
   const 專案名稱 = master.專案名稱 ?? null;
   const 專案總金額未稅 = master.專案總金額未稅 ?? null;
@@ -220,9 +225,9 @@ async function buildPayoutRowsForMaster(master: MasterRow, defaults: PayoutDefau
         領取人: 專案開發人,
       });
     }
-    const partners = await getPartners();
+    const partnerList = partners ?? (await getPartners());
     const kol = master.KOL名稱?.trim()
-      ? partners.find((p) => (p.合作夥伴名稱 ?? "").trim() === (master.KOL名稱 ?? "").trim())
+      ? partnerList.find((p) => (p.合作夥伴名稱 ?? "").trim() === (master.KOL名稱 ?? "").trim())
       : null;
     const roles: Array<{ key: keyof PayoutDefaults; 分潤類型: string; 領取人: string | null }> = [
       { key: "經紀人分潤成數", 分潤類型: "經紀人", 領取人: master.經紀人?.trim() || null },
@@ -289,24 +294,36 @@ async function buildPayoutRowsForMaster(master: MasterRow, defaults: PayoutDefau
   return rows;
 }
 
+export type SyncPayoutForProjectOptions = {
+  partners?: PartnerRow[];
+  /** 單專案同步時補回廠商付款日；全量重算由 syncAllPayoutsFromMaster 批次處理 */
+  restoreVendorDates?: boolean;
+};
+
 /**
  * 依大總表一筆專案與成數預設，產生分潤列並同步至分潤表（先刪該專案舊列再插入）
  * 分潤金額基準：專案營收（未填則用專案總金額未稅）
  */
-export async function syncPayoutForProject(master: MasterRow, defaults: PayoutDefaults): Promise<void> {
+export async function syncPayoutForProject(
+  master: MasterRow,
+  defaults: PayoutDefaults,
+  options?: SyncPayoutForProjectOptions
+): Promise<void> {
   const 專案ID = master.專案ID ?? "";
   const remitByRecipient = await snapshotRemitDatesByRecipient(專案ID);
 
   await deletePayoutBy專案ID(專案ID);
 
-  const rows = await buildPayoutRowsForMaster(master, defaults);
+  const rows = await buildPayoutRowsForMaster(master, defaults, options?.partners);
   const filteredRows = applyHighestRatePerRecipient(rows);
   if (filteredRows.length > 0) await insertPayoutRows(filteredRows);
 
   await restoreRemitDatesByRecipient(專案ID, remitByRecipient);
 
-  const { syncFinanceVendorDateFromInvoicesForProject } = await import("@/lib/db/finance");
-  await syncFinanceVendorDateFromInvoicesForProject(專案ID);
+  if (options?.restoreVendorDates !== false) {
+    const { syncFinanceVendorDateFromInvoicesForProject } = await import("@/lib/db/finance");
+    await syncFinanceVendorDateFromInvoicesForProject(專案ID);
+  }
 }
 
 export function todayDateStringLocal(): string {
@@ -344,14 +361,59 @@ export async function updatePayoutRemitDate(
   return row;
 }
 
-export async function syncAllPayoutsFromMaster(): Promise<void> {
+/** 分潤計算基準版本；變更公式時遞增，觸發全量重算 */
+export const PAYOUT_CALC_VERSION = "project_revenue_v1";
+
+async function getStoredPayoutCalcVersion(): Promise<string | null> {
+  const supabase = getSupabase();
+  const { data } = await supabase
+    .from("system_config")
+    .select("value")
+    .eq("key", "payout_calc_version")
+    .maybeSingle();
+  const v = (data as { value?: unknown } | null)?.value;
+  return typeof v === "string" ? v : null;
+}
+
+export async function isPayoutCalcStale(): Promise<boolean> {
+  const stored = await getStoredPayoutCalcVersion();
+  return stored !== PAYOUT_CALC_VERSION;
+}
+
+async function markPayoutCalcVersionCurrent(): Promise<void> {
+  await updateSystemConfig("payout_calc_version", PAYOUT_CALC_VERSION);
+}
+
+/** 依大總表重算全部分潤並標記計算版本為最新 */
+export async function runPayoutResyncAndMarkCurrent(): Promise<{ synced: number; failed: number }> {
+  const result = await syncAllPayoutsFromMaster();
+  await markPayoutCalcVersionCurrent();
+  return result;
+}
+
+export async function syncAllPayoutsFromMaster(): Promise<{ synced: number; failed: number }> {
   const { master_payout_defaults } = await getSystemConfig();
   const masters = await getMasterList();
+  const partners = await getPartners();
+  let synced = 0;
+  let failed = 0;
   for (const master of masters) {
     try {
-      await syncPayoutForProject(master, master_payout_defaults);
+      await syncPayoutForProject(master, master_payout_defaults, {
+        partners,
+        restoreVendorDates: false,
+      });
+      synced += 1;
     } catch (e) {
+      failed += 1;
       log("payout.syncAll", "syncPayoutForProject 失敗", { 專案ID: master.專案ID, error: String(e) });
     }
   }
+  try {
+    const { syncAllFinanceVendorDatesFromInvoices } = await import("@/lib/db/finance");
+    await syncAllFinanceVendorDatesFromInvoices();
+  } catch (e) {
+    log("payout.syncAll", "syncAllFinanceVendorDatesFromInvoices 失敗", { error: String(e) });
+  }
+  return { synced, failed };
 }

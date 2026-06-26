@@ -4,8 +4,14 @@
  * PATCH：更新單筆「分潤匯款日期」（財務逐列標記已付款）
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { getPayoutList, updatePayoutRemitDate, todayDateStringLocal } from "@/lib/db/payout";
+import { NextRequest, NextResponse, after } from "next/server";
+import {
+  getPayoutList,
+  isPayoutCalcStale,
+  runPayoutResyncAndMarkCurrent,
+  updatePayoutRemitDate,
+  todayDateStringLocal,
+} from "@/lib/db/payout";
 import { requireEmployee } from "@/lib/auth/api";
 
 export const dynamic = "force-dynamic";
@@ -14,8 +20,18 @@ export async function GET(request: NextRequest) {
   const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
+    const payoutResyncQueued = await isPayoutCalcStale();
+    if (payoutResyncQueued) {
+      after(async () => {
+        try {
+          await runPayoutResyncAndMarkCurrent();
+        } catch (e) {
+          console.error("GET /api/payout background resync error:", e);
+        }
+      });
+    }
     const list = await getPayoutList();
-    return NextResponse.json({ ok: true, list });
+    return NextResponse.json({ ok: true, list, payoutResyncQueued });
   } catch (error) {
     console.error("GET /api/payout error:", error);
     return NextResponse.json(

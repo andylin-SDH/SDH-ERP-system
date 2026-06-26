@@ -3,10 +3,10 @@
  * PUT - 更新系統設定（限董事長/管理者）
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { requireAdmin, requireEmployee } from "@/lib/auth/api";
 import { getSystemConfig, updateSystemConfig } from "@/lib/db/system-config";
-import { syncAllPayoutsFromMaster } from "@/lib/db/payout";
+import { runPayoutResyncAndMarkCurrent } from "@/lib/db/payout";
 
 export async function GET(request: NextRequest) {
   const auth = await requireEmployee(request);
@@ -49,16 +49,19 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "不允許的 key" }, { status: 400 });
     }
     await updateSystemConfig(key, body.value);
-    // 分潤成數變更後，重新同步所有專案的分潤表（否則僅在編輯大總表時才會套用）
-    if (key === "master_payout_defaults") {
-      try {
-        await syncAllPayoutsFromMaster();
-      } catch (e) {
-        console.error("syncAllPayoutsFromMaster after system-config PUT", e);
-      }
+    // 分潤成數變更：先回應儲存成功，全專案重算放背景（避免請求逾時卡在「儲存中」）
+    const payoutSyncQueued = key === "master_payout_defaults";
+    if (payoutSyncQueued) {
+      after(async () => {
+        try {
+          await runPayoutResyncAndMarkCurrent();
+        } catch (e) {
+          console.error("syncAllPayoutsFromMaster after system-config PUT", e);
+        }
+      });
     }
     const config = await getSystemConfig();
-    return NextResponse.json({ ok: true, config });
+    return NextResponse.json({ ok: true, config, payoutSyncQueued });
   } catch (err) {
     console.error("PUT /api/system-config error:", err);
     return NextResponse.json(
