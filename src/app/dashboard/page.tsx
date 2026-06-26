@@ -5489,7 +5489,7 @@ export default function DashboardPage() {
                 <p className="mt-2 text-sm text-stone-600">
                   同一專案內，若同一人擔任多個分潤角色，系統會自動只保留
                   <strong className="text-stone-800">分潤成數最高</strong>的那一筆（成數相同則取金額較大者）。
-                  分潤金額以專案關聯發票的<strong className="text-stone-800">發票金額含稅加總</strong>為基準；尚無綁定發票則不產生分潤列。
+                  分潤金額以<strong className="text-stone-800">專案營收</strong>（未填則用專案總金額未稅）× 分潤成數計算；與發票金額無關，請每個專案各開一張發票。
                 </p>
                 <p className="mt-2 text-xs text-stone-500">
                   調整上方「分潤預設成數」並儲存後，會依目前大總表自動重算並更新所有專案的分潤表。

@@ -11,18 +11,14 @@ import type { MasterRow } from "@/lib/db/master";
 import { getMasterList } from "@/lib/db/master";
 import { getPartners } from "@/lib/db/partners";
 import { getSystemConfig } from "@/lib/db/system-config";
-import { getInvoices } from "@/lib/db/finance";
-import type { InvoiceRow } from "@/modules/finance/types";
-import { applyHighestRatePerRecipient } from "@/lib/payout-dedupe";
+import { applyHighestRatePerRecipient, normalizeRecipientForDedupe } from "@/lib/payout-dedupe";
 import { normalizeDecimalString } from "@/lib/number-normalize";
-import { resolvePayoutBaseAmount, sumInvoiceAmountForProject, type InvoiceAmountRow } from "@/lib/payout-base";
 
 export interface PayoutRow {
   id?: string;
   專案ID?: string;
   專案名稱?: string;
   專案總金額未稅?: string;
-  /** 分潤計算基準：有發票時為發票含稅加總，否則為專案營收 */
   專案營收?: string;
   /** 對應大總表「廠商預計付款日」；同步分潤時由 master 帶入 */
   廠商預計付款日?: string;
@@ -81,9 +77,28 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
   const projectIds = [...new Set(list.map((r) => String(r.專案ID ?? "").trim()).filter(Boolean))];
   if (projectIds.length === 0) return list;
 
+  const { data: masters, error: masterErr } = await (supabase as any)
+    .from("大總表")
+    .select("專案ID, 專案營收")
+    .in("專案ID", projectIds);
+
+  const revenueByProjectId = new Map<string, string>();
+  if (!masterErr) {
+    for (const m of masters ?? []) {
+      const pid = String(m?.專案ID ?? "").trim();
+      const revenue = String(m?.專案營收 ?? "").trim();
+      if (pid && revenue) revenueByProjectId.set(pid, revenue);
+    }
+  }
+
+  const listWithRevenue = list.map((r) => ({
+    ...r,
+    專案營收: r.專案營收 ?? (r.專案ID ? revenueByProjectId.get(String(r.專案ID).trim()) : undefined),
+  }));
+
   const groupByPid = new Map<string, PayoutRow[]>();
   const pidOrder: string[] = [];
-  for (const r of list) {
+  for (const r of listWithRevenue) {
     const pid = String(r.專案ID ?? "").trim();
     if (!pid) continue;
     if (!groupByPid.has(pid)) {
@@ -95,8 +110,7 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
 
   const out: PayoutRow[] = [];
   for (const pid of pidOrder) {
-    const rows = groupByPid.get(pid) ?? [];
-    out.push(...applyHighestRatePerRecipient(rows));
+    out.push(...applyHighestRatePerRecipient(groupByPid.get(pid) ?? []));
   }
 
   return out;
@@ -136,51 +150,53 @@ export async function insertPayoutRows(rows: PayoutInsertRow[]): Promise<void> {
 
 type PayoutDefaults = Record<string, string>;
 
-type PayoutRemitSnapshot = {
-  分潤類型: string;
-  領取人: string | null;
-  分潤匯款日期: string | null;
-};
-
-async function snapshotPayoutRemitDates(專案ID: string): Promise<PayoutRemitSnapshot[]> {
+/** 同步前依「領取人」保留分潤匯款日（去重後仍對應同一人） */
+async function snapshotRemitDatesByRecipient(專案ID: string): Promise<Map<string, string>> {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("分潤表")
-    .select('"分潤類型", "領取人", "分潤匯款日期"')
+    .select('"領取人", "分潤匯款日期"')
     .eq("專案ID", 專案ID);
   if (error) {
-    if (error.code === "42P01") return [];
+    if (error.code === "42P01") return new Map();
     throw error;
   }
-  return (data ?? []).map((r) => ({
-    分潤類型: String((r as Record<string, unknown>)["分潤類型"] ?? "").trim(),
-    領取人: (r as Record<string, unknown>)["領取人"] as string | null,
-    分潤匯款日期: (r as Record<string, unknown>)["分潤匯款日期"] as string | null,
-  }));
+  const out = new Map<string, string>();
+  for (const r of data ?? []) {
+    const remit = String((r as Record<string, unknown>)["分潤匯款日期"] ?? "").trim();
+    if (!remit) continue;
+    const key = normalizeRecipientForDedupe((r as Record<string, unknown>)["領取人"] as string | null) || "__empty__";
+    out.set(key, remit);
+  }
+  return out;
 }
 
-async function restorePayoutRemitDates(專案ID: string, snapshots: PayoutRemitSnapshot[]): Promise<void> {
+async function restoreRemitDatesByRecipient(專案ID: string, snapshots: Map<string, string>): Promise<void> {
+  if (snapshots.size === 0) return;
   const supabase = getSupabase();
-  for (const snap of snapshots) {
-    const remit = snap.分潤匯款日期 != null && String(snap.分潤匯款日期).trim() !== "" ? String(snap.分潤匯款日期).trim() : null;
-    if (!remit || !snap.分潤類型) continue;
-    const recipient = snap.領取人 ?? null;
-    let q = supabase.from("分潤表").update({ 分潤匯款日期: remit }).eq("專案ID", 專案ID).eq("分潤類型", snap.分潤類型);
-    q = recipient == null ? q.is("領取人", null) : q.eq("領取人", recipient);
-    const { error } = await q;
-    if (error && error.code !== "42P01") throw error;
+  const { data, error } = await supabase.from("分潤表").select('id, "領取人"').eq("專案ID", 專案ID);
+  if (error) {
+    if (error.code === "42P01") return;
+    throw error;
+  }
+  for (const r of data ?? []) {
+    const id = String((r as Record<string, unknown>).id ?? "").trim();
+    if (!id) continue;
+    const key =
+      normalizeRecipientForDedupe((r as Record<string, unknown>)["領取人"] as string | null) || "__empty__";
+    const remit = snapshots.get(key);
+    if (!remit) continue;
+    const { error: upErr } = await supabase.from("分潤表").update({ 分潤匯款日期: remit }).eq("id", id);
+    if (upErr && upErr.code !== "42P01") throw upErr;
   }
 }
 
-async function buildPayoutRowsForMaster(
-  master: MasterRow,
-  defaults: PayoutDefaults,
-  baseAmount: number,
-  分潤基準金額: string | null
-): Promise<PayoutInsertRow[]> {
+async function buildPayoutRowsForMaster(master: MasterRow, defaults: PayoutDefaults): Promise<PayoutInsertRow[]> {
   const 專案ID = master.專案ID ?? "";
   const 專案名稱 = master.專案名稱 ?? null;
   const 專案總金額未稅 = master.專案總金額未稅 ?? null;
+  const 專案營收 = master.專案營收 ?? null;
+  const amount = parseAmount(專案營收 ?? 專案總金額未稅);
   const 專案類型 = (master.專案類型 ?? "").trim();
   const 廠商預計付款日 = master.廠商預計付款日?.trim() || null;
   const rows: PayoutInsertRow[] = [];
@@ -194,13 +210,13 @@ async function buildPayoutRowsForMaster(
         專案ID,
         專案名稱,
         專案總金額未稅,
-        專案營收: 分潤基準金額,
+        專案營收,
         廠商預計付款日,
         廠商付款日期: null,
         分潤匯款日期: null,
         分潤類型: "專案開發人",
         分潤成數: rateStr開發人 ?? null,
-        分潤金額: String(Math.round(baseAmount * rate開發人)),
+        分潤金額: String(Math.round(amount * rate開發人)),
         領取人: 專案開發人,
       });
     }
@@ -228,13 +244,13 @@ async function buildPayoutRowsForMaster(
         專案ID,
         專案名稱,
         專案總金額未稅,
-        專案營收: 分潤基準金額,
+        專案營收,
         廠商預計付款日,
         廠商付款日期: null,
         分潤匯款日期: null,
         分潤類型,
         分潤成數: defaults[key] ?? null,
-        分潤金額: String(Math.round(baseAmount * rate)),
+        分潤金額: String(Math.round(amount * rate)),
         領取人,
       });
     }
@@ -258,13 +274,13 @@ async function buildPayoutRowsForMaster(
         專案ID,
         專案名稱,
         專案總金額未稅,
-        專案營收: 分潤基準金額,
+        專案營收,
         廠商預計付款日,
         廠商付款日期: null,
         分潤匯款日期: null,
         分潤類型,
         分潤成數: rateStr ?? null,
-        分潤金額: String(Math.round(baseAmount * rate)),
+        分潤金額: String(Math.round(amount * rate)),
         領取人,
       });
     }
@@ -273,59 +289,24 @@ async function buildPayoutRowsForMaster(
   return rows;
 }
 
-export type SyncPayoutForProjectOptions = {
-  invoices?: InvoiceAmountRow[];
-  preserveRemitDates?: boolean;
-};
-
 /**
  * 依大總表一筆專案與成數預設，產生分潤列並同步至分潤表（先刪該專案舊列再插入）
- * 分潤金額基準：專案關聯發票「發票金額含稅」加總；無發票時退回專案營收／專案總金額未稅
+ * 分潤金額基準：專案營收（未填則用專案總金額未稅）
  */
-export async function syncPayoutForProject(
-  master: MasterRow,
-  defaults: PayoutDefaults,
-  options?: SyncPayoutForProjectOptions
-): Promise<void> {
+export async function syncPayoutForProject(master: MasterRow, defaults: PayoutDefaults): Promise<void> {
   const 專案ID = master.專案ID ?? "";
-  const invoices = options?.invoices ?? (await getInvoices());
-  const invoiceSum = sumInvoiceAmountForProject(專案ID, invoices);
-
-  const remitSnapshots = options?.preserveRemitDates ? await snapshotPayoutRemitDates(專案ID) : [];
+  const remitByRecipient = await snapshotRemitDatesByRecipient(專案ID);
 
   await deletePayoutBy專案ID(專案ID);
 
-  // 尚無綁定發票：不產生分潤列（避免無依據的分潤）
-  if (invoiceSum <= 0) {
-    return;
-  }
-
-  const { amount, 分潤基準金額 } = resolvePayoutBaseAmount(專案ID, invoices, master);
-
-  const rows = await buildPayoutRowsForMaster(master, defaults, amount, 分潤基準金額);
+  const rows = await buildPayoutRowsForMaster(master, defaults);
   const filteredRows = applyHighestRatePerRecipient(rows);
   if (filteredRows.length > 0) await insertPayoutRows(filteredRows);
 
-  if (remitSnapshots.length > 0) {
-    await restorePayoutRemitDates(專案ID, remitSnapshots);
-  }
-}
+  await restoreRemitDatesByRecipient(專案ID, remitByRecipient);
 
-/** 發票異動後：依最新發票金額重算該專案分潤金額（保留已勾選的分潤匯款日） */
-export async function recalculatePayoutAmountsForProject(專案ID: string, invoices?: InvoiceRow[]): Promise<void> {
-  const pid = String(專案ID ?? "").trim();
-  if (!pid) return;
-  const masters = await getMasterList();
-  const master = masters.find((m) => String(m.專案ID ?? "").trim() === pid);
-  if (!master) return;
-  const { master_payout_defaults } = await getSystemConfig();
-  const invoiceList = invoices ?? (await getInvoices());
-  await syncPayoutForProject(master, master_payout_defaults, {
-    invoices: invoiceList,
-    preserveRemitDates: true,
-  });
   const { syncFinanceVendorDateFromInvoicesForProject } = await import("@/lib/db/finance");
-  await syncFinanceVendorDateFromInvoicesForProject(pid, invoiceList);
+  await syncFinanceVendorDateFromInvoicesForProject(專案ID);
 }
 
 export function todayDateStringLocal(): string {
@@ -366,10 +347,9 @@ export async function updatePayoutRemitDate(
 export async function syncAllPayoutsFromMaster(): Promise<void> {
   const { master_payout_defaults } = await getSystemConfig();
   const masters = await getMasterList();
-  const invoices = await getInvoices();
   for (const master of masters) {
     try {
-      await syncPayoutForProject(master, master_payout_defaults, { invoices });
+      await syncPayoutForProject(master, master_payout_defaults);
     } catch (e) {
       log("payout.syncAll", "syncPayoutForProject 失敗", { 專案ID: master.專案ID, error: String(e) });
     }

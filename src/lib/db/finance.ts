@@ -335,10 +335,9 @@ async function syncFinanceVendorDatesForInvoiceProjectIds(projectIds: Iterable<s
   const pids = [...new Set([...projectIds].map((id) => String(id ?? "").trim()).filter(Boolean))];
   if (pids.length === 0) return;
   const invoices = await getInvoices();
-  const { recalculatePayoutAmountsForProject } = await import("@/lib/db/payout");
   for (const pid of pids) {
     try {
-      await recalculatePayoutAmountsForProject(pid, invoices);
+      await syncFinanceVendorDateFromInvoicesForProject(pid, invoices);
     } catch {
       /* best effort */
     }
