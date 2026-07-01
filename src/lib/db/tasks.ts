@@ -132,6 +132,18 @@ export async function deleteTasksBy專案ID(專案ID: string): Promise<void> {
   }
 }
 
+/** 刪除單筆任務 */
+export async function deleteTaskById(任務ID: string): Promise<boolean> {
+  const id = String(任務ID ?? "").trim();
+  if (!id) return false;
+  const { data, error } = await getSupabase().from("任務").delete().eq("任務ID", id).select("任務ID").maybeSingle();
+  if (error) {
+    if (error.code === "42P01") return false;
+    throw error;
+  }
+  return Boolean(data);
+}
+
 export async function updateTask(payload: UpdateTaskInput): Promise<TaskRow> {
   const 任務ID = String(payload.任務ID ?? "").trim();
   if (!任務ID) throw new Error("任務ID 為必填");

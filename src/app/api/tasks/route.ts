@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTasks, createTask, updateTask } from "@/lib/db/tasks";
+import { getTasks, createTask, updateTask, deleteTaskById } from "@/lib/db/tasks";
 import { getEmailByNameOrEmail } from "@/modules/users";
 import { sendTaskAssignedEmail } from "@/lib/email";
 import { requireEmployee } from "@/lib/auth/api";
@@ -135,6 +135,29 @@ export async function PATCH(request: NextRequest) {
     console.error("PATCH /api/tasks error:", error);
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "更新任務失敗" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  const auth = await requireEmployee(request);
+  if (auth instanceof NextResponse) return auth;
+  try {
+    const body = (await request.json()) as { 任務ID?: string } | null;
+    const 任務ID = String(body?.任務ID ?? "").trim();
+    if (!任務ID) {
+      return NextResponse.json({ ok: false, error: "任務ID 為必填" }, { status: 400 });
+    }
+    const deleted = await deleteTaskById(任務ID);
+    if (!deleted) {
+      return NextResponse.json({ ok: false, error: "找不到該任務或刪除失敗" }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true, 任務ID });
+  } catch (error) {
+    console.error("DELETE /api/tasks error:", error);
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "刪除任務失敗" },
       { status: 500 }
     );
   }

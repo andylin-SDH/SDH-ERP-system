@@ -1170,6 +1170,8 @@ export default function DashboardPage() {
   const [savingTask, setSavingTask] = useState(false);
   const [saveTaskError, setSaveTaskError] = useState<string | null>(null);
   const [remindingTaskId, setRemindingTaskId] = useState<string | null>(null);
+  const [pendingDeleteTask, setPendingDeleteTask] = useState<TaskRow | null>(null);
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [tasksSectionViewMode, setTasksSectionViewMode] = useState<"list" | "byAssignee">("list");
   const [workloadDrill, setWorkloadDrill] = useState<{ assigneeLabel: string; kind: WorkloadDrillKind } | null>(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -1703,6 +1705,34 @@ export default function DashboardPage() {
       setDeletingMasterTaskTemplateId(null);
     }
   }, []);
+
+  const deleteTaskRow = useCallback(async (task: TaskRow) => {
+    const id = String(task.任務ID ?? "").trim();
+    if (!id) return;
+    setDeletingTaskId(id);
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 任務ID: id }),
+      });
+      const data = (await safeResJson(res)) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        setSaveTaskError(data.error ?? "刪除任務失敗");
+        return;
+      }
+      setTasks((prev) => prev.filter((x) => x.任務ID !== id));
+      if (selectedTask?.任務ID === id) {
+        setSelectedTask(null);
+        setSaveTaskError(null);
+      }
+      setPendingDeleteTask(null);
+    } catch (e) {
+      setSaveTaskError(e instanceof Error ? e.message : "刪除任務失敗");
+    } finally {
+      setDeletingTaskId(null);
+    }
+  }, [selectedTask?.任務ID]);
 
   const saveMasterTaskTemplateRow = useCallback(async (id: number) => {
     const draft = masterTaskTemplateDrafts[id];
@@ -5091,12 +5121,15 @@ export default function DashboardPage() {
                                           <th className="w-12 min-w-[2.75rem] whitespace-nowrap px-2 py-2 text-center text-xs font-semibold uppercase text-stone-500">
                                             完成
                                           </th>
+                                          <th className="w-12 min-w-[2.75rem] whitespace-nowrap px-2 py-2 text-center text-xs font-semibold uppercase text-stone-500">
+                                            刪除
+                                          </th>
                                         </tr>
                                       </thead>
                                       <tbody className="divide-y divide-stone-200 bg-white/90">
                                         {projectTasks.length === 0 ? (
                                           <tr>
-                                            <td colSpan={8} className="px-3 py-4 text-center text-sm text-stone-500">
+                                            <td colSpan={9} className="px-3 py-4 text-center text-sm text-stone-500">
                                               尚無任務，請點「新增任務」新增
                                             </td>
                                           </tr>
@@ -5235,6 +5268,13 @@ export default function DashboardPage() {
                                                     <span className="sr-only">未完成</span>
                                                   )}
                                                 </button>
+                                              </td>
+                                              <td className="w-12 min-w-[2.75rem] px-2 py-2.5 text-center align-middle" onClick={(ev) => ev.stopPropagation()}>
+                                                <TaskDeleteButton
+                                                  task={t}
+                                                  deleting={deletingTaskId === t.任務ID}
+                                                  onRequestDelete={() => setPendingDeleteTask(t)}
+                                                />
                                               </td>
                                             </tr>
                                           ))
@@ -7241,6 +7281,11 @@ export default function DashboardPage() {
                       </p>
                     </div>
                     <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${t.任務完成 ? "bg-amber-100 text-amber-800" : "bg-stone-200 text-stone-500"}`}>{t.任務完成 ? "已完成" : "進行中"}</span>
+                    <TaskDeleteButton
+                      task={t}
+                      deleting={deletingTaskId === t.任務ID}
+                      onRequestDelete={() => setPendingDeleteTask(t)}
+                    />
                   </div>
                   <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-stone-500" onClick={(e) => e.stopPropagation()}>
                     <span>開始：{formatTaskDisplayTime(t.開始時間)}</span>
@@ -7348,24 +7393,27 @@ export default function DashboardPage() {
                       {tableColumnLabels.tasks?.[k] ?? k}
                     </th>
                   ))}
+                  <th className="px-4 py-3.5 text-center text-xs font-bold uppercase tracking-wider text-stone-500 w-14">
+                    刪除
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-200 bg-amber-50/40">
                 {filteredTasks.length === 0 ? (
                   <tr>
-                    <td colSpan={tasksVisibleCols.length || 6} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                    <td colSpan={(tasksVisibleCols.length || 6) + 1} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                       尚無任務資料（請在大總表展開專案後新增任務）
                     </td>
                   </tr>
                 ) : tasksLifecycleFilteredList.length === 0 ? (
                   <tr>
-                    <td colSpan={tasksVisibleCols.length || 6} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                    <td colSpan={(tasksVisibleCols.length || 6) + 1} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                       {tasksLifecycleTab === "in_progress" ? "目前沒有進行中任務" : "目前沒有已完成任務"}
                     </td>
                   </tr>
                 ) : searchedTasks.length === 0 ? (
                   <tr>
-                    <td colSpan={tasksVisibleCols.length || 6} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                    <td colSpan={(tasksVisibleCols.length || 6) + 1} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                       沒有符合搜尋結果
                     </td>
                   </tr>
@@ -7542,6 +7590,13 @@ export default function DashboardPage() {
                           </td>
                         );
                       })}
+                      <td className="px-4 py-3.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <TaskDeleteButton
+                          task={t}
+                          deleting={deletingTaskId === t.任務ID}
+                          onRequestDelete={() => setPendingDeleteTask(t)}
+                        />
+                      </td>
                     </tr>
                   ))
                 )}
@@ -10981,6 +11036,37 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {pendingDeleteTask && (
+        <div className="fixed inset-0 z-[72] flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl ring-1 ring-stone-200/80" role="dialog" aria-modal="true">
+            <h3 className="text-lg font-bold text-stone-900">確認刪除任務？</h3>
+            <p className="mt-2 text-sm leading-relaxed text-stone-600">將永久刪除此任務，此操作無法復原。</p>
+            <p className="mt-2 text-xs font-medium text-stone-500">
+              任務：{pendingDeleteTask.任務 ?? "—"}
+              {pendingDeleteTask.專案名稱 ? ` · ${pendingDeleteTask.專案名稱}` : ""}
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={deletingTaskId === pendingDeleteTask.任務ID}
+                onClick={() => setPendingDeleteTask(null)}
+                className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-100 disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={deletingTaskId === pendingDeleteTask.任務ID}
+                onClick={() => void deleteTaskRow(pendingDeleteTask)}
+                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white shadow transition hover:bg-red-500 disabled:opacity-50"
+              >
+                {deletingTaskId === pendingDeleteTask.任務ID ? "刪除中…" : "確認刪除"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedTask && (
         <div className="fixed inset-0 z-[60] flex items-start justify-end bg-stone-900/30 backdrop-blur-sm">
           <div className="flex h-full w-full max-w-md flex-col border-l border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
@@ -11134,7 +11220,15 @@ export default function DashboardPage() {
                   僅變更任務名稱、類型、負責人、到期日或備註後按「儲存」，才會寄信通知負責人；僅勾選完成或列表快速操作不會寄信。
                 </p>
               </div>
-              <div className="mt-8">
+              <div className="mt-8 space-y-3">
+                <button
+                  type="button"
+                  disabled={savingTask || deletingTaskId === selectedTask.任務ID}
+                  onClick={() => setPendingDeleteTask(selectedTask)}
+                  className="w-full rounded-xl border border-red-200 bg-red-50 py-2.5 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:opacity-60"
+                >
+                  刪除任務
+                </button>
                 <button
                   type="submit"
                   disabled={savingTask}
@@ -11148,6 +11242,37 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+  );
+}
+
+interface TaskDeleteButtonProps {
+  task: TaskRow;
+  deleting: boolean;
+  onRequestDelete: () => void;
+}
+
+function TaskDeleteButton({ task, deleting, onRequestDelete }: TaskDeleteButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!task.任務ID || deleting) return;
+        onRequestDelete();
+      }}
+      disabled={!task.任務ID || deleting}
+      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-red-200 bg-red-50 text-red-600 transition hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+      title="刪除任務"
+      aria-label="刪除任務"
+    >
+      {deleting ? (
+        <span className="h-3 w-3 animate-spin rounded-full border-2 border-red-400 border-t-transparent" />
+      ) : (
+        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+      )}
+    </button>
   );
 }
 
