@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getUsers, createUser, updateUser } from "@/modules/users";
+import { getUsers, createUser, updateUser, getUserByEmail } from "@/modules/users";
 import type { CreateUserInput, UpdateUserInput } from "@/lib/db/users";
 import { requireAdmin, requireEmployee } from "@/lib/auth/api";
 
@@ -72,14 +72,37 @@ export async function PATCH(request: NextRequest) {
     if (body?.role !== undefined) payload.role = String(body.role).trim();
     if (body?.dept !== undefined) payload.dept = String(body.dept ?? "").trim() || undefined;
     if (body?.scope !== undefined) payload.scope = String(body.scope ?? "").trim() || undefined;
-    if (body?.password !== undefined && String(body.password).trim()) payload.password = String(body.password).trim();
-    if (Object.keys(payload).length === 0) {
+
+    const passwordRaw = body?.password !== undefined ? String(body.password).trim() : "";
+    if (passwordRaw && passwordRaw.length < 6) {
+      return NextResponse.json({ ok: false, error: "新密碼至少需要 6 個字元" }, { status: 400 });
+    }
+    if (Object.keys(payload).length === 0 && !passwordRaw) {
       return NextResponse.json({ ok: false, error: "請提供要更新的欄位" }, { status: 400 });
     }
-    const user = await updateUser(email, payload);
+
+    let user = Object.keys(payload).length > 0 ? await updateUser(email, payload) : await getUserByEmail(email);
     if (!user) {
       return NextResponse.json({ ok: false, error: "找不到該使用者" }, { status: 404 });
     }
+
+    if (passwordRaw) {
+      const { updateUserPassword } = await import("@/modules/users");
+      const pwdUser = await updateUserPassword(email, passwordRaw);
+      if (!pwdUser) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: Object.keys(payload).length > 0
+              ? "基本資料已更新，但密碼重設失敗，請至「重設密碼」再試一次。"
+              : "密碼重設失敗，請稍後再試。",
+          },
+          { status: 500 }
+        );
+      }
+      user = pwdUser;
+    }
+
     return NextResponse.json({ ok: true, user });
   } catch (error) {
     console.error("PATCH /api/users error:", error);

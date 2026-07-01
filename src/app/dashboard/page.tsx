@@ -1186,7 +1186,11 @@ export default function DashboardPage() {
   const [visibilityColumns, setVisibilityColumns] = useState<Record<string, string[]>>({});
   const [savingVisibility, setSavingVisibility] = useState(false);
   const [visibilityError, setVisibilityError] = useState<string | null>(null);
-  const [editUserForm, setEditUserForm] = useState<{ name: string; role: string; dept: string; scope: string; password: string }>({ name: "", role: "", dept: "", scope: "", password: "" });
+  const [editUserForm, setEditUserForm] = useState<{ name: string; role: string; dept: string; scope: string }>({ name: "", role: "", dept: "", scope: "", });
+  const [userSettingsTab, setUserSettingsTab] = useState<"profile" | "password" | "visibility">("profile");
+  const [resetPasswordForm, setResetPasswordForm] = useState({ password: "", confirm: "" });
+  const [savingResetPassword, setSavingResetPassword] = useState(false);
+  const [resetPasswordNotice, setResetPasswordNotice] = useState<string | null>(null);
   const [savingUser, setSavingUser] = useState(false);
   const [editUserError, setEditUserError] = useState<string | null>(null);
   const [myVisibility, setMyVisibility] = useState<{
@@ -3011,8 +3015,11 @@ export default function DashboardPage() {
       setVisibilityTables([]);
       setVisibilityColumns({});
       setVisibilityError(null);
-      setEditUserForm({ name: "", role: "", dept: "", scope: "", password: "" });
+      setEditUserForm({ name: "", role: "", dept: "", scope: "" });
       setEditUserError(null);
+      setUserSettingsTab("profile");
+      setResetPasswordForm({ password: "", confirm: "" });
+      setResetPasswordNotice(null);
       return;
     }
     setEditUserForm({
@@ -3020,9 +3027,11 @@ export default function DashboardPage() {
       role: selectedUserForVisibility.role ?? "",
       dept: selectedUserForVisibility.dept ?? "",
       scope: selectedUserForVisibility.scope ?? "",
-      password: "",
     });
     setEditUserError(null);
+    setUserSettingsTab("profile");
+    setResetPasswordForm({ password: "", confirm: "" });
+    setResetPasswordNotice(null);
     fetch(`/api/user-visibility?email=${encodeURIComponent(selectedUserForVisibility.email)}`, { cache: "no-store" })
       .then(safeResJson)
       .then((res) => {
@@ -4446,7 +4455,7 @@ export default function DashboardPage() {
                       </button>
                     </div>
                     <p className="mb-4 text-xs text-stone-500">
-                      點選使用者可設定各 Table 可見欄位；「總覽」下可勾選頂部指標（與其他分頁相同邏輯）。
+                      點選使用者可編輯基本資料、重設登入密碼，或設定各 Table 可見欄位；「總覽」下可勾選頂部指標。
                     </p>
                     <div className="overflow-hidden rounded-lg border border-stone-200/90">
                       <table className="min-w-full divide-y divide-stone-200">
@@ -9765,40 +9774,85 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 使用者可見範圍設定 Modal */}
+      {/* 使用者設定 Modal（基本資料／重設密碼／可見欄位） */}
       {selectedUserForVisibility && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/30 backdrop-blur-sm p-4">
           <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
-            <header className="shrink-0 flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
-              <h2 className="text-xl font-bold tracking-tight text-stone-900">
-                ③ 設定 {selectedUserForVisibility.name}（{selectedUserForVisibility.email}）可見欄位
-              </h2>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedUserForVisibility(null);
-                  setVisibilityError(null);
-                }}
-                className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
-              >
-                關閉
-              </button>
+            <header className="shrink-0 border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight text-stone-900">使用者設定</h2>
+                  <p className="mt-0.5 text-sm text-stone-500">
+                    {selectedUserForVisibility.name} · {selectedUserForVisibility.email}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedUserForVisibility(null);
+                    setVisibilityError(null);
+                    setEditUserError(null);
+                    setResetPasswordNotice(null);
+                  }}
+                  className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
+                >
+                  關閉
+                </button>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-1 rounded-xl border border-stone-200 bg-white/80 p-1">
+                {(
+                  [
+                    { key: "profile" as const, label: "基本資料" },
+                    { key: "password" as const, label: "重設密碼" },
+                    { key: "visibility" as const, label: "可見欄位" },
+                  ] as const
+                ).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => {
+                      setUserSettingsTab(key);
+                      setEditUserError(null);
+                      setVisibilityError(null);
+                      setResetPasswordNotice(null);
+                    }}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      userSettingsTab === key
+                        ? "bg-amber-500 text-slate-900 shadow shadow-amber-200/40"
+                        : "text-stone-500 hover:text-stone-900"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </header>
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-6 py-5">
-              {editUserError && (
+              {editUserError && userSettingsTab === "profile" && (
                 <p className="rounded-lg bg-amber-100/90 px-3 py-2 text-sm font-medium text-amber-800">{editUserError}</p>
               )}
-              {visibilityError && (
+              {resetPasswordNotice && userSettingsTab === "password" && (
+                <p
+                  className={`rounded-lg px-3 py-2 text-sm font-medium ${
+                    resetPasswordNotice.startsWith("密碼已")
+                      ? "bg-emerald-50 text-emerald-900"
+                      : "bg-amber-100/90 text-amber-800"
+                  }`}
+                >
+                  {resetPasswordNotice}
+                </p>
+              )}
+              {visibilityError && userSettingsTab === "visibility" && (
                 <p className="rounded-lg bg-amber-100/90 px-3 py-2 text-sm font-medium text-amber-800">{visibilityError}</p>
               )}
 
-              {/* 基本資料：可修改姓名、角色、部門、scope、密碼 */}
+              {userSettingsTab === "profile" && (
               <div className="rounded-xl border border-stone-200/90 bg-white/90 p-4">
                 <h3 className="mb-3 text-sm font-semibold text-amber-800">基本資料</h3>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="sm:col-span-2">
                     <label className="mb-1 block text-xs font-medium text-stone-500">帳號 (Email)</label>
-                    <p className="rounded-lg border border-stone-200/90 bg-white/90 px-3 py-2 text-sm text-stone-500">{selectedUserForVisibility.email}</p>
+                    <p className="rounded-lg border border-stone-200/90 bg-stone-50/80 px-3 py-2 text-sm text-stone-500">{selectedUserForVisibility.email}</p>
                   </div>
                   <InputField label="姓名" value={editUserForm.name} onChange={(v) => setEditUserForm((f) => ({ ...f, name: v }))} />
                   <SelectField
@@ -9834,9 +9888,6 @@ export default function DashboardPage() {
                       <p className="mt-1 text-xs leading-relaxed text-stone-500">經紀人常見：主管、* 或留空。</p>
                     </div>
                   )}
-                  <div className="sm:col-span-2">
-                    <InputField label="新密碼（不修改請留白）" type="password" value={editUserForm.password} onChange={(v) => setEditUserForm((f) => ({ ...f, password: v }))} />
-                  </div>
                 </div>
                 <div className="mt-3 flex justify-end">
                   <button
@@ -9864,7 +9915,6 @@ export default function DashboardPage() {
                             role,
                             dept: editUserForm.dept.trim() || undefined,
                             scope: editUserForm.scope.trim() || undefined,
-                            ...(editUserForm.password.trim() ? { password: editUserForm.password.trim() } : {}),
                           }),
                         });
                         const data = (await safeResJson(res)) as { ok?: boolean; error?: string; user?: User };
@@ -9875,7 +9925,6 @@ export default function DashboardPage() {
                         }
                         setUsers((prev) => prev.map((u) => (u.email === selectedUserForVisibility.email ? data.user! : u)));
                         setSelectedUserForVisibility(data.user!);
-                        setEditUserForm((f) => ({ ...f, password: "" }));
                         setSavingUser(false);
                       } catch (err) {
                         setEditUserError(err instanceof Error ? err.message : "儲存失敗");
@@ -9888,9 +9937,85 @@ export default function DashboardPage() {
                   </button>
                 </div>
               </div>
+              )}
 
-              <h3 className="text-sm font-semibold text-amber-800">可見欄位</h3>
-              <p className="text-sm text-stone-500">勾選此使用者可看到的 Table 與欄位。未勾選的欄位（如專案分潤、專案成本）將不顯示。未設定時依角色預設顯示。</p>
+              {userSettingsTab === "password" && (
+              <div className="rounded-xl border border-amber-200/80 bg-amber-50/40 p-4">
+                <h3 className="mb-1 text-sm font-semibold text-amber-900">重設登入密碼</h3>
+                <p className="mb-4 text-xs leading-relaxed text-stone-600">
+                  管理員可直接為同事設定新密碼，不需舊密碼。重設後請口頭或私訊通知對方；密碼至少 6 個字元。
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <InputField
+                    label="新密碼"
+                    type="password"
+                    value={resetPasswordForm.password}
+                    onChange={(v) => setResetPasswordForm((f) => ({ ...f, password: v }))}
+                  />
+                  <InputField
+                    label="再次輸入新密碼"
+                    type="password"
+                    value={resetPasswordForm.confirm}
+                    onChange={(v) => setResetPasswordForm((f) => ({ ...f, confirm: v }))}
+                  />
+                </div>
+                <div className="mt-4 flex justify-end">
+                  <button
+                    type="button"
+                    disabled={savingResetPassword}
+                    onClick={async () => {
+                      setResetPasswordNotice(null);
+                      const pwd = resetPasswordForm.password.trim();
+                      const confirm = resetPasswordForm.confirm.trim();
+                      if (!pwd || !confirm) {
+                        setResetPasswordNotice("請填寫新密碼與確認密碼");
+                        return;
+                      }
+                      if (pwd.length < 6) {
+                        setResetPasswordNotice("新密碼至少需要 6 個字元");
+                        return;
+                      }
+                      if (pwd !== confirm) {
+                        setResetPasswordNotice("兩次輸入的密碼不一致");
+                        return;
+                      }
+                      setSavingResetPassword(true);
+                      try {
+                        const res = await fetch("/api/users/reset-password", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            email: selectedUserForVisibility.email,
+                            newPassword: pwd,
+                          }),
+                        });
+                        const data = (await safeResJson(res)) as { ok?: boolean; error?: string; message?: string };
+                        if (!res.ok || !data.ok) {
+                          setResetPasswordNotice(data.error ?? "重設失敗");
+                          return;
+                        }
+                        setResetPasswordForm({ password: "", confirm: "" });
+                        setResetPasswordNotice(data.message ?? "密碼已重設，請通知使用者以新密碼登入。");
+                      } catch (err) {
+                        setResetPasswordNotice(err instanceof Error ? err.message : "重設失敗");
+                      } finally {
+                        setSavingResetPassword(false);
+                      }
+                    }}
+                    className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 shadow shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-60"
+                  >
+                    {savingResetPassword ? "重設中…" : "重設密碼"}
+                  </button>
+                </div>
+              </div>
+              )}
+
+              {userSettingsTab === "visibility" && (
+              <>
+              <div>
+                <h3 className="text-sm font-semibold text-amber-800">可見欄位</h3>
+                <p className="mt-1 text-sm text-stone-500">勾選此使用者可看到的 Table 與欄位。未勾選的欄位（如專案分潤、專案成本）將不顯示。未設定時依角色預設顯示。</p>
+              </div>
               <div className="space-y-4">
                 {TABLE_KEYS.map((tableKey) => {
                   const cols = TABLE_COLUMNS[tableKey] ?? [];
@@ -9957,6 +10082,8 @@ export default function DashboardPage() {
                   );
                 })}
               </div>
+              </>
+              )}
             </div>
             <footer className="shrink-0 flex items-center justify-end gap-3 border-t border-stone-200/90 bg-stone-100/90 px-6 py-4">
               <button
@@ -9964,11 +10091,14 @@ export default function DashboardPage() {
                 onClick={() => {
                   setSelectedUserForVisibility(null);
                   setVisibilityError(null);
+                  setEditUserError(null);
+                  setResetPasswordNotice(null);
                 }}
                 className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-semibold text-stone-600 transition hover:bg-stone-100"
               >
-                取消
+                關閉
               </button>
+              {userSettingsTab === "visibility" && (
               <button
                 type="button"
                 disabled={savingVisibility}
@@ -10009,6 +10139,7 @@ export default function DashboardPage() {
               >
                 {savingVisibility ? "儲存中..." : "儲存可見範圍"}
               </button>
+              )}
             </footer>
           </div>
         </div>
