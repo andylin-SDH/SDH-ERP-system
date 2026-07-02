@@ -11,6 +11,7 @@ import {
   formatPartnerDuplicateError,
 } from "@/lib/partners/duplicate";
 import type { MasterRow } from "@/lib/db/master";
+import { PaymentCollectionLink } from "@/components/PaymentCollectionLink";
 import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, PaymentRecordRow } from "@/modules/finance";
 import { sortInvoicesByInvoiceNumber } from "@/modules/finance";
 import type { FinanceUpdateFields } from "@/lib/db/finance";
@@ -1172,6 +1173,13 @@ export default function DashboardPage() {
   const [remindingTaskId, setRemindingTaskId] = useState<string | null>(null);
   const [pendingDeleteTask, setPendingDeleteTask] = useState<TaskRow | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [masterKolInvoiceForm, setMasterKolInvoiceForm] = useState({
+    KOL發票號碼: "",
+    KOL發票日期: "",
+    KOL發票備註: "",
+  });
+  const [masterKolInvoiceSaving, setMasterKolInvoiceSaving] = useState(false);
+  const [masterKolInvoiceNotice, setMasterKolInvoiceNotice] = useState<string | null>(null);
   const [tasksSectionViewMode, setTasksSectionViewMode] = useState<"list" | "byAssignee">("list");
   const [workloadDrill, setWorkloadDrill] = useState<{ assigneeLabel: string; kind: WorkloadDrillKind } | null>(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -1531,6 +1539,12 @@ export default function DashboardPage() {
     const payoutsN = payoutList.filter((p) => String(p.專案ID ?? "").trim() === pid).length;
     return { tasks: tasksN, payouts: payoutsN };
   }, [selectedMaster, tasks, payoutList]);
+  const selectedMasterHasInvoices = useMemo(() => {
+    if (!selectedMaster) return false;
+    const pid = String(selectedMaster.專案ID ?? "").trim();
+    if (!pid) return false;
+    return invoices.some((inv) => String(inv.專案ID ?? "").trim() === pid);
+  }, [selectedMaster, invoices]);
   /** 欄位標籤快取：避免 render 期間大量 .find() */
   const tableColumnLabels = useMemo(() => {
     const byTable: Record<string, Record<string, string>> = {};
@@ -3108,6 +3122,29 @@ export default function DashboardPage() {
       備註: selectedTask.備註 ?? "",
     });
   }, [selectedTask]);
+
+  useEffect(() => {
+    const pid = String(selectedMaster?.專案ID ?? "").trim();
+    if (!pid) {
+      setMasterKolInvoiceForm({ KOL發票號碼: "", KOL發票日期: "", KOL發票備註: "" });
+      setMasterKolInvoiceNotice(null);
+      return;
+    }
+    setMasterKolInvoiceNotice(null);
+    void fetch(`/api/kol-invoices?專案ID=${encodeURIComponent(pid)}`, { cache: "no-store" })
+      .then(safeResJson)
+      .then((res) => {
+        const inv = (res as { invoice?: { KOL發票號碼?: string; KOL發票日期?: string; KOL發票備註?: string } | null }).invoice;
+        setMasterKolInvoiceForm({
+          KOL發票號碼: String(inv?.KOL發票號碼 ?? "").trim(),
+          KOL發票日期: String(inv?.KOL發票日期 ?? "").trim().slice(0, 10),
+          KOL發票備註: String(inv?.KOL發票備註 ?? "").trim(),
+        });
+      })
+      .catch(() => {
+        setMasterKolInvoiceForm({ KOL發票號碼: "", KOL發票日期: "", KOL發票備註: "" });
+      });
+  }, [selectedMaster?.專案ID]);
 
   useEffect(() => {
     if (tasksSectionViewMode !== "byAssignee") setWorkloadDrill(null);
@@ -5337,6 +5374,11 @@ export default function DashboardPage() {
                                             ))}
                                           </tbody>
                                         </table>
+                                      </div>
+                                    )}
+                                    {projectInvoices.length > 0 && (
+                                      <div className="mt-3">
+                                        <PaymentCollectionLink 專案ID={pid} hasInvoices compact />
                                       </div>
                                     )}
                                   </div>
@@ -10757,6 +10799,84 @@ export default function DashboardPage() {
                   )}
                 </div>
               </section>
+
+              <section>
+                <h3 className="mb-3 text-base font-bold text-amber-800">收款表單</h3>
+                <PaymentCollectionLink
+                  專案ID={String(selectedMaster.專案ID ?? "").trim()}
+                  hasInvoices={selectedMasterHasInvoices}
+                />
+              </section>
+
+              {String(selectedMaster.KOL名稱 ?? "").trim() && (
+                <section>
+                  <h3 className="mb-3 text-base font-bold text-amber-800">KOL 請款發票</h3>
+                  <p className="mb-3 text-xs text-stone-500">
+                    KOL 向 SDH 請款時開立之發票；同一發票號碼可填在多個專案（多案併開一張）。
+                  </p>
+                  {masterKolInvoiceNotice && (
+                    <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900">{masterKolInvoiceNotice}</p>
+                  )}
+                  <div className="grid grid-cols-2 gap-3">
+                    <InputField
+                      label="KOL 發票號碼"
+                      value={masterKolInvoiceForm.KOL發票號碼}
+                      onChange={(v) => setMasterKolInvoiceForm((f) => ({ ...f, KOL發票號碼: v }))}
+                      className="col-span-2 sm:col-span-1"
+                    />
+                    <div className="col-span-2 sm:col-span-1">
+                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">KOL 發票日期</label>
+                      <input
+                        type="date"
+                        value={masterKolInvoiceForm.KOL發票日期}
+                        onChange={(e) => setMasterKolInvoiceForm((f) => ({ ...f, KOL發票日期: e.target.value }))}
+                        className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900"
+                      />
+                    </div>
+                    <InputField
+                      label="備註"
+                      value={masterKolInvoiceForm.KOL發票備註}
+                      onChange={(v) => setMasterKolInvoiceForm((f) => ({ ...f, KOL發票備註: v }))}
+                      className="col-span-2"
+                    />
+                  </div>
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      disabled={masterKolInvoiceSaving || !selectedMaster.專案ID}
+                      onClick={async () => {
+                        setMasterKolInvoiceSaving(true);
+                        setMasterKolInvoiceNotice(null);
+                        try {
+                          const res = await fetch("/api/kol-invoices", {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              專案ID: selectedMaster.專案ID,
+                              KOL發票號碼: masterKolInvoiceForm.KOL發票號碼.trim() || null,
+                              KOL發票日期: masterKolInvoiceForm.KOL發票日期.trim() || null,
+                              KOL發票備註: masterKolInvoiceForm.KOL發票備註.trim() || null,
+                            }),
+                          });
+                          const data = (await safeResJson(res)) as { ok?: boolean; error?: string };
+                          if (!res.ok || !data.ok) {
+                            setMasterKolInvoiceNotice(data.error ?? "儲存失敗");
+                            return;
+                          }
+                          setMasterKolInvoiceNotice("KOL 發票已儲存");
+                        } catch (e) {
+                          setMasterKolInvoiceNotice(e instanceof Error ? e.message : "儲存失敗");
+                        } finally {
+                          setMasterKolInvoiceSaving(false);
+                        }
+                      }}
+                      className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 hover:bg-amber-400 disabled:opacity-60"
+                    >
+                      {masterKolInvoiceSaving ? "儲存中…" : "儲存 KOL 發票"}
+                    </button>
+                  </div>
+                </section>
+              )}
 
               <section>
                 <h3 className="mb-3 text-base font-bold text-amber-800">人員與分潤設定</h3>

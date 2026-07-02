@@ -1,0 +1,53 @@
+---
+description: 中心規則 — 絕不覆蓋或回溯 DB 資料；所有功能設計必須遵守
+alwaysApply: true
+---
+
+# DB 不可覆蓋、不可回溯（中心規則）
+
+本專案**最高優先**的資料原則：**無論任何功能、同步、修復、migration、API，都不得覆蓋或回溯資料庫中既有的業務資料。**
+
+## 禁止行為
+
+- **覆蓋**：用新值直接蓋掉舊值且無留痕（silent UPDATE、整列 upsert 覆寫、以快取／重算結果覆寫人工已填欄位）
+- **回溯**：把 DB 還原到較早狀態（rollback 業務資料、依舊快照整批寫回、sync 用「來源較舊」覆寫「目標較新」）
+- **靜默刪除**：DELETE / TRUNCATE 業務表資料且無審計、無使用者明確操作
+- **破壞性 migration**：對已有資料的表做 DROP COLUMN、改型別失資料、未備份即清空
+
+## 必須做法
+
+1. **新增優於覆寫**：新事件用 INSERT（例：`收款申報`、`partner_edit_log`）；需改主檔時先寫 log 再 UPDATE
+2. **同步只補空、不搶值**：跨表 sync 僅在**目標欄位為空**時帶入；已有值一律保留（除非使用者當次明確修改該欄）
+3. **可見的刪除**：刪除須限管理員且為使用者明確動作；能 soft-delete 則優先 soft-delete
+4. **Migration 只做加法**：`ADD COLUMN IF NOT EXISTS`、新表、索引；資料 backfill 用 `UPDATE … WHERE col IS NULL`，禁止無條件全表覆寫
+5. **修 bug 不重寫歷史**：修正邏輯只影響**之後**的寫入；已入庫資料用新列或標記修正，不做 bulk 回溯
+
+## 實作檢查清單（寫 code 前自問）
+
+- 這段 UPDATE 會不會蓋掉使用者或匯款方已填的值？
+- sync / 重算會不會用計算結果覆寫 `發票`、`財務`、`分潤表` 上已有日期或金額？
+- upsert 的 `onConflict` 是否會整列覆寫？能否改為只更新使用者本次提交的欄位？
+- 是否需要先寫 edit log / 申報表再動主檔？
+
+## 範例
+
+```typescript
+// ❌ 禁止：sync 無條件覆寫
+await supabase.from("財務").update({ 廠商付款日期: computed }).eq("專案ID", pid);
+
+// ✅ 允許：僅補空欄
+await supabase.from("財務").update({ 廠商付款日期: computed }).eq("專案ID", pid).is("廠商付款日期", null);
+
+// ❌ 禁止：用舊 cache 回溯主檔
+setInvoices(staleCacheFromYesterday);
+
+// ✅ 允許：追加一筆申報，主檔入帳日期待對帳程式或人工確認後再寫
+await supabase.from("收款申報").insert({ ... });
+```
+
+## 與其他模組的關係
+
+- **收款表單 / 自動對帳（規劃中）**：申報資料只 INSERT；對帳確認後才寫 `發票.廠商付款日期`，且不得覆寫已有付款日
+- **分潤重算**：不得回溯已填的 `分潤匯款日期` 或歷史分潤列；版本偵測 + 使用者觸發重算，而非 silent overwrite
+
+**若需求與本規則衝突，應改設計（追加表、log、審核），而不是破例覆蓋或回溯 DB。**

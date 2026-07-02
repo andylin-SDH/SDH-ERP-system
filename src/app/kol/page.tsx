@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { parseKolAmount } from "@/lib/kol/format";
 import { isKolProjectInProgress } from "@/lib/kol/project-lifecycle";
 import { SessionExpiryMonitor } from "@/components/SessionExpiryMonitor";
@@ -18,13 +18,24 @@ async function safeResJson(r: Response): Promise<Record<string, unknown>> {
 }
 
 function settlementBadgeClass(status: string): string {
-  if (status === "待結帳") return "bg-stone-200 text-stone-800";
-  if (status === "待分潤") return "bg-amber-100 text-amber-950 ring-1 ring-amber-300/60";
+  if (status === "未入帳") return "bg-stone-200 text-stone-800";
+  if (status === "可提領") return "bg-amber-100 text-amber-950 ring-1 ring-amber-300/60";
   if (status === "已分潤") return "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300/50";
   return "bg-stone-100 text-stone-600";
 }
 
 type LifecycleTab = "in_progress" | "completed";
+
+type EditDraft = {
+  KOL發票號碼: string;
+  KOL發票日期: string;
+  KOL發票備註: string;
+  applyToOthers: boolean;
+};
+
+function emptyDraft(): EditDraft {
+  return { KOL發票號碼: "", KOL發票日期: "", KOL發票備註: "", applyToOthers: false };
+}
 
 export default function KolHomePage() {
   const [loading, setLoading] = useState(true);
@@ -34,6 +45,10 @@ export default function KolHomePage() {
   const [projects, setProjects] = useState<KolPortalProject[]>([]);
   const [lifecycleTab, setLifecycleTab] = useState<LifecycleTab>("in_progress");
   const [sessionActive, setSessionActive] = useState(false);
+  const [expandedPid, setExpandedPid] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, EditDraft>>({});
+  const [savingPid, setSavingPid] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,7 +77,18 @@ export default function KolHomePage() {
     }
     setPartnerName(data.partnerName ?? "");
     setPartnerId(data.partnerId ?? "");
-    setProjects(Array.isArray(data.projects) ? data.projects : []);
+    const list = Array.isArray(data.projects) ? data.projects : [];
+    setProjects(list);
+    const nextDrafts: Record<string, EditDraft> = {};
+    for (const p of list) {
+      nextDrafts[p.專案ID] = {
+        KOL發票號碼: p.KOL發票號碼 ?? "",
+        KOL發票日期: p.KOL發票日期 ?? "",
+        KOL發票備註: p.KOL發票備註 ?? "",
+        applyToOthers: false,
+      };
+    }
+    setDrafts(nextDrafts);
     setSessionActive(true);
     setLoading(false);
   }, []);
@@ -88,18 +114,68 @@ export default function KolHomePage() {
   const summary = useMemo(() => {
     let kolFeeSum = 0;
     let pendingSettlement = 0;
+    let missingKolInvoice = 0;
     for (const p of inProgressProjects) {
       kolFeeSum += parseKolAmount(p.KOL費用未稅);
-      if (p.結帳狀態 === "待結帳") pendingSettlement += 1;
+      if (p.結帳狀態 === "未入帳") pendingSettlement += 1;
+      if (p.結帳狀態 !== "未入帳" && !p.KOL發票號碼.trim()) missingKolInvoice += 1;
     }
-    return {
-      inProgressCount: inProgressProjects.length,
-      kolFeeSum,
-      pendingSettlement,
-    };
+    return { inProgressCount: inProgressProjects.length, kolFeeSum, pendingSettlement, missingKolInvoice };
   }, [inProgressProjects]);
 
   const visibleProjects = lifecycleTab === "in_progress" ? inProgressProjects : completedProjects;
+
+  const batchApplyCandidates = useCallback(
+    (p: KolPortalProject) => {
+      const num = (drafts[p.專案ID]?.KOL發票號碼 ?? p.KOL發票號碼 ?? "").trim();
+      if (!num) return [];
+      return visibleProjects.filter(
+        (x) =>
+          x.專案ID !== p.專案ID &&
+          x.canEditKolInvoice &&
+          !x.KOL發票號碼.trim()
+      );
+    },
+    [drafts, visibleProjects]
+  );
+
+  async function saveKolInvoice(p: KolPortalProject) {
+    const draft = drafts[p.專案ID] ?? emptyDraft();
+    setSavingPid(p.專案ID);
+    setSaveNotice(null);
+    try {
+      const applyToProjectIds = draft.applyToOthers
+        ? batchApplyCandidates(p).map((x) => x.專案ID)
+        : [];
+      const res = await fetch("/api/kol/invoices", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          專案ID: p.專案ID,
+          KOL發票號碼: draft.KOL發票號碼.trim() || null,
+          KOL發票日期: draft.KOL發票日期.trim() || null,
+          KOL發票備註: draft.KOL發票備註.trim() || null,
+          applyToProjectIds,
+        }),
+      });
+      const data = (await safeResJson(res)) as { ok?: boolean; error?: string; updated?: number };
+      if (!res.ok || !data.ok) {
+        setSaveNotice(data.error ?? "儲存失敗");
+        return;
+      }
+      setSaveNotice(
+        data.updated && data.updated > 1
+          ? `已儲存，並套用到 ${data.updated} 個專案`
+          : "KOL 發票已儲存"
+      );
+      await load();
+    } catch (e) {
+      setSaveNotice(e instanceof Error ? e.message : "儲存失敗");
+    } finally {
+      setSavingPid(null);
+    }
+  }
 
   async function handleLogout() {
     await fetch("/api/auth/session", { method: "DELETE", credentials: "include" });
@@ -114,7 +190,7 @@ export default function KolHomePage() {
           <Image src="/logo.png" alt="SDH" width={200} height={48} className="h-10 w-auto object-contain" />
           <div>
             <h1 className="text-lg font-bold tracking-tight text-stone-900">我的專案</h1>
-            <p className="text-xs text-stone-500">只讀檢視 · 結帳狀態依財務入帳自動更新</p>
+            <p className="text-xs text-stone-500">結帳狀態依財務入帳更新 · 可填寫 KOL 請款發票</p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -138,8 +214,11 @@ export default function KolHomePage() {
 
       {loading && <p className="text-stone-500">載入中…</p>}
       {error && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          {error}
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">{error}</div>
+      )}
+      {saveNotice && (
+        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          {saveNotice}
         </div>
       )}
 
@@ -150,7 +229,7 @@ export default function KolHomePage() {
             {partnerId ? <span className="ml-2 text-stone-500">（{partnerId}）</span> : null}
           </p>
 
-          <div className="mb-6 grid gap-3 sm:grid-cols-3">
+          <div className="mb-6 grid gap-3 sm:grid-cols-4">
             <div className="rounded-xl border border-stone-200/90 bg-white/90 px-4 py-3 shadow-sm ring-1 ring-amber-100/40">
               <p className="text-xs font-medium text-stone-500">進行中專案</p>
               <p className="mt-1 text-2xl font-bold tabular-nums text-stone-900">{summary.inProgressCount}</p>
@@ -162,13 +241,18 @@ export default function KolHomePage() {
               </p>
             </div>
             <div className="rounded-xl border border-stone-200/90 bg-white/90 px-4 py-3 shadow-sm ring-1 ring-amber-100/40">
-              <p className="text-xs font-medium text-stone-500">進行中 · 待結帳</p>
+              <p className="text-xs font-medium text-stone-500">進行中 · 未入帳</p>
               <p className="mt-1 text-2xl font-bold tabular-nums text-amber-900">{summary.pendingSettlement}</p>
+            </div>
+            <div className="rounded-xl border border-stone-200/90 bg-white/90 px-4 py-3 shadow-sm ring-1 ring-amber-100/40">
+              <p className="text-xs font-medium text-stone-500">已入帳 · 待填 KOL 發票</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums text-red-700">{summary.missingKolInvoice}</p>
             </div>
           </div>
 
           <p className="mb-4 text-xs leading-relaxed text-stone-500">
-            <strong className="text-stone-700">結帳狀態</strong>：財務於發票／依專案財務填寫「廠商付款日（入帳）」後，會由「待結帳」變為「待分潤」或「已分潤」。請按「重新整理」查看最新狀態。
+            點專案列可展開：<strong className="text-stone-700">客戶端發票</strong>（唯讀）與
+            <strong className="text-stone-700"> KOL 請款發票</strong>（可填寫）。同一張 KOL 發票若涵蓋多案，可勾選「套用到其他未填專案」。
           </p>
 
           <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -215,35 +299,169 @@ export default function KolHomePage() {
                   <tr>
                     <th className="whitespace-nowrap px-3 py-3 font-semibold">專案ID</th>
                     <th className="min-w-[140px] px-3 py-3 font-semibold">專案名稱</th>
-                    <th className="whitespace-nowrap px-3 py-3 font-semibold">專案狀態</th>
                     <th className="whitespace-nowrap px-3 py-3 font-semibold">結帳狀態</th>
                     <th className="whitespace-nowrap px-3 py-3 font-semibold">KOL費用未稅</th>
-                    <th className="whitespace-nowrap px-3 py-3 font-semibold">專案總金額未稅</th>
+                    <th className="whitespace-nowrap px-3 py-3 font-semibold">客戶發票</th>
+                    <th className="whitespace-nowrap px-3 py-3 font-semibold">KOL發票號碼</th>
                     <th className="whitespace-nowrap px-3 py-3 font-semibold">廠商入帳日</th>
-                    <th className="whitespace-nowrap px-3 py-3 font-semibold">發票含稅合計</th>
-                    <th className="whitespace-nowrap px-3 py-3 font-semibold">發票筆數</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-200">
-                  {visibleProjects.map((p) => (
-                    <tr key={p.專案ID} className="bg-amber-50/30 hover:bg-amber-50/60">
-                      <td className="whitespace-nowrap px-3 py-3 font-mono text-xs text-stone-800">{p.專案ID}</td>
-                      <td className="max-w-[220px] px-3 py-3 text-stone-800">{p.專案名稱}</td>
-                      <td className="whitespace-nowrap px-3 py-3 text-stone-600">{p.專案狀態}</td>
-                      <td className="whitespace-nowrap px-3 py-3">
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${settlementBadgeClass(p.結帳狀態)}`}
+                  {visibleProjects.map((p) => {
+                    const expanded = expandedPid === p.專案ID;
+                    const draft = drafts[p.專案ID] ?? emptyDraft();
+                    const applyList = batchApplyCandidates(p);
+                    return (
+                      <Fragment key={p.專案ID}>
+                        <tr
+                          className="cursor-pointer bg-amber-50/30 hover:bg-amber-50/60"
+                          onClick={() => setExpandedPid(expanded ? null : p.專案ID)}
                         >
-                          {p.結帳狀態}
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-3 tabular-nums text-stone-900">{p.KOL費用未稅}</td>
-                      <td className="whitespace-nowrap px-3 py-3 tabular-nums text-stone-700">{p.專案總金額未稅}</td>
-                      <td className="whitespace-nowrap px-3 py-3 tabular-nums text-stone-700">{p.廠商付款日期}</td>
-                      <td className="whitespace-nowrap px-3 py-3 tabular-nums text-stone-900">{p.發票已開含稅合計}</td>
-                      <td className="whitespace-nowrap px-3 py-3 tabular-nums text-stone-600">{p.發票筆數}</td>
-                    </tr>
-                  ))}
+                          <td className="whitespace-nowrap px-3 py-3 font-mono text-xs text-stone-800">{p.專案ID}</td>
+                          <td className="max-w-[220px] px-3 py-3 text-stone-800">{p.專案名稱}</td>
+                          <td className="whitespace-nowrap px-3 py-3">
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${settlementBadgeClass(p.結帳狀態)}`}
+                            >
+                              {p.結帳狀態}
+                            </span>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 tabular-nums text-stone-900">{p.KOL費用未稅}</td>
+                          <td className="whitespace-nowrap px-3 py-3 text-xs text-stone-600">
+                            {p.發票筆數 > 0 ? `${p.發票筆數} 張 · ${p.發票已開含稅合計}` : "—"}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 font-mono text-xs text-stone-800">
+                            {p.KOL發票號碼.trim() || (
+                              <span className="text-red-600">{p.結帳狀態 !== "未入帳" ? "待填" : "—"}</span>
+                            )}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 tabular-nums text-stone-700">{p.廠商付款日期}</td>
+                        </tr>
+                        {expanded && (
+                          <tr className="bg-white">
+                            <td colSpan={7} className="px-4 py-4">
+                              <div className="grid gap-4 lg:grid-cols-2">
+                                <div className="rounded-lg border border-stone-200 bg-stone-50/80 p-3">
+                                  <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-stone-500">
+                                    客戶端 · 我們收款（唯讀）
+                                  </h3>
+                                  {p.客戶端發票.length === 0 ? (
+                                    <p className="text-sm text-stone-500">尚無對應發票</p>
+                                  ) : (
+                                    <ul className="space-y-2 text-sm">
+                                      {p.客戶端發票.map((inv, i) => (
+                                        <li key={`${p.專案ID}-cinv-${i}`} className="rounded-md border border-stone-200 bg-white px-3 py-2">
+                                          <span className="font-mono font-semibold text-stone-800">{inv.發票號碼}</span>
+                                          <span className="ml-2 text-stone-500">{inv.發票日期}</span>
+                                          <span className="ml-2 tabular-nums text-stone-700">含稅 {inv.發票金額含稅}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                </div>
+                                <div className="rounded-lg border border-amber-200/80 bg-amber-50/40 p-3">
+                                  <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-amber-900">
+                                    KOL 請款發票
+                                  </h3>
+                                  {!p.canEditKolInvoice ? (
+                                    <p className="mb-2 text-xs text-stone-500">此專案已分潤，發票資料不可再修改。</p>
+                                  ) : null}
+                                  <div className="space-y-2">
+                                    <label className="block text-xs font-medium text-stone-600">
+                                      發票號碼
+                                      <input
+                                        type="text"
+                                        disabled={!p.canEditKolInvoice || savingPid === p.專案ID}
+                                        value={draft.KOL發票號碼}
+                                        onChange={(e) =>
+                                          setDrafts((prev) => ({
+                                            ...prev,
+                                            [p.專案ID]: { ...draft, KOL發票號碼: e.target.value },
+                                          }))
+                                        }
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-mono text-sm disabled:opacity-60"
+                                        placeholder="例：AB-12345678"
+                                      />
+                                    </label>
+                                    <label className="block text-xs font-medium text-stone-600">
+                                      發票日期
+                                      <input
+                                        type="date"
+                                        disabled={!p.canEditKolInvoice || savingPid === p.專案ID}
+                                        value={draft.KOL發票日期}
+                                        onChange={(e) =>
+                                          setDrafts((prev) => ({
+                                            ...prev,
+                                            [p.專案ID]: { ...draft, KOL發票日期: e.target.value },
+                                          }))
+                                        }
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
+                                      />
+                                    </label>
+                                    <label className="block text-xs font-medium text-stone-600">
+                                      備註
+                                      <input
+                                        type="text"
+                                        disabled={!p.canEditKolInvoice || savingPid === p.專案ID}
+                                        value={draft.KOL發票備註}
+                                        onChange={(e) =>
+                                          setDrafts((prev) => ({
+                                            ...prev,
+                                            [p.專案ID]: { ...draft, KOL發票備註: e.target.value },
+                                          }))
+                                        }
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
+                                      />
+                                    </label>
+                                    {p.canEditKolInvoice && applyList.length > 0 && draft.KOL發票號碼.trim() && (
+                                      <label className="flex cursor-pointer items-start gap-2 text-xs text-stone-600">
+                                        <input
+                                          type="checkbox"
+                                          checked={draft.applyToOthers}
+                                          onChange={(e) =>
+                                            setDrafts((prev) => ({
+                                              ...prev,
+                                              [p.專案ID]: { ...draft, applyToOthers: e.target.checked },
+                                            }))
+                                          }
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="mt-0.5"
+                                        />
+                                        <span>
+                                          同一張發票套用到其他 {applyList.length} 個未填號碼的專案
+                                        </span>
+                                      </label>
+                                    )}
+                                    {p.KOL發票填寫人 && (
+                                      <p className="text-[11px] text-stone-500">
+                                        最後更新：{p.KOL發票填寫來源} · {p.KOL發票填寫人}
+                                      </p>
+                                    )}
+                                    {p.canEditKolInvoice && (
+                                      <button
+                                        type="button"
+                                        disabled={savingPid === p.專案ID}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          void saveKolInvoice(p);
+                                        }}
+                                        className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 hover:bg-amber-400 disabled:opacity-60"
+                                      >
+                                        {savingPid === p.專案ID ? "儲存中…" : "儲存 KOL 發票"}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
