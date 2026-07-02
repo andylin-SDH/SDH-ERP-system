@@ -14,6 +14,7 @@ import type { MasterRow } from "@/lib/db/master";
 import { PaymentCollectionLink } from "@/components/PaymentCollectionLink";
 import { PaymentCollectionLinkIcon } from "@/components/PaymentCollectionLinkIcon";
 import type { PaymentSubmissionWithProject } from "@/lib/db/payment-collection";
+import { formatTaipeiDateTime } from "@/lib/taiwan-date";
 import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, PaymentRecordRow } from "@/modules/finance";
 import { sortInvoicesByInvoiceNumber } from "@/modules/finance";
 import type { FinanceUpdateFields } from "@/lib/db/finance";
@@ -8881,7 +8882,7 @@ export default function DashboardPage() {
                       searchedPaymentSubmissions.map((r) => (
                         <tr key={r.id} className="hover:bg-sky-50/40">
                           <td className="whitespace-nowrap px-3 py-2.5 text-xs text-stone-600">
-                            {r.submitted_at ? String(r.submitted_at).slice(0, 16).replace("T", " ") : "—"}
+                            {formatTaipeiDateTime(r.submitted_at)}
                           </td>
                           <td className="px-3 py-2.5">
                             <p className="font-medium text-stone-900">{r.專案名稱}</p>

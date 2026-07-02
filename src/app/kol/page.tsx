@@ -343,7 +343,7 @@ export default function KolHomePage() {
                               <div className="grid gap-4 lg:grid-cols-2">
                                 <div className="rounded-lg border border-stone-200 bg-stone-50/80 p-3">
                                   <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-stone-500">
-                                    客戶端 · 我們收款（唯讀）
+                                    SDH對外請款（唯讀）
                                   </h3>
                                   {p.客戶端發票.length === 0 ? (
                                     <p className="text-sm text-stone-500">尚無對應發票</p>

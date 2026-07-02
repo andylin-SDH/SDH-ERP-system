@@ -5,6 +5,7 @@ import {
   ensurePaymentLinkForProject,
   getPaymentLinkByProjectId,
   getSubmissionsByProjectId,
+  regeneratePaymentLinkForProject,
 } from "@/lib/db/payment-collection";
 
 export const dynamic = "force-dynamic";
@@ -44,24 +45,27 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/** POST { 專案ID } — 產生（或取得既有）收款連結 */
+/** POST { 專案ID, regenerate?: boolean } — 產生／取得／重新產生收款連結 */
 export async function POST(request: NextRequest) {
   const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
-    const body = (await request.json()) as { 專案ID?: string } | null;
+    const body = (await request.json()) as { 專案ID?: string; regenerate?: boolean } | null;
     const pid = String(body?.專案ID ?? "").trim();
     if (!pid) {
       return NextResponse.json({ ok: false, error: "請提供專案ID" }, { status: 400 });
     }
     const creator = String(auth.user.name ?? auth.user.email ?? "").trim() || "—";
-    const link = await ensurePaymentLinkForProject(pid, creator);
+    const link = body?.regenerate
+      ? await regeneratePaymentLinkForProject(pid, creator)
+      : await ensurePaymentLinkForProject(pid, creator);
     return NextResponse.json({
       ok: true,
       link: {
         ...link,
         url: buildPublicUrl(request, link.token),
       },
+      regenerated: Boolean(body?.regenerate),
     });
   } catch (e) {
     console.error("POST /api/payment-links", e);

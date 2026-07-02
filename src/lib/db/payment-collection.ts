@@ -115,6 +115,52 @@ export async function ensurePaymentLinkForProject(專案ID: string, 建立人: s
   return rowToPaymentLink(data as Record<string, unknown>);
 }
 
+/** 重新產生 token（舊連結失效）；須已有發票 */
+export async function regeneratePaymentLinkForProject(專案ID: string, 建立人: string): Promise<PaymentLinkRow> {
+  const pid = String(專案ID ?? "").trim();
+  if (!pid) throw new Error("專案ID 為必填");
+
+  const hasInv = await projectHasInvoices(pid);
+  if (!hasInv) throw new Error("此專案尚無關聯發票，請先在發票清冊將發票連結至本專案");
+
+  const now = new Date().toISOString();
+  const token = generateToken();
+  const existing = await getPaymentLinkByProjectId(pid);
+
+  if (existing) {
+    const { data, error } = await getSupabase()
+      .from("專案收款連結")
+      .update({
+        token,
+        建立人: 建立人.trim(),
+        updated_at: now,
+      })
+      .eq("專案ID", pid)
+      .select("*")
+      .single();
+    if (error) {
+      if (isMissingTableError(error)) {
+        throw new Error("收款連結表尚未建立，請先執行 migration 054_payment_collection.sql");
+      }
+      throw error;
+    }
+    return rowToPaymentLink(data as Record<string, unknown>);
+  }
+
+  const { data, error } = await getSupabase()
+    .from("專案收款連結")
+    .insert({
+      專案ID: pid,
+      token,
+      建立人: 建立人.trim(),
+      updated_at: now,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToPaymentLink(data as Record<string, unknown>);
+}
+
 export async function buildPaymentFormByToken(token: string): Promise<PaymentFormPayload | null> {
   const link = await getPaymentLinkByToken(token);
   if (!link) return null;

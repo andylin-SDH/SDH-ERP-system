@@ -79,6 +79,7 @@ export function PaymentCollectionLinkIcon({ 專案ID, onViewSubmissions }: Props
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [url, setUrl] = useState<string | null>(null);
   const [submissions, setSubmissions] = useState<PaymentSubmissionRow[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
@@ -133,8 +134,14 @@ export function PaymentCollectionLinkIcon({ 專案ID, onViewSubmissions }: Props
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  async function generate() {
-    setGenerating(true);
+  async function postLink(regenerate: boolean) {
+    if (regenerate) {
+      const ok = window.confirm("將產生新連結，舊連結將失效。確定？");
+      if (!ok) return;
+      setRegenerating(true);
+    } else {
+      setGenerating(true);
+    }
     setNotice(null);
     setError(null);
     try {
@@ -142,7 +149,7 @@ export function PaymentCollectionLinkIcon({ 專案ID, onViewSubmissions }: Props
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 專案ID: pid }),
+        body: JSON.stringify({ 專案ID: pid, regenerate }),
       });
       const data = (await safeResJson(res)) as { ok?: boolean; error?: string; link?: { url?: string } };
       if (!res.ok || !data.ok) {
@@ -151,12 +158,13 @@ export function PaymentCollectionLinkIcon({ 專案ID, onViewSubmissions }: Props
       }
       previewCache.delete(pid);
       setUrl(data.link?.url ?? null);
-      setNotice("連結已就緒");
+      setNotice(regenerate ? "已重新產生，請複製新連結" : "連結已就緒");
       await load(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "產生失敗");
     } finally {
       setGenerating(false);
+      setRegenerating(false);
     }
   }
 
@@ -164,7 +172,7 @@ export function PaymentCollectionLinkIcon({ 專案ID, onViewSubmissions }: Props
     if (!url) return;
     try {
       await navigator.clipboard.writeText(url);
-      setNotice("已複製");
+      setNotice("已複製正式連結");
     } catch {
       setNotice("請手動複製");
     }
@@ -227,13 +235,14 @@ export function PaymentCollectionLinkIcon({ 專案ID, onViewSubmissions }: Props
                 <button
                   type="button"
                   disabled={generating}
-                  onClick={() => void generate()}
+                  onClick={() => void postLink(false)}
                   className="w-full rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-sky-500 disabled:opacity-60"
                 >
                   {generating ? "產生中…" : "產生收款連結"}
                 </button>
               ) : (
                 <>
+                  <p className="text-[10px] text-stone-500">給客戶（erp.sdh-corp.com，免登入）</p>
                   <input
                     readOnly
                     value={url}
@@ -243,9 +252,9 @@ export function PaymentCollectionLinkIcon({ 專案ID, onViewSubmissions }: Props
                     <button
                       type="button"
                       onClick={() => void copyUrl()}
-                      className="rounded border border-sky-200 px-2 py-1 text-xs font-semibold text-sky-900 hover:bg-sky-50"
+                      className="rounded bg-sky-600 px-2 py-1 text-xs font-bold text-white hover:bg-sky-500"
                     >
-                      複製
+                      複製給客戶
                     </button>
                     <a
                       href={url}
@@ -255,6 +264,14 @@ export function PaymentCollectionLinkIcon({ 專案ID, onViewSubmissions }: Props
                     >
                       預覽
                     </a>
+                    <button
+                      type="button"
+                      disabled={regenerating}
+                      onClick={() => void postLink(true)}
+                      className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-950 hover:bg-amber-100 disabled:opacity-60"
+                    >
+                      {regenerating ? "…" : "重新產生"}
+                    </button>
                   </div>
                 </>
               )}
