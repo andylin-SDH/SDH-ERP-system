@@ -1,9 +1,50 @@
-/** 應用程式根 URL（郵件連結、登入後導向用） */
+/**
+ * SDH ERP 對外正式網域（收款連結、通知信）。
+ * 勿使用 Vercel 預覽網址（*-team.vercel.app）；可被 NEXT_PUBLIC_APP_URL 覆寫。
+ */
+export const SDH_PUBLIC_APP_ORIGIN = "https://erp.sdh-corp.com";
+
+function stripTrailingSlash(url: string): string {
+  return url.replace(/\/$/, "");
+}
+
+function normalizeOrigin(raw: string): string {
+  const t = raw.trim();
+  if (!t) return "";
+  return stripTrailingSlash(t.startsWith("http") ? t : `https://${t}`);
+}
+
+function hostFromUrlOrHost(raw: string): string {
+  const t = raw.trim().replace(/^https?:\/\//, "");
+  return t.split("/")[0]?.toLowerCase() ?? "";
+}
+
+/** Vercel 預覽部署網址（含 hash、team 名稱），不可給匯款方 */
+function isVercelPreviewHost(host: string): boolean {
+  const h = hostFromUrlOrHost(host);
+  if (!h.endsWith(".vercel.app")) return false;
+  // 專案正式 *.vercel.app 別名可接受；其餘 *.vercel.app 皆視為 preview
+  if (h === "sdh-erp-system.vercel.app") return false;
+  return true;
+}
+
+/** 應用程式根 URL（郵件連結、收款連結、登入後導向用） */
 export function getAppBaseUrl(): string {
-  const raw =
-    process.env.NEXT_PUBLIC_APP_URL ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
-  return raw.replace(/\/$/, "");
+  const fromEnv = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (fromEnv) return normalizeOrigin(fromEnv);
+
+  // Vercel 預覽／分支部署：固定用正式網域
+  if (process.env.VERCEL && process.env.VERCEL_ENV !== "production") {
+    return SDH_PUBLIC_APP_ORIGIN;
+  }
+
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  if (vercelUrl) {
+    if (isVercelPreviewHost(vercelUrl)) return SDH_PUBLIC_APP_ORIGIN;
+    return normalizeOrigin(vercelUrl);
+  }
+
+  return "http://localhost:3000";
 }
 
 /** 任務／專案通知信：直達 Dashboard 並帶 query 開啟對應專案（與任務） */
