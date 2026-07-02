@@ -12,6 +12,8 @@ import {
 } from "@/lib/partners/duplicate";
 import type { MasterRow } from "@/lib/db/master";
 import { PaymentCollectionLink } from "@/components/PaymentCollectionLink";
+import { PaymentCollectionLinkIcon } from "@/components/PaymentCollectionLinkIcon";
+import type { PaymentSubmissionWithProject } from "@/lib/db/payment-collection";
 import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, PaymentRecordRow } from "@/modules/finance";
 import { sortInvoicesByInvoiceNumber } from "@/modules/finance";
 import type { FinanceUpdateFields } from "@/lib/db/finance";
@@ -1428,6 +1430,8 @@ export default function DashboardPage() {
   const [payoutSearch, setPayoutSearch] = useState("");
   const [payoutWorkflowTab, setPayoutWorkflowTab] = useState<PayoutWorkflowTabKey>("pending_vendor");
   const [financeSearch, setFinanceSearch] = useState("");
+  const [paymentSubmissions, setPaymentSubmissions] = useState<PaymentSubmissionWithProject[]>([]);
+  const [paymentSubmissionsSearch, setPaymentSubmissionsSearch] = useState("");
   const [invoicesSearch, setInvoicesSearch] = useState("");
   const [paymentRecordsSearch, setPaymentRecordsSearch] = useState("");
   const [tasksLifecycleTab, setTasksLifecycleTab] = useState<"in_progress" | "completed">(() => {
@@ -1441,7 +1445,9 @@ export default function DashboardPage() {
     return "in_progress";
   });
   /** 財務分頁內：依專案列 vs 發票清冊 vs 付款記錄 */
-  const [financeSubTab, setFinanceSubTab] = useState<"byProject" | "employeePayout" | "invoices" | "payments">(
+  const [financeSubTab, setFinanceSubTab] = useState<
+    "byProject" | "employeePayout" | "invoices" | "payments" | "collectionSubmissions"
+  >(
     "employeePayout"
   );
   const [financeEmployeePayoutTab, setFinanceEmployeePayoutTab] = useState<"pending" | "paid">("pending");
@@ -3007,6 +3013,28 @@ export default function DashboardPage() {
     return () => { if (timer) window.clearTimeout(timer); };
   }, [activeSection, financeSubTab, searchedPaymentRecords.length]);
 
+  const deferredPaymentSubmissionsSearch = useDeferredValue(paymentSubmissionsSearch);
+  const searchedPaymentSubmissions = useMemo(() => {
+    const q = deferredPaymentSubmissionsSearch.trim().toLowerCase();
+    if (!q) return paymentSubmissions;
+    return paymentSubmissions.filter((r) => {
+      const hay = [
+        r.專案ID,
+        r.專案名稱,
+        r.匯款單位,
+        r.匯款末五碼,
+        r.匯款日期,
+        r.匯款金額,
+        r.備註,
+        r.聯絡人,
+        r.聯絡Email,
+      ]
+        .map((x) => String(x ?? "").toLowerCase())
+        .join(" ");
+      return hay.includes(q);
+    });
+  }, [paymentSubmissions, deferredPaymentSubmissionsSearch]);
+
   useEffect(() => {
     // 切換選取專案時，重置編輯狀態並同步表單
     if (!selectedMaster) {
@@ -3201,7 +3229,7 @@ export default function DashboardPage() {
 
   const refreshDashboardData = useCallback(
     async (
-      targets: Array<"users" | "master" | "tasks" | "partners" | "myVisibility" | "visibilityRules" | "systemConfig" | "invoices" | "finance" | "payout" | "payments"> = [
+      targets: Array<"users" | "master" | "tasks" | "partners" | "myVisibility" | "visibilityRules" | "systemConfig" | "invoices" | "finance" | "payout" | "payments" | "paymentSubmissions"> = [
         "users", "master", "tasks", "partners", "myVisibility", "visibilityRules", "systemConfig", "invoices", "finance", "payout", "payments",
       ]
     ) => {
@@ -3347,10 +3375,25 @@ export default function DashboardPage() {
             })
         );
       }
+      if (need.has("paymentSubmissions")) {
+        reqs.push(
+          fetch("/api/payment-submissions", { cache: "no-store" })
+            .then(safeResJson)
+            .then((res) => {
+              if (!(res as { ok?: boolean }).ok) return;
+              setPaymentSubmissions(((res as { submissions?: PaymentSubmissionWithProject[] }).submissions) ?? []);
+            })
+        );
+      }
       await Promise.allSettled(reqs);
     },
     []
   );
+
+  useEffect(() => {
+    if (activeSection !== "finance" || financeSubTab !== "collectionSubmissions") return;
+    void refreshDashboardData(["paymentSubmissions"]);
+  }, [activeSection, financeSubTab, refreshDashboardData]);
 
   const runMasterTaskTemplatesNow = useCallback(async () => {
     setMasterTaskTemplatesRunning(true);
@@ -3908,7 +3951,7 @@ export default function DashboardPage() {
   useEffect(() => {
     try {
       const v = localStorage.getItem("sdh-finance-subtab");
-      if (v === "invoices" || v === "byProject" || v === "payments") setFinanceSubTab(v);
+      if (v === "invoices" || v === "byProject" || v === "payments" || v === "collectionSubmissions") setFinanceSubTab(v);
     } catch {
       /* ignore */
     }
@@ -7981,6 +8024,20 @@ export default function DashboardPage() {
               >
                 付款記錄
               </button>
+              <button
+                type="button"
+                onClick={() => setFinanceSubTab("collectionSubmissions")}
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  financeSubTab === "collectionSubmissions"
+                    ? "bg-amber-500 text-slate-900 shadow shadow-amber-200/40"
+                    : "text-stone-500 hover:text-stone-900"
+                }`}
+              >
+                收款申報
+                {paymentSubmissions.length > 0 ? (
+                  <span className="ml-1 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] tabular-nums">{paymentSubmissions.length}</span>
+                ) : null}
+              </button>
             </div>
           </div>
 
@@ -8676,7 +8733,11 @@ export default function DashboardPage() {
                               })}
                               <td className="whitespace-nowrap px-3 py-2 text-right align-middle">
                                 {rowId ? (
-                                  <div className="flex justify-end gap-2">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <PaymentCollectionLinkIcon
+                                      專案ID={String(inv.專案ID ?? "").trim()}
+                                      onViewSubmissions={() => setFinanceSubTab("collectionSubmissions")}
+                                    />
                                     <button
                                       type="button"
                                       disabled={saving || !dirty}
@@ -8767,6 +8828,83 @@ export default function DashboardPage() {
                   </div>
                 </div>
               )}
+            </>
+          )}
+
+          {financeSubTab === "collectionSubmissions" && (
+            <>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-stone-500">
+                  匯款方透過收款表單填寫的匯款資訊（只新增、不覆寫），供日後自動對帳。
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void refreshDashboardData(["paymentSubmissions"])}
+                    className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-50"
+                  >
+                    重新整理
+                  </button>
+                  <input
+                    type="text"
+                    value={paymentSubmissionsSearch}
+                    onChange={(e) => setPaymentSubmissionsSearch(e.target.value)}
+                    placeholder="搜尋專案、匯款單位、末五碼…"
+                    className="w-full min-w-0 max-w-72 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-stone-200/90 bg-white shadow-sm">
+                <table className="min-w-full divide-y divide-stone-200 text-sm">
+                  <thead className="bg-sky-50">
+                    <tr>
+                      <th className="whitespace-nowrap px-3 py-3 text-left text-xs font-bold text-stone-600">提交時間</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-left text-xs font-bold text-stone-600">專案</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-left text-xs font-bold text-stone-600">匯款單位</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-left text-xs font-bold text-stone-600">匯款日期</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-right text-xs font-bold text-stone-600">匯款金額</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-left text-xs font-bold text-stone-600">末五碼</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-left text-xs font-bold text-stone-600">聯絡人</th>
+                      <th className="min-w-[8rem] px-3 py-3 text-left text-xs font-bold text-stone-600">備註</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {searchedPaymentSubmissions.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-10 text-center text-sm text-stone-500">
+                          {paymentSubmissions.length === 0
+                            ? "尚無收款申報。請在發票清冊或專案詳情產生收款連結，匯款方填寫後會出現於此。"
+                            : "沒有符合搜尋結果"}
+                        </td>
+                      </tr>
+                    ) : (
+                      searchedPaymentSubmissions.map((r) => (
+                        <tr key={r.id} className="hover:bg-sky-50/40">
+                          <td className="whitespace-nowrap px-3 py-2.5 text-xs text-stone-600">
+                            {r.submitted_at ? String(r.submitted_at).slice(0, 16).replace("T", " ") : "—"}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <p className="font-medium text-stone-900">{r.專案名稱}</p>
+                            <p className="font-mono text-[11px] text-stone-500">{r.專案ID}</p>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2.5 text-stone-800">{r.匯款單位}</td>
+                          <td className="whitespace-nowrap px-3 py-2.5 text-stone-700">{r.匯款日期 || "—"}</td>
+                          <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums font-semibold text-stone-900">
+                            {r.匯款金額 != null && String(r.匯款金額).trim() ? Number(r.匯款金額).toLocaleString("zh-TW") : "—"}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2.5 font-mono text-stone-800">{r.匯款末五碼}</td>
+                          <td className="whitespace-nowrap px-3 py-2.5 text-xs text-stone-600">
+                            {[r.聯絡人, r.聯絡Email, r.聯絡電話].filter(Boolean).join(" · ") || "—"}
+                          </td>
+                          <td className="max-w-[14rem] px-3 py-2.5 text-xs text-stone-600">
+                            <span className="line-clamp-2 break-words">{r.備註 || "—"}</span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
 
@@ -10805,6 +10943,7 @@ export default function DashboardPage() {
                 <PaymentCollectionLink
                   專案ID={String(selectedMaster.專案ID ?? "").trim()}
                   hasInvoices={selectedMasterHasInvoices}
+                  showSubmissions
                 />
               </section>
 

@@ -215,3 +215,33 @@ export async function getSubmissionsByProjectId(專案ID: string): Promise<Payme
   }
   return (data ?? []).map((r) => rowToSubmission(r as Record<string, unknown>));
 }
+
+export type PaymentSubmissionWithProject = PaymentSubmissionRow & {
+  專案名稱: string;
+};
+
+/** 全部收款申報（財務清單用，新到舊） */
+export async function getAllPaymentSubmissions(): Promise<PaymentSubmissionWithProject[]> {
+  const { data, error } = await getSupabase()
+    .from("收款申報")
+    .select("*")
+    .order("submitted_at", { ascending: false });
+  if (error) {
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+  const rows = (data ?? []).map((r) => rowToSubmission(r as Record<string, unknown>));
+  if (rows.length === 0) return [];
+
+  const masters = await getMasterList();
+  const nameByPid = new Map<string, string>();
+  for (const m of masters) {
+    const pid = String(m.專案ID ?? "").trim();
+    if (pid) nameByPid.set(pid, String(m.專案名稱 ?? "").trim() || pid);
+  }
+
+  return rows.map((r) => ({
+    ...r,
+    專案名稱: nameByPid.get(r.專案ID) ?? r.專案ID,
+  }));
+}

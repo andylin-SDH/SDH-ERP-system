@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireEmployee } from "@/lib/auth/api";
+import { getAppBaseUrl } from "@/lib/deep-link";
 import {
   ensurePaymentLinkForProject,
   getPaymentLinkByProjectId,
@@ -8,11 +9,9 @@ import {
 
 export const dynamic = "force-dynamic";
 
-function buildPublicUrl(request: NextRequest, token: string): string {
-  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  const proto = request.headers.get("x-forwarded-proto") ?? "http";
-  if (host) return `${proto}://${host}/pay/${token}`;
-  return `/pay/${token}`;
+function buildPublicUrl(_request: NextRequest, token: string): string {
+  const base = getAppBaseUrl();
+  return `${base}/pay/${token}`;
 }
 
 /** GET ?專案ID= — 查詢專案收款連結與申報紀錄 */

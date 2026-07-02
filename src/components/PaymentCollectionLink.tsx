@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { PaymentSubmissionRow } from "@/lib/payment-collection/types";
 
 async function safeResJson(r: Response): Promise<Record<string, unknown>> {
   const text = await r.text();
@@ -16,12 +17,15 @@ type Props = {
   專案ID: string;
   hasInvoices: boolean;
   compact?: boolean;
+  /** 顯示此專案的申報明細 */
+  showSubmissions?: boolean;
 };
 
-export function PaymentCollectionLink({ 專案ID, hasInvoices, compact }: Props) {
+export function PaymentCollectionLink({ 專案ID, hasInvoices, compact, showSubmissions }: Props) {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [url, setUrl] = useState<string | null>(null);
+  const [submissions, setSubmissions] = useState<PaymentSubmissionRow[]>([]);
   const [submissionCount, setSubmissionCount] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,14 +46,16 @@ export function PaymentCollectionLink({ 專案ID, hasInvoices, compact }: Props)
         ok?: boolean;
         error?: string;
         link?: { url?: string } | null;
-        submissions?: unknown[];
+        submissions?: PaymentSubmissionRow[];
       };
       if (!res.ok || !data.ok) {
         setError(data.error ?? "讀取失敗");
         return;
       }
       setUrl(data.link?.url ?? null);
-      setSubmissionCount(Array.isArray(data.submissions) ? data.submissions.length : 0);
+      const list = Array.isArray(data.submissions) ? data.submissions : [];
+      setSubmissions(list);
+      setSubmissionCount(list.length);
     } catch (e) {
       setError(e instanceof Error ? e.message : "讀取失敗");
     } finally {
@@ -160,6 +166,36 @@ export function PaymentCollectionLink({ 專案ID, hasInvoices, compact }: Props)
               </a>
             </>
           )}
+        </div>
+      )}
+      {showSubmissions && submissions.length > 0 && (
+        <div className="mt-4 overflow-x-auto rounded-lg border border-sky-100 bg-white/80">
+          <table className="min-w-full text-xs">
+            <thead className="bg-sky-50/80 text-stone-600">
+              <tr>
+                <th className="px-2 py-2 text-left font-semibold">提交時間</th>
+                <th className="px-2 py-2 text-left font-semibold">匯款單位</th>
+                <th className="px-2 py-2 text-left font-semibold">匯款日</th>
+                <th className="px-2 py-2 text-right font-semibold">金額</th>
+                <th className="px-2 py-2 text-left font-semibold">末五碼</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-stone-100">
+              {submissions.map((s) => (
+                <tr key={s.id}>
+                  <td className="whitespace-nowrap px-2 py-2 text-stone-600">
+                    {s.submitted_at ? String(s.submitted_at).slice(0, 16).replace("T", " ") : "—"}
+                  </td>
+                  <td className="px-2 py-2 text-stone-800">{s.匯款單位}</td>
+                  <td className="whitespace-nowrap px-2 py-2">{s.匯款日期 || "—"}</td>
+                  <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums font-semibold">
+                    {s.匯款金額 != null ? Number(s.匯款金額).toLocaleString("zh-TW") : "—"}
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-2 font-mono">{s.匯款末五碼}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
