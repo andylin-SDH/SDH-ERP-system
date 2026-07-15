@@ -84,7 +84,6 @@ export default function KolCatalogPage() {
   const [isEmployee, setIsEmployee] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportPdfError, setExportPdfError] = useState<string | null>(null);
-  const [copyOk, setCopyOk] = useState(false);
   const catalogRef = useRef<HTMLElement>(null);
 
   const load = useCallback(async () => {
@@ -151,16 +150,6 @@ export default function KolCatalogPage() {
     }
   }, [exportingPdf]);
 
-  const handleCopyLink = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(window.location.href.split("?")[0]!);
-      setCopyOk(true);
-      window.setTimeout(() => setCopyOk(false), 2000);
-    } catch {
-      setCopyOk(false);
-    }
-  }, []);
-
   if (loading) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3">
@@ -198,13 +187,6 @@ export default function KolCatalogPage() {
               <span className="text-stone-500">內部預覽 · 此頁可分享給客戶瀏覽</span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void handleCopyLink()}
-                className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-50"
-              >
-                {copyOk ? "已複製連結" : "複製客戶連結"}
-              </button>
               <button
                 type="button"
                 disabled={exportingPdf || visibleItems.length === 0}

@@ -1391,8 +1391,6 @@ export default function DashboardPage() {
   });
   const [savingPartner, setSavingPartner] = useState(false);
   const [partnerEditError, setPartnerEditError] = useState<string | null>(null);
-  const [refreshingFollowers, setRefreshingFollowers] = useState(false);
-  const [refreshFollowersMessage, setRefreshFollowersMessage] = useState<string | null>(null);
   const [partnerEditLogs, setPartnerEditLogs] = useState<PartnerEditLogItem[]>([]);
   const [partnerEditLogsLoading, setPartnerEditLogsLoading] = useState(false);
   /** 編輯 Modal 開啟時的來源列 */
@@ -7201,41 +7199,22 @@ export default function DashboardPage() {
                 className="w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
               />
               <>
-                  {canEditVisibility && (
-                  <button
-                    type="button"
-                    disabled={refreshingFollowers}
-                    onClick={async () => {
-                      setRefreshFollowersMessage(null);
-                      setRefreshingFollowers(true);
-                      try {
-                        const res = await fetch("/api/partners/refresh-followers", { method: "POST" });
-                        const data = (await res.json()) as { ok?: boolean; updated?: number; errors?: { partnerId: string; url: string; message: string }[]; message?: string; error?: string };
-                        if (data.ok) {
-                          setRefreshFollowersMessage(data.message ?? `已更新 ${data.updated ?? 0} 位`);
-                          const listRes = await fetch("/api/partners", { cache: "no-store" });
-                          const listData = (await listRes.json()) as { partners?: PartnerRow[] };
-                          if (Array.isArray(listData.partners)) setPartners(listData.partners);
-                        } else {
-                          setRefreshFollowersMessage(data.error ?? "更新失敗");
-                        }
-                      } catch (e) {
-                        setRefreshFollowersMessage(e instanceof Error ? e.message : "更新失敗");
-                      } finally {
-                        setRefreshingFollowers(false);
-                      }
-                    }}
-                    className="rounded-full border border-amber-500/60 bg-amber-50 px-4 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-100/90 disabled:opacity-60"
-                  >
-                    {refreshingFollowers ? "更新粉絲數中…" : "更新粉絲數"}
-                  </button>
-                  )}
                   <Link
                     href="/kol-catalog"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="rounded-full border border-stone-300 bg-white px-4 py-1.5 text-xs font-bold text-stone-700 transition hover:bg-stone-50"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-400 px-5 py-2 text-sm font-bold text-slate-900 shadow-md shadow-amber-300/50 ring-2 ring-amber-400/40 transition hover:from-amber-400 hover:to-amber-300 hover:shadow-lg"
                   >
+                    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="shrink-0">
+                      <path
+                        d="M3 8.5h7.5M8.5 5L12 8.5 8.5 12"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.75"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
                     KOL 合作名單（客戶版）
                   </Link>
                   <button
@@ -7274,9 +7253,6 @@ export default function DashboardPage() {
                   </button>
               </>
             </div>
-            {refreshFollowersMessage && (
-              <p className="mt-2 text-xs text-amber-800">{refreshFollowersMessage}</p>
-            )}
           </div>
           {partners.length === 0 ? (
             <p className="rounded-xl border border-stone-200/90 px-4 py-12 text-center text-sm text-stone-500">
