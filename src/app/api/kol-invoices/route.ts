@@ -5,7 +5,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireEmployee } from "@/lib/auth/api";
-import { getKolInvoiceByProjectId, upsertKolInvoice } from "@/lib/db/kol-invoices";
+import { getKolInvoiceByProjectId, getKolInvoicesByProjectIds, upsertKolInvoice } from "@/lib/db/kol-invoices";
+import { getFinance } from "@/modules/finance";
+import { kolFinanceProgressShort } from "@/lib/kol/finance-status";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +56,21 @@ export async function PATCH(request: NextRequest) {
     for (const raw of extra) {
       const pid = String(raw ?? "").trim();
       if (pid && !targetIds.includes(pid)) targetIds.push(pid);
+    }
+
+    const [financeList, kolInvByPid] = await Promise.all([getFinance(), getKolInvoicesByProjectIds(targetIds)]);
+    const financeByPid = new Map<string, (typeof financeList)[number]>();
+    for (const f of financeList) {
+      const pid = String(f.專案ID ?? "").trim();
+      if (pid) financeByPid.set(pid, f);
+    }
+    for (const pid of targetIds) {
+      const f = financeByPid.get(pid);
+      const kolInv = kolInvByPid.get(pid);
+      const status = kolFinanceProgressShort(f?.廠商付款日期, kolInv, kolInv?.KOL匯款日期);
+      if (status === "已匯款") {
+        return NextResponse.json({ ok: false, error: `專案 ${pid} 已匯款，無法修改請款憑證` }, { status: 400 });
+      }
     }
 
     const 填寫人 = fillerLabel(auth.user);

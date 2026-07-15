@@ -13,6 +13,14 @@ async function safeResJson(r: Response): Promise<Record<string, unknown>> {
   }
 }
 
+function loginEmailTypoHint(email: string): string | null {
+  const e = email.trim().toLowerCase();
+  if (e.includes("@sdh-crop.com")) {
+    return "帳號網域疑似打錯：請改為 @sdh-corp.com（corp，不是 crop）";
+  }
+  return null;
+}
+
 type ErpLoginPanelProps = {
   subtitle?: string;
   /** 登入過期後顯示於表單上方 */
@@ -41,7 +49,10 @@ export function ErpLoginPanel({ subtitle, sessionNotice, onSuccess }: ErpLoginPa
       });
       const data = await safeResJson(res);
       if (!data.ok) {
-        setError(String(data.error ?? "登入失敗"));
+        const hint = loginEmailTypoHint(email);
+        setError(
+          hint ? `${String(data.error ?? "登入失敗")}。${hint}` : String(data.error ?? "登入失敗")
+        );
         return;
       }
       await onSuccess((data.user as Record<string, unknown>) ?? {});
@@ -123,18 +134,35 @@ export function ErpLoginPanel({ subtitle, sessionNotice, onSuccess }: ErpLoginPa
 
 /** 讀取 session（含一次短暫重試，避免瞬斷誤判未登入） */
 export async function fetchSessionWithRetry(): Promise<{ ok: boolean; user: Record<string, unknown> | null }> {
-  const load = async () => {
-    const res = await fetch("/api/auth/session", { credentials: "include", cache: "no-store" });
+  const load = async (signal: AbortSignal) => {
+    const res = await fetch("/api/auth/session", {
+      credentials: "include",
+      cache: "no-store",
+      signal,
+    });
     const data = await safeResJson(res);
     return {
       ok: Boolean(data.ok),
       user: data.ok && data.user ? (data.user as Record<string, unknown>) : null,
     };
   };
-  let result = await load();
-  if (!result.ok || !result.user) {
-    await new Promise((r) => setTimeout(r, 350));
-    result = await load();
+  const withTimeout = async () => {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+    try {
+      return await load(controller.signal);
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  };
+  try {
+    let result = await withTimeout();
+    if (!result.ok || !result.user) {
+      await new Promise((r) => setTimeout(r, 350));
+      result = await withTimeout();
+    }
+    return result;
+  } catch {
+    return { ok: false, user: null };
   }
-  return result;
 }

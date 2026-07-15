@@ -30,6 +30,7 @@ export type PaymentRecordInput = {
   付款對象?: string | null;
   付款金額?: string | null;
   備註?: string | null;
+  匯款類型?: string | null;
 };
 
 function mapInvoiceRecord(r: Record<string, unknown>): InvoiceRow {
@@ -56,6 +57,7 @@ function mapPaymentRecord(r: Record<string, unknown>): PaymentRecordRow {
     付款對象: r.付款對象 != null ? String(r.付款對象) : undefined,
     付款金額: normalizeMoneyString(r.付款金額),
     備註: r.備註 != null ? String(r.備註) : undefined,
+    匯款類型: r.匯款類型 != null ? String(r.匯款類型) : undefined,
   };
 }
 import type { MasterRow } from "@/lib/db/master";
@@ -502,6 +504,7 @@ export async function createPaymentRecordsBatch(
       付款對象: trimOrNull(row.付款對象 ?? undefined),
       付款金額: normalizeMoneyOrNull(row.付款金額 ?? undefined),
       備註: trimOrNull(row.備註 ?? undefined),
+      匯款類型: trimOrNull(row.匯款類型 ?? undefined),
     }));
 
   if (payload.length === 0) {
@@ -524,6 +527,7 @@ export async function updatePaymentRecordById(id: string, row: PaymentRecordInpu
     付款對象: trimOrNull(row.付款對象 ?? undefined),
     付款金額: normalizeMoneyOrNull(row.付款金額 ?? undefined),
     備註: trimOrNull(row.備註 ?? undefined),
+    匯款類型: trimOrNull(row.匯款類型 ?? undefined),
     updated_at: new Date().toISOString(),
   };
 

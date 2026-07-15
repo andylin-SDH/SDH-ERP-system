@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
       ok: true,
       partnerId: data.partnerId,
       partnerName: data.partnerName,
+      laborProfile: data.laborProfile,
       projects: data.projects,
     });
   } catch (e) {

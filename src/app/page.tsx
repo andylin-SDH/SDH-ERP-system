@@ -19,13 +19,18 @@ export default function Home() {
     }
 
     void (async () => {
-      const sess = await fetchSessionWithRetry();
-      if (sess.ok && sess.user) {
-        const role = String(sess.user.role ?? "").trim();
-        window.location.replace(role === "KOL" ? "/kol" : afterLogin);
-        return;
+      try {
+        const sess = await fetchSessionWithRetry();
+        if (sess.ok && sess.user) {
+          const role = String(sess.user.role ?? "").trim();
+          window.location.replace(role === "KOL" ? "/kol" : afterLogin);
+          return;
+        }
+      } catch {
+        /* 顯示登入表單 */
+      } finally {
+        setChecking(false);
       }
-      setChecking(false);
     })();
   }, []);
 

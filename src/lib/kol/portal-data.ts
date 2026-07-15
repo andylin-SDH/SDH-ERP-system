@@ -8,15 +8,27 @@ import type { InvoiceRow } from "@/modules/finance";
 import { getMasterList } from "@/lib/db/master";
 import { getKolInvoicesByProjectIds } from "@/lib/db/kol-invoices";
 import { getFinance, getInvoices } from "@/modules/finance";
-import { kolFinanceProgressShort } from "@/lib/kol/finance-status";
+import {
+  kolCanEditRequestCredential,
+  kolFinanceProgressShort,
+  kolRequestCredentialLabel,
+  kolRequestMode,
+} from "@/lib/kol/finance-status";
 import { formatKolAmountInt, parseKolAmount, sumKolInvoiceAmount含稅 } from "@/lib/kol/format";
 import { resolveKolPartnerForUser } from "@/lib/kol/partner-bind";
+import { getPartnerLaborProfile } from "@/lib/kol/partner-labor-profile";
 import type { KolPortalProject } from "@/lib/kol/types";
 
 export type { KolPortalProject } from "@/lib/kol/types";
 
 export async function buildKolPortalData(user: User): Promise<
-  | { ok: true; partnerId: string; partnerName: string; projects: KolPortalProject[] }
+  | {
+      ok: true;
+      partnerId: string;
+      partnerName: string;
+      laborProfile: { 身分證字號: string; 聯絡電話: string; 戶籍地址: string };
+      projects: KolPortalProject[];
+    }
   | { ok: false; error: string }
 > {
   const resolved = await resolveKolPartnerForUser(user);
@@ -27,7 +39,12 @@ export async function buildKolPortalData(user: User): Promise<
     return { ok: false, error: "合作夥伴名稱空白，無法對應專案。" };
   }
 
-  const [masterList, financeList, invoiceList] = await Promise.all([getMasterList(), getFinance(), getInvoices()]);
+  const [masterList, financeList, invoiceList, laborProfile] = await Promise.all([
+    getMasterList(),
+    getFinance(),
+    getInvoices(),
+    getPartnerLaborProfile(partnerId),
+  ]);
 
   const financeByPid = new Map<string, FinanceRow>();
   for (const f of financeList) {
@@ -50,7 +67,10 @@ export async function buildKolPortalData(user: User): Promise<
     if (pid) matchedPids.push(pid);
   }
 
-  const kolInvoiceByPid = await getKolInvoicesByProjectIds(matchedPids);
+  const kolInvoiceByPid = await getKolInvoicesByProjectIds(matchedPids).catch((e) => {
+    console.warn("buildKolPortalData: KOL發票讀取失敗，略過", e);
+    return new Map();
+  });
 
   const projects: KolPortalProject[] = [];
   for (const row of masterList) {
@@ -60,7 +80,8 @@ export async function buildKolPortalData(user: User): Promise<
     const f = financeByPid.get(pid);
     const invs = invoicesByPid.get(pid) ?? [];
     const kolInv = kolInvoiceByPid.get(pid);
-    const 結帳狀態 = kolFinanceProgressShort(f?.廠商付款日期, f?.員工分潤日期);
+    const 結帳狀態 = kolFinanceProgressShort(f?.廠商付款日期, kolInv, kolInv?.KOL匯款日期);
+    const mode = kolRequestMode(kolInv);
     projects.push({
       專案ID: pid,
       專案名稱: String(row.專案名稱 ?? "—"),
@@ -76,12 +97,29 @@ export async function buildKolPortalData(user: User): Promise<
         發票日期: String(inv.發票日期 ?? "").trim().slice(0, 10) || "—",
         發票金額含稅: String(inv.發票金額含稅 ?? "").trim() || "—",
       })),
+      請款方式: mode,
       KOL發票號碼: String(kolInv?.KOL發票號碼 ?? "").trim() || "",
       KOL發票日期: String(kolInv?.KOL發票日期 ?? "").trim().slice(0, 10) || "",
       KOL發票備註: String(kolInv?.KOL發票備註 ?? "").trim() || "",
+      勞務期間起: String(kolInv?.勞務期間起 ?? "").trim().slice(0, 10) || "",
+      勞務期間迄: String(kolInv?.勞務期間迄 ?? "").trim().slice(0, 10) || "",
+      勞務內容: String(kolInv?.勞務內容 ?? "").trim() || "",
+      給付總額: formatKolAmountInt(parseKolAmount(kolInv?.給付總額 || row.KOL費用未稅)),
+      身分證字號: String(kolInv?.身分證字號 ?? laborProfile.身分證字號 ?? "").trim() || "",
+      勞報領款方式: kolInv?.領款方式 === "匯款" ? "匯款" : "現金",
+      聯絡電話: String(kolInv?.聯絡電話 ?? laborProfile.聯絡電話 ?? "").trim() || "",
+      戶籍地址: String(kolInv?.戶籍地址 ?? laborProfile.戶籍地址 ?? "").trim() || "",
+      扣繳稅額: formatKolAmountInt(parseKolAmount(kolInv?.扣繳稅額)),
+      二代健保費: formatKolAmountInt(parseKolAmount(kolInv?.二代健保費)),
+      實領金額: formatKolAmountInt(parseKolAmount(kolInv?.實領金額 || kolInv?.給付總額)),
+      勞報簽署時間: String(kolInv?.勞報簽署時間 ?? "").trim() || "",
+      勞報簽名: String(kolInv?.勞報簽名 ?? "").trim() || "",
+      請款憑證摘要: kolRequestCredentialLabel(kolInv),
       KOL發票填寫來源: String(kolInv?.填寫來源 ?? "").trim() || "",
       KOL發票填寫人: String(kolInv?.填寫人 ?? "").trim() || "",
-      canEditKolInvoice: 結帳狀態 !== "已分潤",
+      KOL匯款日期: String(kolInv?.KOL匯款日期 ?? "").trim().slice(0, 10) || "",
+      KOL匯款金額: formatKolAmountInt(parseKolAmount(kolInv?.KOL匯款金額)),
+      canEditKolInvoice: kolCanEditRequestCredential(f?.廠商付款日期, kolInv, kolInv?.KOL匯款日期),
     });
   }
 
@@ -91,6 +129,7 @@ export async function buildKolPortalData(user: User): Promise<
     ok: true,
     partnerId,
     partnerName,
+    laborProfile,
     projects,
   };
 }

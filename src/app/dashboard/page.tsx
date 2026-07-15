@@ -521,6 +521,74 @@ function InvoiceProjectSearchSelect({
   );
 }
 
+/** 付款對象：依歷史紀錄打字快速選擇（仍可輸入新名稱） */
+function PaymentRecipientAutocomplete({
+  value,
+  options,
+  disabled,
+  onChange,
+  placeholder = "付款對象",
+}: {
+  value: string;
+  options: string[];
+  disabled?: boolean;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const normalized = String(value ?? "").trim();
+
+  const filtered = useMemo(() => {
+    const q = normalized.toLowerCase();
+    const base = [...new Set(options.map((o) => String(o ?? "").trim()).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b, "zh-TW")
+    );
+    if (!q) return base.slice(0, 40);
+    return base.filter((o) => o.toLowerCase().includes(q)).slice(0, 40);
+  }, [options, normalized]);
+
+  const showList = open && !disabled && filtered.length > 0;
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        autoComplete="off"
+        onFocus={() => setOpen(true)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+        }}
+        onBlur={() => {
+          window.setTimeout(() => setOpen(false), 120);
+        }}
+        className="w-full min-w-[10rem] rounded border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-800 placeholder:text-stone-400 focus:border-emerald-500/60 focus:outline-none disabled:opacity-60"
+      />
+      {showList && (
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-full min-w-[14rem] overflow-auto rounded-lg border border-stone-200 bg-white py-1 text-xs shadow-xl">
+          {filtered.map((name) => (
+            <button
+              key={name}
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChange(name);
+                setOpen(false);
+              }}
+              className="block w-full px-3 py-2 text-left font-medium text-stone-800 hover:bg-emerald-50"
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClickableProjectName({
   name,
   projectId,
@@ -1447,11 +1515,39 @@ export default function DashboardPage() {
   });
   /** 財務分頁內：依專案列 vs 發票清冊 vs 付款記錄 */
   const [financeSubTab, setFinanceSubTab] = useState<
-    "byProject" | "employeePayout" | "invoices" | "payments" | "collectionSubmissions"
+    "byProject" | "employeePayout" | "kolRemittance" | "invoices" | "payments" | "collectionSubmissions"
   >(
     "employeePayout"
   );
   const [financeEmployeePayoutTab, setFinanceEmployeePayoutTab] = useState<"pending" | "paid">("pending");
+  const [financeKolRemittanceTab, setFinanceKolRemittanceTab] = useState<"pending" | "remitted">("pending");
+  const [kolRemittanceItems, setKolRemittanceItems] = useState<
+    Array<{
+      專案ID: string;
+      專案名稱: string;
+      KOL名稱: string;
+      KOL費用未稅: string;
+      廠商付款日期: string;
+      請款方式: string;
+      請款憑證摘要: string;
+      KOL發票號碼: string;
+      KOL發票日期: string;
+      勞務期間起: string;
+      勞務期間迄: string;
+      給付總額: string;
+      實領金額: string;
+      KOL匯款日期: string;
+      KOL匯款金額: string;
+      結帳狀態: string;
+    }>
+  >([]);
+  const [kolRemittanceLoading, setKolRemittanceLoading] = useState(false);
+  const [kolRemittanceError, setKolRemittanceError] = useState<string | null>(null);
+  const [kolRemittanceSearch, setKolRemittanceSearch] = useState("");
+  const [kolRemittanceSavingPid, setKolRemittanceSavingPid] = useState<string | null>(null);
+  const [kolRemitDrafts, setKolRemitDrafts] = useState<
+    Record<string, { 匯款日期: string; 匯款金額: string; 付款對象: string; 備註: string }>
+  >({});
   const [financeEmployeePayoutSearch, setFinanceEmployeePayoutSearch] = useState("");
   const [financePayoutSavingIds, setFinancePayoutSavingIds] = useState<string[]>([]);
   const [financePayoutEditError, setFinancePayoutEditError] = useState<string | null>(null);
@@ -1489,6 +1585,7 @@ export default function DashboardPage() {
   const deferredPayoutSearch = useDeferredValue(payoutSearch);
   const deferredFinanceSearch = useDeferredValue(financeSearch);
   const deferredFinanceEmployeePayoutSearch = useDeferredValue(financeEmployeePayoutSearch);
+  const deferredKolRemittanceSearch = useDeferredValue(kolRemittanceSearch);
   const deferredInvoicesSearch = useDeferredValue(invoicesSearch);
   const deferredPaymentRecordsSearch = useDeferredValue(paymentRecordsSearch);
 
@@ -2705,6 +2802,44 @@ export default function DashboardPage() {
     }
     return { pending, pendingAmount, paid, paidAmount };
   }, [dedupedPayoutForFinanceEmployee]);
+  const kolRemittancePendingItems = useMemo(
+    () => kolRemittanceItems.filter((r) => r.結帳狀態 === "待匯款"),
+    [kolRemittanceItems]
+  );
+  const kolRemittanceRemittedItems = useMemo(
+    () => kolRemittanceItems.filter((r) => r.結帳狀態 === "已匯款"),
+    [kolRemittanceItems]
+  );
+  const kolRemittanceBaseItems = useMemo(
+    () => (financeKolRemittanceTab === "pending" ? kolRemittancePendingItems : kolRemittanceRemittedItems),
+    [financeKolRemittanceTab, kolRemittancePendingItems, kolRemittanceRemittedItems]
+  );
+  const kolRemittanceCounts = useMemo(() => {
+    let pending = 0;
+    let pendingAmount = 0;
+    let remitted = 0;
+    let remittedAmount = 0;
+    for (const r of kolRemittanceItems) {
+      const amt = parseNumericField(r.KOL費用未稅);
+      if (r.結帳狀態 === "待匯款") {
+        pending += 1;
+        pendingAmount += amt;
+      } else if (r.結帳狀態 === "已匯款") {
+        remitted += 1;
+        remittedAmount += parseNumericField(r.KOL匯款金額) || amt;
+      }
+    }
+    return { pending, pendingAmount, remitted, remittedAmount };
+  }, [kolRemittanceItems]);
+  const searchedKolRemittanceItems = useMemo(() => {
+    const q = deferredKolRemittanceSearch.trim().toLowerCase();
+    if (!q) return kolRemittanceBaseItems;
+    return kolRemittanceBaseItems.filter((r) =>
+      [r.專案ID, r.專案名稱, r.KOL名稱, r.KOL發票號碼, r.KOL匯款日期, r.KOL匯款金額]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q))
+    );
+  }, [kolRemittanceBaseItems, deferredKolRemittanceSearch]);
   const financeEmployeePayoutSearchCols = useMemo(
     () => ["專案ID", "專案名稱", "領取人", "分潤類型", "分潤金額", "分潤匯款日期"] as const,
     []
@@ -2770,6 +2905,15 @@ export default function DashboardPage() {
     () => sumNumericColumn(searchedPaymentRecords as unknown as Record<string, unknown>[], "付款金額"),
     [searchedPaymentRecords]
   );
+  /** 付款記錄曾填過的付款對象（快速選擇） */
+  const paymentRecipientSuggestions = useMemo(() => {
+    const names = new Set<string>();
+    for (const r of paymentRecords) {
+      const n = String(r.付款對象 ?? "").trim();
+      if (n) names.add(n);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b, "zh-TW"));
+  }, [paymentRecords]);
   const visibleMasterRows = useMemo(
     () => searchedMasterList.slice(0, masterRenderCount),
     [searchedMasterList, masterRenderCount]
@@ -3772,6 +3916,85 @@ export default function DashboardPage() {
     [refreshDashboardData]
   );
 
+  const loadKolRemittanceList = useCallback(async () => {
+    setKolRemittanceLoading(true);
+    setKolRemittanceError(null);
+    try {
+      const res = await fetch("/api/kol-remittance", { cache: "no-store" });
+      const data = (await safeResJson(res)) as {
+        ok?: boolean;
+        error?: string;
+        items?: typeof kolRemittanceItems;
+      };
+      if (!res.ok || !data.ok) {
+        setKolRemittanceError(data.error ?? "讀取 KOL 匯款清單失敗");
+        return;
+      }
+      const items = Array.isArray(data.items) ? data.items : [];
+      setKolRemittanceItems(items);
+      const today = new Date().toISOString().slice(0, 10);
+      const nextDrafts: typeof kolRemitDrafts = {};
+      for (const row of items) {
+        if (row.結帳狀態 !== "待匯款") continue;
+        nextDrafts[row.專案ID] = {
+          匯款日期: today,
+          匯款金額: row.請款方式 === "勞務報酬" ? row.實領金額 || row.給付總額 || row.KOL費用未稅 || "" : row.KOL費用未稅 || "",
+          付款對象: row.KOL名稱 || "",
+          備註: "",
+        };
+      }
+      setKolRemitDrafts(nextDrafts);
+    } catch (e) {
+      setKolRemittanceError(e instanceof Error ? e.message : "讀取失敗");
+    } finally {
+      setKolRemittanceLoading(false);
+    }
+  }, []);
+
+  const registerKolRemittance = useCallback(
+    async (row: (typeof kolRemittanceItems)[number]) => {
+      const pid = String(row.專案ID ?? "").trim();
+      if (!pid) return;
+      const draft = kolRemitDrafts[pid] ?? {
+        匯款日期: new Date().toISOString().slice(0, 10),
+        匯款金額: row.KOL費用未稅 || "",
+        付款對象: row.KOL名稱 || "",
+        備註: "",
+      };
+      setKolRemittanceSavingPid(pid);
+      setKolRemittanceError(null);
+      try {
+        const res = await fetch("/api/kol-remittance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            專案ID: pid,
+            匯款日期: draft.匯款日期,
+            匯款金額: draft.匯款金額,
+            付款對象: draft.付款對象,
+            備註: draft.備註,
+          }),
+        });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string };
+        if (!res.ok || !data.ok) {
+          setKolRemittanceError(data.error ?? "登記匯款失敗");
+          return;
+        }
+        await Promise.all([loadKolRemittanceList(), refreshDashboardData(["payments"])]);
+      } catch (e) {
+        setKolRemittanceError(e instanceof Error ? e.message : "登記匯款失敗");
+      } finally {
+        setKolRemittanceSavingPid(null);
+      }
+    },
+    [kolRemitDrafts, loadKolRemittanceList, refreshDashboardData]
+  );
+
+  useEffect(() => {
+    if (activeSection !== "finance") return;
+    void loadKolRemittanceList();
+  }, [activeSection, loadKolRemittanceList]);
+
   const refetchTasksOnly = useCallback(async () => {
     try {
       const res = await fetch("/api/tasks", { cache: "no-store" });
@@ -3952,7 +4175,8 @@ export default function DashboardPage() {
   useEffect(() => {
     try {
       const v = localStorage.getItem("sdh-finance-subtab");
-      if (v === "invoices" || v === "byProject" || v === "payments" || v === "collectionSubmissions") setFinanceSubTab(v);
+      if (v === "invoices" || v === "byProject" || v === "payments" || v === "collectionSubmissions" || v === "kolRemittance")
+        setFinanceSubTab(v);
     } catch {
       /* ignore */
     }
@@ -7012,7 +7236,7 @@ export default function DashboardPage() {
                     rel="noopener noreferrer"
                     className="rounded-full border border-stone-300 bg-white px-4 py-1.5 text-xs font-bold text-stone-700 transition hover:bg-stone-50"
                   >
-                    KOL 提案型錄
+                    KOL 合作名單（客戶版）
                   </Link>
                   <button
                     type="button"
@@ -7983,7 +8207,7 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-xl font-bold tracking-tight text-stone-900">財務</h2>
               <p className="mt-1 text-xs text-stone-500">
-                員工分潤付款：逐筆勾選已匯款；依專案：專案級日期；發票清冊：收款憑證；付款記錄：對外支出。
+                員工分潤付款：內部員工匯款；KOL 匯款：匯給 KOL 老師；發票清冊：客戶入帳；付款記錄：對外支出流水。
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-stone-200 bg-amber-50/90 p-1">
@@ -7997,6 +8221,22 @@ export default function DashboardPage() {
                 }`}
               >
                 員工分潤付款
+              </button>
+              <button
+                type="button"
+                onClick={() => setFinanceSubTab("kolRemittance")}
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  financeSubTab === "kolRemittance"
+                    ? "bg-amber-500 text-slate-900 shadow shadow-amber-200/40"
+                    : "text-stone-500 hover:text-stone-900"
+                }`}
+              >
+                KOL 匯款
+                {kolRemittanceCounts.pending > 0 ? (
+                  <span className="ml-1 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] tabular-nums text-amber-950">
+                    {kolRemittanceCounts.pending}
+                  </span>
+                ) : null}
               </button>
               <button
                 type="button"
@@ -8208,6 +8448,219 @@ export default function DashboardPage() {
                             <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-stone-600">
                               {row.分潤匯款日期 ?? "—"}
                             </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          )}
+
+          {financeSubTab === "kolRemittance" && (
+            <>
+              <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 px-4 py-3">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-amber-800">待匯款</p>
+                  <p className="mt-1 text-lg font-bold tabular-nums text-stone-900">
+                    {kolRemittanceCounts.pending}{" "}
+                    <span className="text-sm font-semibold text-stone-500">筆</span>
+                  </p>
+                  <p className="mt-0.5 text-xs tabular-nums text-stone-600">
+                    KOL 費用合計 {formatAmount(String(Math.round(kolRemittanceCounts.pendingAmount)))}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/50 px-4 py-3">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-800">已匯款</p>
+                  <p className="mt-1 text-lg font-bold tabular-nums text-stone-900">
+                    {kolRemittanceCounts.remitted}{" "}
+                    <span className="text-sm font-semibold text-stone-500">筆</span>
+                  </p>
+                  <p className="mt-0.5 text-xs tabular-nums text-stone-600">
+                    合計 {formatAmount(String(Math.round(kolRemittanceCounts.remittedAmount)))}
+                  </p>
+                </div>
+              </div>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex rounded-lg border border-stone-200 bg-white/90 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setFinanceKolRemittanceTab("pending")}
+                    className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
+                      financeKolRemittanceTab === "pending"
+                        ? "bg-amber-500 text-slate-900"
+                        : "text-stone-500 hover:text-stone-900"
+                    }`}
+                  >
+                    待匯款 ({kolRemittanceCounts.pending})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFinanceKolRemittanceTab("remitted")}
+                    className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
+                      financeKolRemittanceTab === "remitted"
+                        ? "bg-emerald-600 text-white"
+                        : "text-stone-500 hover:text-stone-900"
+                    }`}
+                  >
+                    已匯款 ({kolRemittanceCounts.remitted})
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={kolRemittanceSearch}
+                  onChange={(e) => setKolRemittanceSearch(e.target.value)}
+                  placeholder="搜尋專案、KOL、發票號碼…"
+                  className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
+                />
+              </div>
+              {kolRemittanceError && (
+                <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{kolRemittanceError}</p>
+              )}
+              <p className="mb-2 text-[11px] text-stone-500">
+                KOL 填寫請款憑證（發票或勞務報酬單）後會出現在「待匯款」。登記匯款會同時寫入付款記錄（類型 KOL），KOL 入口即顯示已匯款與匯款日期。
+              </p>
+              <div className="overflow-x-auto rounded-xl border border-stone-200/90">
+                {kolRemittanceLoading ? (
+                  <p className="px-4 py-8 text-center text-stone-500">載入中…</p>
+                ) : searchedKolRemittanceItems.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-stone-500">
+                    {financeKolRemittanceTab === "pending"
+                      ? "目前沒有待匯款專案（需 KOL 已提交請款憑證）。"
+                      : "尚無已匯款紀錄。"}
+                  </p>
+                ) : (
+                  <table className="min-w-full divide-y divide-stone-200">
+                    <thead className="bg-stone-100">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">專案</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">KOL</th>
+                        <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-stone-600">KOL費用未稅</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">請款方式</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">請款憑證</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">客戶入帳日</th>
+                        {financeKolRemittanceTab === "pending" ? (
+                          <>
+                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">匯款日期</th>
+                            <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-stone-600">匯款金額</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">付款對象</th>
+                            <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-stone-600">操作</th>
+                          </>
+                        ) : (
+                          <>
+                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">匯款日期</th>
+                            <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-stone-600">匯款金額</th>
+                          </>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-200 bg-white">
+                      {searchedKolRemittanceItems.map((row) => {
+                        const pid = row.專案ID;
+                        const saving = kolRemittanceSavingPid === pid;
+                        const draft = kolRemitDrafts[pid] ?? {
+                          匯款日期: new Date().toISOString().slice(0, 10),
+                          匯款金額: row.KOL費用未稅 || "",
+                          付款對象: row.KOL名稱 || "",
+                          備註: "",
+                        };
+                        return (
+                          <tr key={pid} className="hover:bg-amber-50/40">
+                            <td className="px-4 py-3 text-sm">
+                              <div className="max-w-xs truncate font-semibold text-stone-900" title={row.專案名稱}>
+                                {row.專案名稱 || pid}
+                              </div>
+                              <div className="max-w-xs truncate text-[11px] text-stone-400" title={pid}>
+                                {pid}
+                              </div>
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-stone-900">{row.KOL名稱}</td>
+                            <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold tabular-nums text-stone-900">
+                              {formatAmount(row.KOL費用未稅)}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-700">
+                              {row.請款方式 === "勞務報酬" ? "勞務報酬" : "發票"}
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              <div className="font-medium text-stone-800">{row.請款憑證摘要 || "—"}</div>
+                              {row.請款方式 === "勞務報酬" && row.勞務期間起 ? (
+                                <div className="text-[11px] text-stone-500">
+                                  {row.勞務期間起} ~ {row.勞務期間迄} · 應領 {row.給付總額 || row.KOL費用未稅}
+                                  {row.實領金額 ? ` · 實領 ${row.實領金額}` : ""}
+                                </div>
+                              ) : row.KOL發票日期 ? (
+                                <div className="text-[11px] text-stone-500">{row.KOL發票日期}</div>
+                              ) : null}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-stone-600">
+                              {row.廠商付款日期 || "—"}
+                            </td>
+                            {financeKolRemittanceTab === "pending" ? (
+                              <>
+                                <td className="whitespace-nowrap px-2 py-2">
+                                  <input
+                                    type="date"
+                                    value={draft.匯款日期}
+                                    disabled={saving}
+                                    onChange={(e) =>
+                                      setKolRemitDrafts((prev) => ({
+                                        ...prev,
+                                        [pid]: { ...draft, 匯款日期: e.target.value },
+                                      }))
+                                    }
+                                    className="w-full min-w-[8.5rem] rounded border border-stone-200 bg-white px-2 py-1 text-xs disabled:opacity-60"
+                                  />
+                                </td>
+                                <td className="whitespace-nowrap px-2 py-2">
+                                  <input
+                                    type="text"
+                                    value={draft.匯款金額}
+                                    disabled={saving}
+                                    onChange={(e) =>
+                                      setKolRemitDrafts((prev) => ({
+                                        ...prev,
+                                        [pid]: { ...draft, 匯款金額: e.target.value },
+                                      }))
+                                    }
+                                    className="w-full min-w-[5rem] rounded border border-stone-200 bg-white px-2 py-1 text-right text-xs tabular-nums disabled:opacity-60"
+                                  />
+                                </td>
+                                <td className="whitespace-nowrap px-2 py-2">
+                                  <input
+                                    type="text"
+                                    value={draft.付款對象}
+                                    disabled={saving}
+                                    onChange={(e) =>
+                                      setKolRemitDrafts((prev) => ({
+                                        ...prev,
+                                        [pid]: { ...draft, 付款對象: e.target.value },
+                                      }))
+                                    }
+                                    className="w-full min-w-[7rem] rounded border border-stone-200 bg-white px-2 py-1 text-xs disabled:opacity-60"
+                                  />
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 text-center align-middle">
+                                  <button
+                                    type="button"
+                                    disabled={saving}
+                                    onClick={() => void registerKolRemittance(row)}
+                                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-60"
+                                  >
+                                    {saving ? "登記中…" : "登記匯款"}
+                                  </button>
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums font-semibold text-emerald-800">
+                                  {row.KOL匯款日期 || "—"}
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold tabular-nums text-stone-900">
+                                  {formatAmount(row.KOL匯款金額 || row.KOL費用未稅)}
+                                </td>
+                              </>
+                            )}
                           </tr>
                         );
                       })}
@@ -9027,6 +9480,24 @@ export default function DashboardPage() {
                                     </td>
                                   );
                                 }
+                                if (k === "付款對象") {
+                                  return (
+                                    <td key={k} className="min-w-[12rem] px-2 py-2 align-middle">
+                                      <PaymentRecipientAutocomplete
+                                        value={val}
+                                        options={paymentRecipientSuggestions}
+                                        disabled={saving}
+                                        onChange={(next) => {
+                                          setPaymentEditError(null);
+                                          setPaymentDirtyIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
+                                          setPaymentRecords((prev) =>
+                                            prev.map((r) => (r.id === rowId ? { ...r, 付款對象: next } : r))
+                                          );
+                                        }}
+                                      />
+                                    </td>
+                                  );
+                                }
                                 if (k === "備註") {
                                   return (
                                     <td key={k} className="min-w-[12rem] max-w-[18rem] px-2 py-2 align-top">
@@ -9624,19 +10095,33 @@ export default function DashboardPage() {
                       <tr key={rowIdx} className="bg-white">
                         {PAYMENT_RECORD_KEYS.map((k) => (
                           <td key={k} className="border-b border-stone-100 p-1 align-top">
-                            <input
-                              type={k === "付款日期" ? "date" : "text"}
-                              value={row[k] ?? ""}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setPaymentDraftRows((prev) => {
-                                  const next = [...prev];
-                                  next[rowIdx] = { ...next[rowIdx], [k]: v };
-                                  return next;
-                                });
-                              }}
-                              className="w-full min-w-[5rem] rounded border border-stone-200 bg-stone-50 px-1.5 py-1.5 text-stone-900 focus:border-emerald-500/70 focus:outline-none"
-                            />
+                            {k === "付款對象" ? (
+                              <PaymentRecipientAutocomplete
+                                value={row[k] ?? ""}
+                                options={paymentRecipientSuggestions}
+                                onChange={(next) => {
+                                  setPaymentDraftRows((prev) => {
+                                    const nextRows = [...prev];
+                                    nextRows[rowIdx] = { ...nextRows[rowIdx], 付款對象: next };
+                                    return nextRows;
+                                  });
+                                }}
+                              />
+                            ) : (
+                              <input
+                                type={k === "付款日期" ? "date" : "text"}
+                                value={row[k] ?? ""}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setPaymentDraftRows((prev) => {
+                                    const next = [...prev];
+                                    next[rowIdx] = { ...next[rowIdx], [k]: v };
+                                    return next;
+                                  });
+                                }}
+                                className="w-full min-w-[5rem] rounded border border-stone-200 bg-stone-50 px-1.5 py-1.5 text-stone-900 focus:border-emerald-500/70 focus:outline-none"
+                              />
+                            )}
                           </td>
                         ))}
                         <td className="border-b border-stone-100 p-1 text-center align-top">
