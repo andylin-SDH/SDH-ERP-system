@@ -9504,6 +9504,14 @@ export default function DashboardPage() {
                   <span className="ml-1 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] tabular-nums">{paymentSubmissions.length}</span>
                 ) : null}
               </button>
+              {["董事長", "管理者", "會計"].includes(String(me?.role ?? "")) ? (
+                <Link
+                  href="/reconciliation"
+                  className="rounded-lg px-3 py-2 text-xs font-semibold text-stone-500 transition hover:bg-white hover:text-stone-900"
+                >
+                  銀行對帳 ↗
+                </Link>
+              ) : null}
             </div>
           </div>
 
@@ -14451,4 +14459,3 @@ function TextAreaField({ label, value, onChange }: TextAreaFieldProps) {
     </div>
   );
 }
-
