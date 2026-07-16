@@ -5,6 +5,36 @@ export interface ParsedBankCsv {
   headers: string[];
   errors: string[];
   encoding: "UTF-8" | "Big5";
+  format: "CSV" | "HTML-XLS";
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)));
+}
+
+function htmlCellText(value: string): string {
+  return decodeHtmlEntities(
+    value
+      .replace(/<br\s*\/?\s*>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
+function parseHtmlTableRecords(html: string): string[][] {
+  return [...html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map((rowMatch) =>
+    [...rowMatch[1].matchAll(/<(?:td|th)\b[^>]*>([\s\S]*?)<\/(?:td|th)>/gi)].map((cell) =>
+      htmlCellText(cell[1])
+    )
+  );
 }
 
 function parseCsvRecords(text: string): string[][] {
@@ -101,9 +131,14 @@ function decodeBest(buffer: ArrayBuffer): { text: string; encoding: "UTF-8" | "B
 
 export function parseBankCsv(buffer: ArrayBuffer): ParsedBankCsv {
   const decoded = decodeBest(buffer);
-  const records = parseCsvRecords(decoded.text.replace(/^\uFEFF/, ""));
+  const sourceText = decoded.text.replace(/^\uFEFF/, "");
+  const isHtmlXls = /<(?:html|table|tr)\b/i.test(sourceText);
+  const records = isHtmlXls ? parseHtmlTableRecords(sourceText) : parseCsvRecords(sourceText);
+  const format = isHtmlXls ? "HTML-XLS" : "CSV";
   const errors: string[] = [];
-  if (records.length === 0) return { rows: [], headers: [], errors: ["檔案是空的"], encoding: decoded.encoding };
+  if (records.length === 0) {
+    return { rows: [], headers: [], errors: ["檔案是空的"], encoding: decoded.encoding, format };
+  }
 
   const dateAliases = ["交易日期", "帳務日期", "轉帳日期", "日期"];
   const amountAliases = ["交易金額", "入帳金額", "金額", "存入金額", "貸方金額"];
@@ -120,6 +155,7 @@ export function parseBankCsv(buffer: ArrayBuffer): ParsedBankCsv {
       headers: records[0] ?? [],
       errors: ["找不到交易日期與金額欄位；需要依國泰實際 CSV 欄位調整一次"],
       encoding: decoded.encoding,
+      format,
     };
   }
 
@@ -129,15 +165,18 @@ export function parseBankCsv(buffer: ArrayBuffer): ParsedBankCsv {
     bookingDate: headerIndex(headers, ["入帳日期", "入帳日", "起息日"]),
     amount: headerIndex(headers, amountAliases),
     credit: headerIndex(headers, creditAliases),
-    debit: headerIndex(headers, debitAliases),
+    debit: headerIndex(headers, [...debitAliases, "提出金額"]),
     direction: headerIndex(headers, ["借貸別", "收支別", "交易方向", "交易類型"]),
     name: headerIndex(headers, ["匯款人", "匯款戶名", "對方戶名", "交易對象", "轉帳戶名"]),
     account: headerIndex(headers, ["匯款帳號", "對方帳號", "轉出帳號", "交易帳號"]),
     last5: headerIndex(headers, ["匯款末五碼", "帳號末五碼", "末五碼"]),
     description: headerIndex(headers, ["交易摘要", "摘要", "交易說明", "說明", "備註"]),
     reference: headerIndex(headers, ["交易序號", "交易編號", "參考號碼", "流水號", "序號"]),
+    transactionCode: headerIndex(headers, ["交易代號"]),
+    checkNumber: headerIndex(headers, ["支票號碼"]),
+    balance: headerIndex(headers, ["餘額"]),
     currency: headerIndex(headers, ["幣別", "交易幣別"]),
-    sourceAccount: headerIndex(headers, ["本行帳號", "帳戶號碼", "查詢帳號"]),
+    sourceAccount: headerIndex(headers, ["本行帳號", "帳戶號碼", "查詢帳號", "帳號"]),
   };
 
   const valueAt = (record: string[], index: number) => (index >= 0 ? String(record[index] ?? "").trim() : "");
@@ -168,20 +207,31 @@ export function parseBankCsv(buffer: ArrayBuffer): ParsedBankCsv {
       continue;
     }
     const raw = Object.fromEntries(headers.map((header, index) => [header || `欄位${index + 1}`, record[index] ?? ""]));
+    const description = valueAt(record, indexes.description) || null;
+    const explicitReference = valueAt(record, indexes.reference);
+    const generatedReference = isHtmlXls
+      ? [
+          valueAt(record, indexes.transactionCode),
+          valueAt(record, indexes.checkNumber),
+          valueAt(record, indexes.balance),
+        ]
+          .filter(Boolean)
+          .join("|")
+      : "";
     rows.push({
       transactionDate,
       bookingDate: normalizeDate(valueAt(record, indexes.bookingDate)) || null,
       amount,
       currency: valueAt(record, indexes.currency) || "TWD",
       direction,
-      counterpartyName: valueAt(record, indexes.name) || null,
+      counterpartyName: valueAt(record, indexes.name) || (direction === "credit" ? description : null),
       counterpartyAccount: valueAt(record, indexes.account) || null,
       counterpartyLast5: valueAt(record, indexes.last5) || null,
-      description: valueAt(record, indexes.description) || null,
-      bankReference: valueAt(record, indexes.reference) || null,
+      description,
+      bankReference: explicitReference || generatedReference || null,
       sourceAccount: valueAt(record, indexes.sourceAccount) || null,
       raw,
     });
   }
-  return { rows, headers, errors: errors.slice(0, 50), encoding: decoded.encoding };
+  return { rows, headers, errors: errors.slice(0, 50), encoding: decoded.encoding, format };
 }

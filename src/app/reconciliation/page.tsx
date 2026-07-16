@@ -231,13 +231,13 @@ export default function ReconciliationPage() {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h2 className="font-bold text-stone-900">1. 匯入國泰交易 CSV</h2>
-              <p className="mt-1 text-xs leading-5 text-stone-500">支援 UTF-8／Big5。提款資料不會匯入；相同交易再次上傳會自動略過。</p>
+              <p className="mt-1 text-xs leading-5 text-stone-500">支援國泰下載的 Detail.xls、UTF-8／Big5 CSV。提出金額不會匯入；相同交易再次上傳會自動略過。</p>
             </div>
             <label className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-stone-900 shadow-sm hover:bg-amber-400">
-              選擇 CSV 檔案
+              選擇銀行檔案
               <input
                 type="file"
-                accept=".csv,.txt,text/csv,text/plain"
+                accept=".xls,.csv,.txt,application/vnd.ms-excel,text/csv,text/plain,text/html"
                 className="sr-only"
                 onChange={(event) => void chooseFile(event.target.files?.[0] ?? null)}
               />
@@ -250,7 +250,7 @@ export default function ReconciliationPage() {
                 <div>
                   <p className="text-sm font-bold text-stone-900">{preview.filename}</p>
                   <p className="mt-1 text-xs text-stone-600">
-                    偵測 {preview.encoding}；共解析 {preview.rows.length} 筆交易，其中入帳 {preview.rows.filter((row) => row.direction !== "debit").length} 筆
+                    偵測 {preview.format}／{preview.encoding}；共解析 {preview.rows.length} 筆交易，其中入帳 {preview.rows.filter((row) => row.direction !== "debit").length} 筆
                   </p>
                   {preview.errors.length > 0 ? <p className="mt-1 text-xs text-red-700">另有 {preview.errors.length} 列無法辨識，匯入時會略過。</p> : null}
                 </div>
@@ -381,4 +381,3 @@ export default function ReconciliationPage() {
     </main>
   );
 }
-
