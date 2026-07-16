@@ -17,6 +17,7 @@ import {
   applySessionCookies,
   clearSessionCookies,
   computeSessionExpiresAtEpoch,
+  decodeSessionEmailCookie,
   getSessionExpiresAtFromCookieHeader,
 } from "@/lib/auth/session-cookie";
 
@@ -30,7 +31,7 @@ function getEmailFromCookie(cookieHeader: string | null): string | null {
   } catch {
     /* 已非 encoded 字串則忽略 */
   }
-  return value || null;
+  return decodeSessionEmailCookie(value);
 }
 
 const noCache = { "Cache-Control": "no-store, no-cache, must-revalidate" };

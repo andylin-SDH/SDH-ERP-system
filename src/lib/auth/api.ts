@@ -9,9 +9,11 @@ import { getUserByEmail } from "@/modules/users";
 import type { User } from "@/lib/types";
 
 import { SESSION_EMAIL_COOKIE } from "@/lib/auth/session-config";
+import { decodeSessionEmailCookie } from "@/lib/auth/session-cookie";
 
 const COOKIE_NAME = SESSION_EMAIL_COOKIE;
 export const ADMIN_ROLES = ["董事長", "管理者"] as const;
+export const FINANCE_ROLES = ["董事長", "管理者", "會計"] as const;
 
 /** KOL 專用入口（與員工後台分離） */
 export const KOL_ROLE = "KOL" as const;
@@ -27,7 +29,7 @@ export function getEmailFromCookie(request: NextRequest | Request): string | nul
   } catch {
     /* ignore */
   }
-  return value || null;
+  return decodeSessionEmailCookie(value);
 }
 
 /** 取得目前登入者，未登入回傳 null */
@@ -66,6 +68,17 @@ export async function requireAdmin(request: NextRequest | Request): Promise<{ us
   const role = result.user.role as (typeof ADMIN_ROLES)[number] | string;
   if (!ADMIN_ROLES.includes(role as (typeof ADMIN_ROLES)[number])) {
     return NextResponse.json({ ok: false, error: "僅董事長或管理者可執行此操作" }, { status: 403 });
+  }
+  return result;
+}
+
+/** 銀行交易與對帳寫回僅限財務相關角色。 */
+export async function requireFinanceOperator(request: NextRequest | Request): Promise<{ user: User } | NextResponse> {
+  const result = await requireEmployee(request);
+  if (result instanceof NextResponse) return result;
+  const role = String(result.user.role ?? "").trim();
+  if (!FINANCE_ROLES.includes(role as (typeof FINANCE_ROLES)[number])) {
+    return NextResponse.json({ ok: false, error: "僅會計、管理者或董事長可操作銀行對帳" }, { status: 403 });
   }
   return result;
 }
