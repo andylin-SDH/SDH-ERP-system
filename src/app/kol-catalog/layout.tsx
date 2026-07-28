@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 
 export const metadata = {
-  title: "盛德好 KOL 合作資源",
-  description: "盛德好 KOL 合作資源名單，供品牌提案與媒合參考。",
+  title: "盛德好 合作KOL名單",
+  description: "盛德好合作KOL名單，供品牌提案與媒合參考。",
 };
 
 export default function KolCatalogLayout({ children }: { children: ReactNode }) {

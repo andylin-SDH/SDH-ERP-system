@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -H 0.0.0.0",
+    "dev": "next dev -H 0.0.0.0 --webpack",
+    "dev:3002": "next dev -H 0.0.0.0 -p 3002 --webpack",
+    "dev:clean": "rm -rf .next && next dev -H 0.0.0.0 -p 3002 --webpack",
+    "preview:local": "npm run build && next start -H 0.0.0.0 -p 3003",
+    "restart:dev": "bash scripts/restart-dev.sh",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

@@ -219,7 +219,7 @@ export default function KolCatalogPage() {
             <Image src="/logo.png" alt="盛德好" width={200} height={48} className="h-10 w-auto object-contain sm:h-11" />
             <p className="mt-6 text-xs font-bold uppercase tracking-[0.25em] text-amber-800/70">Influencer Roster</p>
             <h1 className="mt-2 max-w-2xl text-3xl font-bold tracking-tight text-stone-900 sm:text-4xl lg:text-5xl">
-              KOL 合作資源名單
+              合作KOL名單
             </h1>
             <p className="mt-4 max-w-2xl text-sm leading-relaxed text-stone-600 sm:text-base">
               精選創作者與頻道資源，依領域分類整理，方便品牌提案時快速瀏覽與媒合。

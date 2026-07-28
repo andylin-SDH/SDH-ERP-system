@@ -3651,6 +3651,7 @@ export default function DashboardPage() {
       if (master) {
         setActiveSection("master");
         setSelectedMaster(master);
+        setExpandedProjectId(String(master.專案ID ?? "").trim());
         opened = true;
       }
     }
@@ -4973,6 +4974,14 @@ export default function DashboardPage() {
                     搜尋
                   </span>
                 </div>
+                <Link
+                  href="/meeting"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center rounded-full border border-stone-300 bg-white px-4 py-2 text-xs font-bold text-stone-800 shadow-sm transition hover:border-amber-300 hover:bg-amber-50/80"
+                >
+                  週一晨會視圖
+                </Link>
                 <button
                   type="button"
                   onClick={() => {
