@@ -131,7 +131,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "備註", label: "備註" },
   ],
   invoices: [
-    { key: "專案ID", label: "對應專案（可空白）" },
+    { key: "專案ID", label: "對應專案（可多選／可空白）" },
     { key: "發票號碼", label: "發票號碼" },
     { key: "發票日期", label: "發票日期" },
     { key: "收款對象", label: "收款對象" },

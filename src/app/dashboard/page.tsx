@@ -521,6 +521,193 @@ function InvoiceProjectSearchSelect({
   );
 }
 
+/** 草稿列內多專案：用逗號串接專案ID（SDH 專案ID 不含逗號） */
+function parseInvoiceDraftProjectIds(raw: string | null | undefined): string[] {
+  return String(raw ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function joinInvoiceDraftProjectIds(ids: string[]): string {
+  return [...new Set(ids.map((id) => id.trim()).filter(Boolean))].join(",");
+}
+
+/** 新增發票：一列可選多個專案，存檔時展開成多筆（同發票號碼、各綁一專案） */
+function InvoiceProjectMultiSelect({
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  options: InvoiceProjectOption[];
+  disabled?: boolean;
+  onChange: (joinedProjectIds: string) => void;
+}) {
+  const selectedIds = useMemo(() => parseInvoiceDraftProjectIds(value), [value]);
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const filteredOptions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const rows = q
+      ? options.filter((opt) => opt.searchText.toLowerCase().includes(q))
+      : options;
+    return rows.filter((opt) => !selectedSet.has(opt.id)).slice(0, 30);
+  }, [options, query, selectedSet]);
+
+  const selectedOptions = useMemo(
+    () =>
+      selectedIds.map((id) => {
+        const opt = options.find((o) => o.id === id);
+        return { id, name: invoiceProjectDisplayName(opt, id) };
+      }),
+    [options, selectedIds]
+  );
+
+  return (
+    <div className="relative min-w-[12rem] max-w-[18rem]">
+      {selectedOptions.length > 0 ? (
+        <div className="mb-1 flex flex-wrap gap-1">
+          {selectedOptions.map((opt) => (
+            <span
+              key={opt.id}
+              className="inline-flex max-w-full items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-950 ring-1 ring-amber-200/80"
+              title={opt.id}
+            >
+              <span className="truncate">{opt.name}</span>
+              <button
+                type="button"
+                disabled={disabled}
+                aria-label={`移除 ${opt.name}`}
+                onClick={() => onChange(joinInvoiceDraftProjectIds(selectedIds.filter((id) => id !== opt.id)))}
+                className="shrink-0 text-amber-800/70 hover:text-red-700 disabled:opacity-50"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <input
+        type="text"
+        value={query}
+        disabled={disabled}
+        placeholder={selectedIds.length > 0 ? "再搜尋加入其他專案…" : "搜尋專案名稱（可多選）"}
+        onFocus={() => setOpen(true)}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        onBlur={() => {
+          window.setTimeout(() => setOpen(false), 120);
+        }}
+        className="w-full rounded border border-stone-200 bg-white px-2 py-1.5 text-xs font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none disabled:opacity-60"
+      />
+      {open && !disabled ? (
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-72 overflow-auto rounded-lg border border-stone-200 bg-white py-1 text-xs shadow-xl">
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onChange("");
+              setQuery("");
+              setOpen(false);
+            }}
+            className="block w-full px-3 py-2 text-left text-stone-500 hover:bg-amber-50 hover:text-stone-900"
+          >
+            清空／不綁定專案
+          </button>
+          {filteredOptions.length === 0 ? (
+            <div className="px-3 py-2 text-stone-400">
+              {selectedIds.length > 0 && !query.trim() ? "已選專案皆在上方；可搜尋再加入" : "沒有符合的專案"}
+            </div>
+          ) : (
+            filteredOptions.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onChange(joinInvoiceDraftProjectIds([...selectedIds, opt.id]));
+                  setQuery("");
+                }}
+                className="block w-full px-3 py-2 text-left hover:bg-amber-50"
+              >
+                <span className="block truncate font-medium text-stone-900">{opt.name || opt.id}</span>
+                <span className="block truncate text-[10px] text-stone-500">{opt.id}</span>
+              </button>
+            ))
+          )}
+        </div>
+      ) : null}
+      {selectedIds.length > 1 ? (
+        <p className="mt-1 text-[10px] text-amber-800/80">
+          將建立 {selectedIds.length} 筆（同號各綁一專案；若勾選分攤則金額平均拆開）
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** 將含稅金額平均分攤到 n 份（小數兩位；餘數加在最後一份，總和不變） */
+function splitInvoiceAmountAcrossParts(totalRaw: string, partCount: number): string[] {
+  const n = Math.max(1, Math.floor(partCount));
+  const total = Number(String(totalRaw ?? "").replace(/,/g, "").trim());
+  if (!Number.isFinite(total) || n === 1) {
+    return Array.from({ length: n }, () => String(totalRaw ?? "").trim());
+  }
+  const totalCents = Math.round(total * 100);
+  const base = Math.floor(totalCents / n);
+  const remainder = totalCents - base * n;
+  return Array.from({ length: n }, (_, i) => {
+    const cents = base + (i === n - 1 ? remainder : 0);
+    return String(Number((cents / 100).toFixed(2)));
+  });
+}
+
+/** 新增草稿：一列多專案 → 展開成多筆；可選平均分攤金額 */
+function expandInvoiceDraftRowsForSave(
+  rows: Array<Record<string, string>>,
+  opts?: { splitAmount?: boolean }
+): Array<Record<string, string>> {
+  const splitAmount = opts?.splitAmount !== false;
+  const out: Array<Record<string, string>> = [];
+  for (const row of rows) {
+    if (!String(row.發票號碼 ?? "").trim()) continue;
+    const pids = parseInvoiceDraftProjectIds(row.專案ID);
+    if (pids.length === 0) {
+      out.push({ ...row, 專案ID: "" });
+      continue;
+    }
+    if (pids.length === 1) {
+      out.push({ ...row, 專案ID: pids[0]! });
+      continue;
+    }
+    const amountRaw = String(row.發票金額含稅 ?? "").trim();
+    const amounts =
+      splitAmount && amountRaw !== ""
+        ? splitInvoiceAmountAcrossParts(amountRaw, pids.length)
+        : pids.map(() => amountRaw);
+    pids.forEach((pid, i) => {
+      out.push({
+        ...row,
+        專案ID: pid,
+        發票金額含稅: amounts[i] ?? amountRaw,
+        備註: (() => {
+          const note = String(row.備註 ?? "").trim();
+          if (!splitAmount || !amountRaw) return note;
+          const tag = `多專案分攤（總額 ${amountRaw} ÷ ${pids.length}）`;
+          return note ? `${note}；${tag}` : tag;
+        })(),
+      });
+    });
+  }
+  return out;
+}
+
 /** 付款對象：依歷史紀錄打字快速選擇（仍可輸入新名稱） */
 function PaymentRecipientAutocomplete({
   value,
@@ -1431,6 +1618,11 @@ export default function DashboardPage() {
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
   const [deletingInvoiceIds, setDeletingInvoiceIds] = useState<string[]>([]);
   const [invoiceDirtyIds, setInvoiceDirtyIds] = useState<string[]>([]);
+  /** 發票清冊：正在為哪一筆「再綁其他專案」 */
+  const [invoiceBindExtraId, setInvoiceBindExtraId] = useState<string | null>(null);
+  const [bindingInvoiceExtra, setBindingInvoiceExtra] = useState(false);
+  /** 新增發票：多專案時是否平均分攤「發票金額含稅」（預設開啟） */
+  const [invoiceSplitAmountAcrossProjects, setInvoiceSplitAmountAcrossProjects] = useState(true);
   /** 入帳分類／月份：僅反映已存檔的廠商付款日期 */
   const [invoiceLedgerSnapshot, setInvoiceLedgerSnapshot] = useState<Record<string, string>>({});
   const invoicesRef = useRef<InvoiceRow[]>([]);
@@ -3621,6 +3813,106 @@ export default function DashboardPage() {
             void persistInvoiceRowById(id);
           });
         }
+      }
+    },
+    [refreshDashboardData]
+  );
+
+  /** 同一張發票再綁另一專案（新增一列，並把同號金額重新平均分攤） */
+  const bindInvoiceToAnotherProject = useCallback(
+    async (sourceId: string, projectId: string) => {
+      const pid = String(projectId ?? "").trim();
+      if (!sourceId || !pid) return;
+      const source = invoicesRef.current.find((r) => r.id === sourceId);
+      if (!source) return;
+      const invoiceNo = String(source.發票號碼 ?? "").trim();
+      const already = invoicesRef.current.some(
+        (r) =>
+          String(r.發票號碼 ?? "").trim() === invoiceNo &&
+          String(r.專案ID ?? "").trim() === pid
+      );
+      if (already) {
+        setInvoiceEditError("此發票號碼已對應該專案");
+        setInvoiceBindExtraId(null);
+        return;
+      }
+      setBindingInvoiceExtra(true);
+      setInvoiceEditError(null);
+      try {
+        const siblings = invoicesRef.current.filter((r) => String(r.發票號碼 ?? "").trim() === invoiceNo);
+        const parsedAmounts = siblings.map((r) => Number(String(r.發票金額含稅 ?? "").replace(/,/g, "").trim()));
+        const finiteAmounts = parsedAmounts.filter((n) => Number.isFinite(n));
+        let total = 0;
+        if (finiteAmounts.length > 0) {
+          const first = finiteAmounts[0]!;
+          const allSame = finiteAmounts.every((n) => Math.abs(n - first) < 0.001);
+          // 若同號各列金額相同，多半是先前整額複製 → 以該額當總額；否則加總視為已分攤
+          total = allSame && siblings.length > 1 ? first : finiteAmounts.reduce((s, n) => s + n, 0);
+        }
+        const partCount = siblings.length + 1;
+        const parts =
+          total > 0 && Number.isFinite(total)
+            ? splitInvoiceAmountAcrossParts(String(total), partCount)
+            : null;
+
+        const payload = {
+          ...invoiceRowToInsertInput(source),
+          專案ID: pid,
+          發票金額含稅: parts ? parts[parts.length - 1]! : (source.發票金額含稅 ?? ""),
+          備註: (() => {
+            const note = String(source.備註 ?? "").trim();
+            if (!parts) return note;
+            const tag = `多專案分攤（總額 ${total} ÷ ${partCount}）`;
+            return note.includes("多專案分攤") ? note : note ? `${note}；${tag}` : tag;
+          })(),
+        };
+        const res = await fetch("/api/invoices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ invoices: [payload] }),
+        });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string; invoices?: InvoiceRow[] };
+        if (!res.ok || !data.ok) {
+          setInvoiceEditError(data.error ?? "再綁專案失敗");
+          return;
+        }
+
+        if (parts) {
+          for (let i = 0; i < siblings.length; i++) {
+            const row = siblings[i]!;
+            const id = String(row.id ?? "").trim();
+            if (!id) continue;
+            const nextAmount = parts[i]!;
+            const patchRes = await fetch("/api/invoices", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                id,
+                ...invoiceRowToInsertInput(row),
+                發票金額含稅: nextAmount,
+              }),
+            });
+            const patchData = (await safeResJson(patchRes)) as { ok?: boolean; invoice?: InvoiceRow };
+            if (patchRes.ok && patchData.invoice) {
+              setInvoices((prev) =>
+                sortInvoicesByInvoiceNumber(prev.map((r) => (r.id === id ? { ...r, ...patchData.invoice } : r)))
+              );
+            }
+          }
+        }
+
+        if (data.invoices?.length) {
+          setInvoiceLedgerSnapshot((prev) => ({ ...prev, ...buildInvoiceLedgerSnapshot(data.invoices!) }));
+          setInvoices((prev) => sortInvoicesByInvoiceNumber([...data.invoices!, ...prev]));
+        } else {
+          await refreshDashboardData(["invoices", "finance"]);
+        }
+        setInvoiceBindExtraId(null);
+        await refreshDashboardData(["finance", "payout"]);
+      } catch (e) {
+        setInvoiceEditError(e instanceof Error ? e.message : "再綁專案失敗");
+      } finally {
+        setBindingInvoiceExtra(false);
       }
     },
     [refreshDashboardData]
@@ -9172,31 +9464,61 @@ export default function DashboardPage() {
                               })}
                               <td className="whitespace-nowrap px-3 py-2 text-right align-middle">
                                 {rowId ? (
-                                  <div className="flex items-center justify-end gap-2">
-                                    <PaymentCollectionLinkIcon
-                                      專案ID={String(inv.專案ID ?? "").trim()}
-                                      onViewSubmissions={() => setFinanceSubTab("collectionSubmissions")}
-                                    />
-                                    <button
-                                      type="button"
-                                      disabled={saving || !dirty}
-                                      onClick={() => void persistInvoiceRowById(rowId)}
-                                      className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
-                                        dirty
-                                          ? "border border-amber-500 bg-amber-500 text-slate-900 hover:bg-amber-400"
-                                          : "border border-stone-200 bg-stone-50 text-stone-400"
-                                      } disabled:opacity-60`}
-                                    >
-                                      {saving ? "存檔中…" : dirty ? "存檔" : "已儲存"}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={deletingInvoiceIdSet.has(rowId)}
-                                      onClick={() => void deleteInvoicesByIdList([rowId])}
-                                      className="rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50"
-                                    >
-                                      {deletingInvoiceIdSet.has(rowId) ? "刪除中…" : "刪除"}
-                                    </button>
+                                  <div className="flex flex-col items-end gap-1.5">
+                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                      <PaymentCollectionLinkIcon
+                                        專案ID={String(inv.專案ID ?? "").trim()}
+                                        onViewSubmissions={() => setFinanceSubTab("collectionSubmissions")}
+                                      />
+                                      <button
+                                        type="button"
+                                        disabled={saving || bindingInvoiceExtra}
+                                        onClick={() =>
+                                          setInvoiceBindExtraId((cur) => (cur === rowId ? null : rowId))
+                                        }
+                                        className="rounded-lg border border-stone-300 bg-white px-2.5 py-1 text-xs font-semibold text-stone-700 transition hover:bg-amber-50 disabled:opacity-50"
+                                        title="同一發票號碼再對應另一專案，並重新平均分攤金額"
+                                      >
+                                        再綁專案
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={saving || !dirty}
+                                        onClick={() => void persistInvoiceRowById(rowId)}
+                                        className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                                          dirty
+                                            ? "border border-amber-500 bg-amber-500 text-slate-900 hover:bg-amber-400"
+                                            : "border border-stone-200 bg-stone-50 text-stone-400"
+                                        } disabled:opacity-60`}
+                                      >
+                                        {saving ? "存檔中…" : dirty ? "存檔" : "已儲存"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={deletingInvoiceIdSet.has(rowId)}
+                                        onClick={() => void deleteInvoicesByIdList([rowId])}
+                                        className="rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50"
+                                      >
+                                        {deletingInvoiceIdSet.has(rowId) ? "刪除中…" : "刪除"}
+                                      </button>
+                                    </div>
+                                    {invoiceBindExtraId === rowId ? (
+                                      <div className="w-56 text-left">
+                                        <p className="mb-1 text-[10px] font-medium text-stone-500">
+                                          選擇要再綁的專案（會重算平均分攤金額）
+                                        </p>
+                                        <InvoiceProjectSearchSelect
+                                          value=""
+                                          options={invoiceProjectOptions.filter(
+                                            (opt) => opt.id !== String(inv.專案ID ?? "").trim()
+                                          )}
+                                          disabled={bindingInvoiceExtra}
+                                          onChange={(projectId) => {
+                                            if (projectId) void bindInvoiceToAnotherProject(rowId, projectId);
+                                          }}
+                                        />
+                                      </div>
+                                    ) : null}
                                   </div>
                                 ) : null}
                               </td>
@@ -9586,7 +9908,7 @@ export default function DashboardPage() {
               <div className="min-w-0">
                 <h2 className="text-lg font-bold tracking-tight text-stone-900 sm:text-xl">新增發票</h2>
                 <p className="mt-0.5 text-xs text-stone-500">
-                  可一次建立多筆；每列須填發票號碼，空白列會自動略過。專案ID 可留空。
+                  可一次建立多筆；每列須填發票號碼，空白列會自動略過。同一列可選多個專案，存檔後拆成多筆；預設會把「發票金額含稅」平均分攤到各專案。
                 </p>
               </div>
               <button
@@ -9748,13 +10070,13 @@ export default function DashboardPage() {
                         {INVOICE_DRAFT_KEYS.map((k) => (
                           <td key={k} className="border-b border-stone-100 p-1 align-top">
                             {k === "專案ID" ? (
-                              <InvoiceProjectSearchSelect
+                              <InvoiceProjectMultiSelect
                                 value={row[k] ?? ""}
                                 options={invoiceProjectOptions}
-                                onChange={(projectId) => {
+                                onChange={(projectIds) => {
                                   setInvoiceDraftRows((prev) => {
                                     const next = [...prev];
-                                    next[rowIdx] = { ...next[rowIdx], [k]: projectId };
+                                    next[rowIdx] = { ...next[rowIdx], [k]: projectIds };
                                     return next;
                                   });
                                 }}
@@ -9828,7 +10150,17 @@ export default function DashboardPage() {
                 + 新增一列
               </button>
             </div>
-            <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-stone-200/90 bg-stone-50/90 px-4 py-3 sm:px-6">
+            <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-stone-200/90 bg-stone-50/90 px-4 py-3 sm:px-6">
+              <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-700">
+                <input
+                  type="checkbox"
+                  checked={invoiceSplitAmountAcrossProjects}
+                  onChange={(e) => setInvoiceSplitAmountAcrossProjects(e.target.checked)}
+                  className="rounded border-stone-300 text-amber-500 focus:ring-amber-400"
+                />
+                多專案時平均分攤金額
+              </label>
+              <div className="flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -9846,10 +10178,18 @@ export default function DashboardPage() {
                   setInvoiceCreateError(null);
                   setSavingInvoices(true);
                   try {
+                    const invoicesToSave = expandInvoiceDraftRowsForSave(invoiceDraftRows, {
+                      splitAmount: invoiceSplitAmountAcrossProjects,
+                    });
+                    if (invoicesToSave.length === 0) {
+                      setInvoiceCreateError("請至少填寫一筆發票號碼");
+                      setSavingInvoices(false);
+                      return;
+                    }
                     const res = await fetch("/api/invoices", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ invoices: invoiceDraftRows }),
+                      body: JSON.stringify({ invoices: invoicesToSave }),
                     });
                     const data = (await safeResJson(res)) as { ok?: boolean; error?: string; invoices?: InvoiceRow[] };
                     if (!res.ok || !data.ok) {
@@ -9880,6 +10220,7 @@ export default function DashboardPage() {
               >
                 {savingInvoices ? "儲存中…" : "儲存"}
               </button>
+              </div>
             </footer>
           </div>
         </div>
