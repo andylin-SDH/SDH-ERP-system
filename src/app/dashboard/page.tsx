@@ -645,63 +645,52 @@ function InvoiceProjectMultiSelect({
       ) : null}
       {selectedIds.length > 1 ? (
         <p className="mt-1 text-[10px] text-amber-800/80">
-          將建立 {selectedIds.length} 筆（同號各綁一專案；若勾選分攤則金額平均拆開）
+          將建立 {selectedIds.length} 筆（同號各綁一專案；金額依各專案總金額未稅×1.05）
         </p>
       ) : null}
     </div>
   );
 }
 
-/** 將含稅金額平均分攤到 n 份（小數兩位；餘數加在最後一份，總和不變） */
-function splitInvoiceAmountAcrossParts(totalRaw: string, partCount: number): string[] {
-  const n = Math.max(1, Math.floor(partCount));
-  const total = Number(String(totalRaw ?? "").replace(/,/g, "").trim());
-  if (!Number.isFinite(total) || n === 1) {
-    return Array.from({ length: n }, () => String(totalRaw ?? "").trim());
-  }
-  const totalCents = Math.round(total * 100);
-  const base = Math.floor(totalCents / n);
-  const remainder = totalCents - base * n;
-  return Array.from({ length: n }, (_, i) => {
-    const cents = base + (i === n - 1 ? remainder : 0);
-    return String(Number((cents / 100).toFixed(2)));
-  });
+/** 專案總金額未稅 → 發票金額含稅（五稅，四捨五入至整數元） */
+function projectUntaxedToInvoiceTaxIncluded(untaxed: number): string {
+  if (!Number.isFinite(untaxed) || untaxed <= 0) return "";
+  return String(Math.round(untaxed * 1.05));
 }
 
-/** 新增草稿：一列多專案 → 展開成多筆；可選平均分攤金額 */
+/** 新增草稿：一列多專案 → 展開成多筆；可依各專案「專案總金額未稅×1.05」帶入金額 */
 function expandInvoiceDraftRowsForSave(
   rows: Array<Record<string, string>>,
-  opts?: { splitAmount?: boolean }
+  opts?: { useProjectAmounts?: boolean; amountByProjectId?: Map<string, number> }
 ): Array<Record<string, string>> {
-  const splitAmount = opts?.splitAmount !== false;
+  const useProjectAmounts = opts?.useProjectAmounts !== false;
+  const amountByProjectId = opts?.amountByProjectId ?? new Map<string, number>();
   const out: Array<Record<string, string>> = [];
   for (const row of rows) {
     if (!String(row.發票號碼 ?? "").trim()) continue;
     const pids = parseInvoiceDraftProjectIds(row.專案ID);
+    const draftAmount = String(row.發票金額含稅 ?? "").trim();
     if (pids.length === 0) {
       out.push({ ...row, 專案ID: "" });
       continue;
     }
-    if (pids.length === 1) {
-      out.push({ ...row, 專案ID: pids[0]! });
-      continue;
-    }
-    const amountRaw = String(row.發票金額含稅 ?? "").trim();
-    const amounts =
-      splitAmount && amountRaw !== ""
-        ? splitInvoiceAmountAcrossParts(amountRaw, pids.length)
-        : pids.map(() => amountRaw);
-    pids.forEach((pid, i) => {
+    pids.forEach((pid) => {
+      let amount = draftAmount;
+      let note = String(row.備註 ?? "").trim();
+      if (useProjectAmounts) {
+        const untaxed = amountByProjectId.get(pid) ?? 0;
+        const fromProject = projectUntaxedToInvoiceTaxIncluded(untaxed);
+        if (fromProject) {
+          amount = fromProject;
+          const tag = `依專案總金額未稅 ${untaxed} ×1.05`;
+          note = note.includes("依專案總金額未稅") ? note : note ? `${note}；${tag}` : tag;
+        }
+      }
       out.push({
         ...row,
         專案ID: pid,
-        發票金額含稅: amounts[i] ?? amountRaw,
-        備註: (() => {
-          const note = String(row.備註 ?? "").trim();
-          if (!splitAmount || !amountRaw) return note;
-          const tag = `多專案分攤（總額 ${amountRaw} ÷ ${pids.length}）`;
-          return note ? `${note}；${tag}` : tag;
-        })(),
+        發票金額含稅: amount,
+        備註: note,
       });
     });
   }
@@ -1621,8 +1610,8 @@ export default function DashboardPage() {
   /** 發票清冊：正在為哪一筆「再綁其他專案」 */
   const [invoiceBindExtraId, setInvoiceBindExtraId] = useState<string | null>(null);
   const [bindingInvoiceExtra, setBindingInvoiceExtra] = useState(false);
-  /** 新增發票：多專案時是否平均分攤「發票金額含稅」（預設開啟） */
-  const [invoiceSplitAmountAcrossProjects, setInvoiceSplitAmountAcrossProjects] = useState(true);
+  /** 新增發票：多專案時是否依各專案「專案總金額未稅×1.05」帶入金額（預設開啟） */
+  const [invoiceUseProjectAmounts, setInvoiceUseProjectAmounts] = useState(true);
   /** 入帳分類／月份：僅反映已存檔的廠商付款日期 */
   const [invoiceLedgerSnapshot, setInvoiceLedgerSnapshot] = useState<Record<string, string>>({});
   const invoicesRef = useRef<InvoiceRow[]>([]);
@@ -3818,7 +3807,7 @@ export default function DashboardPage() {
     [refreshDashboardData]
   );
 
-  /** 同一張發票再綁另一專案（新增一列，並把同號金額重新平均分攤） */
+  /** 同一張發票再綁另一專案（新增一列；金額依該專案總金額未稅×1.05） */
   const bindInvoiceToAnotherProject = useCallback(
     async (sourceId: string, projectId: string) => {
       const pid = String(projectId ?? "").trim();
@@ -3839,31 +3828,18 @@ export default function DashboardPage() {
       setBindingInvoiceExtra(true);
       setInvoiceEditError(null);
       try {
-        const siblings = invoicesRef.current.filter((r) => String(r.發票號碼 ?? "").trim() === invoiceNo);
-        const parsedAmounts = siblings.map((r) => Number(String(r.發票金額含稅 ?? "").replace(/,/g, "").trim()));
-        const finiteAmounts = parsedAmounts.filter((n) => Number.isFinite(n));
-        let total = 0;
-        if (finiteAmounts.length > 0) {
-          const first = finiteAmounts[0]!;
-          const allSame = finiteAmounts.every((n) => Math.abs(n - first) < 0.001);
-          // 若同號各列金額相同，多半是先前整額複製 → 以該額當總額；否則加總視為已分攤
-          total = allSame && siblings.length > 1 ? first : finiteAmounts.reduce((s, n) => s + n, 0);
-        }
-        const partCount = siblings.length + 1;
-        const parts =
-          total > 0 && Number.isFinite(total)
-            ? splitInvoiceAmountAcrossParts(String(total), partCount)
-            : null;
-
+        const master = masterList.find((m) => String(m.專案ID ?? "").trim() === pid);
+        const untaxed = master ? masterRowUntaxedTotal(master) : 0;
+        const fromProject = projectUntaxedToInvoiceTaxIncluded(untaxed);
         const payload = {
           ...invoiceRowToInsertInput(source),
           專案ID: pid,
-          發票金額含稅: parts ? parts[parts.length - 1]! : (source.發票金額含稅 ?? ""),
+          發票金額含稅: fromProject || (source.發票金額含稅 ?? ""),
           備註: (() => {
             const note = String(source.備註 ?? "").trim();
-            if (!parts) return note;
-            const tag = `多專案分攤（總額 ${total} ÷ ${partCount}）`;
-            return note.includes("多專案分攤") ? note : note ? `${note}；${tag}` : tag;
+            if (!fromProject) return note;
+            const tag = `依專案總金額未稅 ${untaxed} ×1.05`;
+            return note.includes("依專案總金額未稅") ? note : note ? `${note}；${tag}` : tag;
           })(),
         };
         const res = await fetch("/api/invoices", {
@@ -3876,31 +3852,6 @@ export default function DashboardPage() {
           setInvoiceEditError(data.error ?? "再綁專案失敗");
           return;
         }
-
-        if (parts) {
-          for (let i = 0; i < siblings.length; i++) {
-            const row = siblings[i]!;
-            const id = String(row.id ?? "").trim();
-            if (!id) continue;
-            const nextAmount = parts[i]!;
-            const patchRes = await fetch("/api/invoices", {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                id,
-                ...invoiceRowToInsertInput(row),
-                發票金額含稅: nextAmount,
-              }),
-            });
-            const patchData = (await safeResJson(patchRes)) as { ok?: boolean; invoice?: InvoiceRow };
-            if (patchRes.ok && patchData.invoice) {
-              setInvoices((prev) =>
-                sortInvoicesByInvoiceNumber(prev.map((r) => (r.id === id ? { ...r, ...patchData.invoice } : r)))
-              );
-            }
-          }
-        }
-
         if (data.invoices?.length) {
           setInvoiceLedgerSnapshot((prev) => ({ ...prev, ...buildInvoiceLedgerSnapshot(data.invoices!) }));
           setInvoices((prev) => sortInvoicesByInvoiceNumber([...data.invoices!, ...prev]));
@@ -3915,7 +3866,7 @@ export default function DashboardPage() {
         setBindingInvoiceExtra(false);
       }
     },
-    [refreshDashboardData]
+    [masterList, refreshDashboardData]
   );
 
   /** 郵件深連結：?project=專案ID&task=任務ID → 開啟專案詳情與任務 */
@@ -9477,7 +9428,7 @@ export default function DashboardPage() {
                                           setInvoiceBindExtraId((cur) => (cur === rowId ? null : rowId))
                                         }
                                         className="rounded-lg border border-stone-300 bg-white px-2.5 py-1 text-xs font-semibold text-stone-700 transition hover:bg-amber-50 disabled:opacity-50"
-                                        title="同一發票號碼再對應另一專案，並重新平均分攤金額"
+                                        title="同一發票號碼再對應另一專案；金額依該專案總金額未稅×1.05"
                                       >
                                         再綁專案
                                       </button>
@@ -9505,7 +9456,7 @@ export default function DashboardPage() {
                                     {invoiceBindExtraId === rowId ? (
                                       <div className="w-56 text-left">
                                         <p className="mb-1 text-[10px] font-medium text-stone-500">
-                                          選擇要再綁的專案（會重算平均分攤金額）
+                                          選擇要再綁的專案（金額依該專案總金額未稅×1.05）
                                         </p>
                                         <InvoiceProjectSearchSelect
                                           value=""
@@ -9908,7 +9859,7 @@ export default function DashboardPage() {
               <div className="min-w-0">
                 <h2 className="text-lg font-bold tracking-tight text-stone-900 sm:text-xl">新增發票</h2>
                 <p className="mt-0.5 text-xs text-stone-500">
-                  可一次建立多筆；每列須填發票號碼，空白列會自動略過。同一列可選多個專案，存檔後拆成多筆；預設會把「發票金額含稅」平均分攤到各專案。
+                  可一次建立多筆；每列須填發票號碼，空白列會自動略過。同一列可選多個專案，存檔後拆成多筆；預設依各專案「專案總金額未稅×1.05」帶入含稅金額。
                 </p>
               </div>
               <button
@@ -10154,11 +10105,11 @@ export default function DashboardPage() {
               <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-700">
                 <input
                   type="checkbox"
-                  checked={invoiceSplitAmountAcrossProjects}
-                  onChange={(e) => setInvoiceSplitAmountAcrossProjects(e.target.checked)}
+                  checked={invoiceUseProjectAmounts}
+                  onChange={(e) => setInvoiceUseProjectAmounts(e.target.checked)}
                   className="rounded border-stone-300 text-amber-500 focus:ring-amber-400"
                 />
-                多專案時平均分攤金額
+                依各專案「總金額未稅×1.05」帶入金額
               </label>
               <div className="flex flex-wrap items-center justify-end gap-2">
               <button
@@ -10178,8 +10129,14 @@ export default function DashboardPage() {
                   setInvoiceCreateError(null);
                   setSavingInvoices(true);
                   try {
+                    const amountByProjectId = new Map<string, number>();
+                    for (const m of masterList) {
+                      const id = String(m.專案ID ?? "").trim();
+                      if (id) amountByProjectId.set(id, masterRowUntaxedTotal(m));
+                    }
                     const invoicesToSave = expandInvoiceDraftRowsForSave(invoiceDraftRows, {
-                      splitAmount: invoiceSplitAmountAcrossProjects,
+                      useProjectAmounts: invoiceUseProjectAmounts,
+                      amountByProjectId,
                     });
                     if (invoicesToSave.length === 0) {
                       setInvoiceCreateError("請至少填寫一筆發票號碼");
