@@ -29,7 +29,14 @@ function settlementBadgeClass(status: string): string {
   return "bg-stone-100 text-stone-600";
 }
 
-type LifecycleTab = "in_progress" | "completed";
+type SettlementTab = "未入帳" | "可請款" | "待匯款" | "已匯款";
+
+const SETTLEMENT_TABS: { key: SettlementTab; label: string; activeClass: string }[] = [
+  { key: "未入帳", label: "未入帳", activeClass: "bg-stone-500 text-white shadow-sm" },
+  { key: "可請款", label: "可請款", activeClass: "bg-sky-500 text-white shadow-sm" },
+  { key: "待匯款", label: "待匯款", activeClass: "bg-amber-500 text-slate-900 shadow-sm" },
+  { key: "已匯款", label: "已匯款", activeClass: "bg-emerald-600 text-white shadow-sm" },
+];
 
 type EditDraft = {
   請款方式: KolRequestMode;
@@ -46,7 +53,6 @@ type EditDraft = {
   戶籍地址: string;
   勞報簽名: string;
   勞報簽署: boolean;
-  applyToOthers: boolean;
 };
 
 function emptyDraft(p?: KolPortalProject, laborProfile?: KolLaborProfile): EditDraft {
@@ -65,7 +71,6 @@ function emptyDraft(p?: KolPortalProject, laborProfile?: KolLaborProfile): EditD
     戶籍地址: p?.戶籍地址 || laborProfile?.戶籍地址 || "",
     勞報簽名: "",
     勞報簽署: false,
-    applyToOthers: false,
   };
 }
 
@@ -172,7 +177,6 @@ function SdhOutboundInfoPanel({ p }: { p: KolPortalProject }) {
 function KolRequestCredentialPanel({
   p,
   draft,
-  applyList,
   saving,
   partnerName,
   onDraftChange,
@@ -180,7 +184,6 @@ function KolRequestCredentialPanel({
 }: {
   p: KolPortalProject;
   draft: EditDraft;
-  applyList: KolPortalProject[];
   saving: boolean;
   partnerName: string;
   onDraftChange: (next: EditDraft) => void;
@@ -415,18 +418,6 @@ function KolRequestCredentialPanel({
               className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
             />
           </label>
-          {p.canEditKolInvoice && applyList.length > 0 && draft.KOL發票號碼.trim() && (
-            <label className="flex cursor-pointer items-start gap-2 text-xs text-stone-600">
-              <input
-                type="checkbox"
-                checked={draft.applyToOthers}
-                onChange={(e) => onDraftChange({ ...draft, applyToOthers: e.target.checked })}
-                onClick={(e) => e.stopPropagation()}
-                className="mt-0.5"
-              />
-              <span>同一張發票套用到其他 {applyList.length} 個未填號碼的專案</span>
-            </label>
-          )}
           {p.canEditKolInvoice && (
             <button
               type="button"
@@ -637,7 +628,7 @@ export default function KolHomePage() {
     戶籍地址: "",
   });
   const [projects, setProjects] = useState<KolPortalProject[]>([]);
-  const [lifecycleTab, setLifecycleTab] = useState<LifecycleTab>("in_progress");
+  const [settlementTab, setSettlementTab] = useState<SettlementTab>("未入帳");
   const [sessionActive, setSessionActive] = useState(false);
   const [expandedPid, setExpandedPid] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, EditDraft>>({});
@@ -716,10 +707,24 @@ export default function KolHomePage() {
     () => projects.filter((p) => isKolProjectInProgress(p.專案狀態)),
     [projects]
   );
-  const completedProjects = useMemo(
-    () => projects.filter((p) => !isKolProjectInProgress(p.專案狀態)),
-    [projects]
-  );
+
+  const projectsBySettlement = useMemo(() => {
+    const buckets: Record<SettlementTab, KolPortalProject[]> = {
+      未入帳: [],
+      可請款: [],
+      待匯款: [],
+      已匯款: [],
+    };
+    for (const p of projects) {
+      const key = (["未入帳", "可請款", "待匯款", "已匯款"] as const).includes(
+        p.結帳狀態 as SettlementTab
+      )
+        ? (p.結帳狀態 as SettlementTab)
+        : "未入帳";
+      buckets[key].push(p);
+    }
+    return buckets;
+  }, [projects]);
 
   const summary = useMemo(() => {
     let kolFeeSum = 0;
@@ -733,22 +738,16 @@ export default function KolHomePage() {
     return { inProgressCount: inProgressProjects.length, kolFeeSum, pendingSettlement, missingKolInvoice };
   }, [inProgressProjects]);
 
-  const visibleProjects = lifecycleTab === "in_progress" ? inProgressProjects : completedProjects;
+  const visibleProjects = projectsBySettlement[settlementTab];
+  const settlementTabInitialized = useRef(false);
 
-  const batchApplyCandidates = useCallback(
-    (p: KolPortalProject) => {
-      const num = (drafts[p.專案ID]?.KOL發票號碼 ?? p.KOL發票號碼 ?? "").trim();
-      if (!num) return [];
-      return visibleProjects.filter(
-        (x) =>
-          x.專案ID !== p.專案ID &&
-          x.canEditKolInvoice &&
-          x.請款方式 === "發票" &&
-          !x.KOL發票號碼.trim()
-      );
-    },
-    [drafts, visibleProjects]
-  );
+  useEffect(() => {
+    if (projects.length === 0 || settlementTabInitialized.current) return;
+    const preferred: SettlementTab[] = ["可請款", "待匯款", "未入帳", "已匯款"];
+    const firstWithItems = preferred.find((k) => projectsBySettlement[k].length > 0);
+    if (firstWithItems) setSettlementTab(firstWithItems);
+    settlementTabInitialized.current = true;
+  }, [projects.length, projectsBySettlement]);
 
   async function saveKolInvoice(p: KolPortalProject) {
     const draft = drafts[p.專案ID] ?? emptyDraft(p);
@@ -756,8 +755,6 @@ export default function KolHomePage() {
     setSaveNotice(null);
     try {
       const isLabor = draft.請款方式 === "勞務報酬";
-      const applyToProjectIds =
-        !isLabor && draft.applyToOthers ? batchApplyCandidates(p).map((x) => x.專案ID) : [];
       const res = await fetch("/api/kol/invoices", {
         method: "PATCH",
         credentials: "include",
@@ -785,7 +782,6 @@ export default function KolHomePage() {
                 KOL發票號碼: draft.KOL發票號碼.trim() || null,
                 KOL發票日期: draft.KOL發票日期.trim() || null,
                 KOL發票備註: draft.KOL發票備註.trim() || null,
-                applyToProjectIds,
               }
         ),
       });
@@ -794,13 +790,7 @@ export default function KolHomePage() {
         setSaveNotice(data.error ?? "儲存失敗");
         return;
       }
-      setSaveNotice(
-        isLabor
-          ? "勞務報酬單已簽署並送出"
-          : data.updated && data.updated > 1
-            ? `已儲存，並套用到 ${data.updated} 個專案`
-            : "KOL 發票已儲存"
-      );
+      setSaveNotice(isLabor ? "勞務報酬單已簽署並送出" : "KOL 發票已儲存");
       await load();
     } catch (e) {
       setSaveNotice(e instanceof Error ? e.message : "儲存失敗");
@@ -897,31 +887,22 @@ export default function KolHomePage() {
           </div>
 
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="inline-flex rounded-lg border border-stone-200 bg-stone-100/80 p-0.5 text-sm">
-              <button
-                type="button"
-                onClick={() => setLifecycleTab("in_progress")}
-                className={`rounded-md px-3 py-1.5 font-semibold transition ${
-                  lifecycleTab === "in_progress"
-                    ? "bg-amber-500 text-slate-900 shadow-sm"
-                    : "text-stone-600 hover:text-stone-900"
-                }`}
-              >
-                進行中
-                <span className="ml-1.5 text-xs font-normal opacity-80">({inProgressProjects.length})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setLifecycleTab("completed")}
-                className={`rounded-md px-3 py-1.5 font-semibold transition ${
-                  lifecycleTab === "completed"
-                    ? "bg-stone-600 text-white shadow-sm"
-                    : "text-stone-600 hover:text-stone-900"
-                }`}
-              >
-                已結案
-                <span className="ml-1.5 text-xs font-normal opacity-80">({completedProjects.length})</span>
-              </button>
+            <div className="inline-flex max-w-full flex-wrap rounded-lg border border-stone-200 bg-stone-100/80 p-0.5 text-sm">
+              {SETTLEMENT_TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setSettlementTab(tab.key)}
+                  className={`rounded-md px-3 py-1.5 font-semibold transition ${
+                    settlementTab === tab.key ? tab.activeClass : "text-stone-600 hover:text-stone-900"
+                  }`}
+                >
+                  {tab.label}
+                  <span className="ml-1.5 text-xs font-normal opacity-80">
+                    ({projectsBySettlement[tab.key].length})
+                  </span>
+                </button>
+              ))}
             </div>
             <p className="text-xs text-stone-500">
               <span className="inline-flex items-center gap-1 rounded-full bg-amber-100/80 px-2 py-0.5 font-medium text-amber-900">
@@ -946,7 +927,7 @@ export default function KolHomePage() {
             </p>
           ) : visibleProjects.length === 0 ? (
             <p className="rounded-xl border border-stone-200 bg-white/80 px-4 py-10 text-center text-stone-500">
-              {lifecycleTab === "in_progress" ? "目前沒有進行中的專案。" : "目前沒有已結案的專案。"}
+              目前沒有「{settlementTab}」的專案。
             </p>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-stone-200/90 bg-white shadow-sm ring-1 ring-amber-100/50">
@@ -968,7 +949,6 @@ export default function KolHomePage() {
                   {visibleProjects.map((p) => {
                     const expanded = expandedPid === p.專案ID;
                     const draft = drafts[p.專案ID] ?? emptyDraft(p, laborProfile);
-                    const applyList = batchApplyCandidates(p);
                     const needsAction = p.結帳狀態 === "可請款" && !projectHasCredential(p);
                     return (
                       <Fragment key={p.專案ID}>
@@ -1073,7 +1053,6 @@ export default function KolHomePage() {
                                 <KolRequestCredentialPanel
                                   p={p}
                                   draft={draft}
-                                  applyList={applyList}
                                   saving={savingPid === p.專案ID}
                                   partnerName={partnerName}
                                   onDraftChange={(next) =>

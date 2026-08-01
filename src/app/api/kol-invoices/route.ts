@@ -19,7 +19,18 @@ export async function GET(request: NextRequest) {
   const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
-    const pid = String(new URL(request.url).searchParams.get("專案ID") ?? "").trim();
+    const sp = new URL(request.url).searchParams;
+    const multi = String(sp.get("專案IDs") ?? "").trim();
+    if (multi) {
+      const ids = [...new Set(multi.split(",").map((s) => s.trim()).filter(Boolean))];
+      const map = await getKolInvoicesByProjectIds(ids);
+      const invoices = ids.map((專案ID) => ({
+        專案ID,
+        invoice: map.get(專案ID) ?? null,
+      }));
+      return NextResponse.json({ ok: true, invoices });
+    }
+    const pid = String(sp.get("專案ID") ?? "").trim();
     if (!pid) {
       return NextResponse.json({ ok: false, error: "專案ID 為必填" }, { status: 400 });
     }
@@ -64,7 +75,15 @@ export async function PATCH(request: NextRequest) {
       const pid = String(f.專案ID ?? "").trim();
       if (pid) financeByPid.set(pid, f);
     }
-    for (const pid of targetIds) {
+
+    /** 主專案必寫；其他僅套用「尚未填發票號碼」者，避免覆蓋已填資料 */
+    const writeIds = targetIds.filter((pid) => {
+      if (pid === 專案ID) return true;
+      const existing = String(kolInvByPid.get(pid)?.KOL發票號碼 ?? "").trim();
+      return !existing;
+    });
+
+    for (const pid of writeIds) {
       const f = financeByPid.get(pid);
       const kolInv = kolInvByPid.get(pid);
       const status = kolFinanceProgressShort(f?.廠商付款日期, kolInv, kolInv?.KOL匯款日期);
@@ -75,7 +94,7 @@ export async function PATCH(request: NextRequest) {
 
     const 填寫人 = fillerLabel(auth.user);
     const rows = [];
-    for (const pid of targetIds) {
+    for (const pid of writeIds) {
       rows.push(
         await upsertKolInvoice({
           專案ID: pid,

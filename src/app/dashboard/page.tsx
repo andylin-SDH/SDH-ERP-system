@@ -1427,6 +1427,11 @@ export default function DashboardPage() {
   });
   const [masterKolInvoiceSaving, setMasterKolInvoiceSaving] = useState(false);
   const [masterKolInvoiceNotice, setMasterKolInvoiceNotice] = useState<string | null>(null);
+  /** 同 KOL、尚未填發票號碼的其他專案（後台可套用同一張發票） */
+  const [masterKolInvoiceApplyCandidates, setMasterKolInvoiceApplyCandidates] = useState<
+    Array<{ 專案ID: string; 專案名稱: string }>
+  >([]);
+  const [masterKolInvoiceApplyToOthers, setMasterKolInvoiceApplyToOthers] = useState(false);
   const [tasksSectionViewMode, setTasksSectionViewMode] = useState<"list" | "byAssignee">("list");
   const [workloadDrill, setWorkloadDrill] = useState<{ assigneeLabel: string; kind: WorkloadDrillKind } | null>(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -3480,9 +3485,12 @@ export default function DashboardPage() {
     if (!pid) {
       setMasterKolInvoiceForm({ KOL發票號碼: "", KOL發票日期: "", KOL發票備註: "" });
       setMasterKolInvoiceNotice(null);
+      setMasterKolInvoiceApplyCandidates([]);
+      setMasterKolInvoiceApplyToOthers(false);
       return;
     }
     setMasterKolInvoiceNotice(null);
+    setMasterKolInvoiceApplyToOthers(false);
     void fetch(`/api/kol-invoices?專案ID=${encodeURIComponent(pid)}`, { cache: "no-store" })
       .then(safeResJson)
       .then((res) => {
@@ -3496,7 +3504,46 @@ export default function DashboardPage() {
       .catch(() => {
         setMasterKolInvoiceForm({ KOL發票號碼: "", KOL發票日期: "", KOL發票備註: "" });
       });
-  }, [selectedMaster?.專案ID]);
+
+    const kolName = String(selectedMaster?.KOL名稱 ?? "").trim();
+    if (!kolName) {
+      setMasterKolInvoiceApplyCandidates([]);
+      return;
+    }
+    const siblings = masterList.filter(
+      (m) =>
+        String(m.專案ID ?? "").trim() !== pid &&
+        String(m.KOL名稱 ?? "").trim() === kolName
+    );
+    if (siblings.length === 0) {
+      setMasterKolInvoiceApplyCandidates([]);
+      return;
+    }
+    const siblingIds = siblings.map((m) => String(m.專案ID ?? "").trim()).filter(Boolean);
+    void fetch(`/api/kol-invoices?專案IDs=${encodeURIComponent(siblingIds.join(","))}`, { cache: "no-store" })
+      .then(safeResJson)
+      .then((res) => {
+        const rows = (res as {
+          ok?: boolean;
+          invoices?: Array<{ 專案ID?: string; invoice?: { KOL發票號碼?: string | null } | null }>;
+        }).invoices;
+        const emptyIds = new Set(
+          (Array.isArray(rows) ? rows : [])
+            .filter((r) => !String(r.invoice?.KOL發票號碼 ?? "").trim())
+            .map((r) => String(r.專案ID ?? "").trim())
+            .filter(Boolean)
+        );
+        setMasterKolInvoiceApplyCandidates(
+          siblings
+            .filter((m) => emptyIds.has(String(m.專案ID ?? "").trim()))
+            .map((m) => ({
+              專案ID: String(m.專案ID ?? "").trim(),
+              專案名稱: String(m.專案名稱 ?? "").trim() || String(m.專案ID ?? "").trim(),
+            }))
+        );
+      })
+      .catch(() => setMasterKolInvoiceApplyCandidates([]));
+  }, [selectedMaster?.專案ID, selectedMaster?.KOL名稱, masterList]);
 
   useEffect(() => {
     if (tasksSectionViewMode !== "byAssignee") setWorkloadDrill(null);
@@ -11748,6 +11795,29 @@ export default function DashboardPage() {
                       className="col-span-2"
                     />
                   </div>
+                  {masterKolInvoiceApplyCandidates.length > 0 && masterKolInvoiceForm.KOL發票號碼.trim() ? (
+                    <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-xs text-stone-700">
+                      <input
+                        type="checkbox"
+                        checked={masterKolInvoiceApplyToOthers}
+                        onChange={(e) => setMasterKolInvoiceApplyToOthers(e.target.checked)}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        同一張發票套用到其他 {masterKolInvoiceApplyCandidates.length} 個未填號碼的專案
+                        <span className="mt-0.5 block text-[10px] text-stone-500">
+                          {masterKolInvoiceApplyCandidates
+                            .slice(0, 3)
+                            .map((c) => c.專案名稱)
+                            .join("、")}
+                          {masterKolInvoiceApplyCandidates.length > 3
+                            ? ` 等 ${masterKolInvoiceApplyCandidates.length} 案`
+                            : ""}
+                          （僅內部後台可見）
+                        </span>
+                      </span>
+                    </label>
+                  ) : null}
                   <div className="mt-3 flex justify-end">
                     <button
                       type="button"
@@ -11756,6 +11826,10 @@ export default function DashboardPage() {
                         setMasterKolInvoiceSaving(true);
                         setMasterKolInvoiceNotice(null);
                         try {
+                          const applyToProjectIds =
+                            masterKolInvoiceApplyToOthers && masterKolInvoiceForm.KOL發票號碼.trim()
+                              ? masterKolInvoiceApplyCandidates.map((c) => c.專案ID)
+                              : [];
                           const res = await fetch("/api/kol-invoices", {
                             method: "PATCH",
                             headers: { "Content-Type": "application/json" },
@@ -11764,14 +11838,25 @@ export default function DashboardPage() {
                               KOL發票號碼: masterKolInvoiceForm.KOL發票號碼.trim() || null,
                               KOL發票日期: masterKolInvoiceForm.KOL發票日期.trim() || null,
                               KOL發票備註: masterKolInvoiceForm.KOL發票備註.trim() || null,
+                              applyToProjectIds,
                             }),
                           });
-                          const data = (await safeResJson(res)) as { ok?: boolean; error?: string };
+                          const data = (await safeResJson(res)) as { ok?: boolean; error?: string; updated?: number };
                           if (!res.ok || !data.ok) {
                             setMasterKolInvoiceNotice(data.error ?? "儲存失敗");
                             return;
                           }
-                          setMasterKolInvoiceNotice("KOL 發票已儲存");
+                          setMasterKolInvoiceNotice(
+                            data.updated && data.updated > 1
+                              ? `KOL 發票已儲存，並套用到 ${data.updated} 個專案`
+                              : "KOL 發票已儲存"
+                          );
+                          setMasterKolInvoiceApplyToOthers(false);
+                          setMasterKolInvoiceApplyCandidates((prev) =>
+                            applyToProjectIds.length
+                              ? prev.filter((c) => !applyToProjectIds.includes(c.專案ID))
+                              : prev
+                          );
                         } catch (e) {
                           setMasterKolInvoiceNotice(e instanceof Error ? e.message : "儲存失敗");
                         } finally {

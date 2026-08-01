@@ -36,7 +36,6 @@ export async function PATCH(request: NextRequest) {
       戶籍地址?: string | null;
       勞報簽署?: boolean;
       勞報簽名?: string | null;
-      applyToProjectIds?: string[];
     } | null;
 
     const 專案ID = String(body?.專案ID ?? "").trim();
@@ -69,14 +68,8 @@ export async function PATCH(request: NextRequest) {
     };
 
     const isLabor = body?.請款方式 === "勞務報酬";
+    // 套用到其他專案僅限員工後台（/api/kol-invoices）；KOL 入口僅能改本專案
     const targetIds = [專案ID];
-    if (!isLabor) {
-      const extra = Array.isArray(body?.applyToProjectIds) ? body!.applyToProjectIds! : [];
-      for (const raw of extra) {
-        const pid = String(raw ?? "").trim();
-        if (pid && access.projectIds.has(pid) && !targetIds.includes(pid)) targetIds.push(pid);
-      }
-    }
 
     for (const pid of targetIds) {
       const f = financeByPid.get(pid);
