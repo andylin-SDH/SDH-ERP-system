@@ -728,15 +728,15 @@ export default function KolHomePage() {
 
   const summary = useMemo(() => {
     let kolFeeSum = 0;
-    let pendingSettlement = 0;
-    let missingKolInvoice = 0;
-    let unclaimedTotal = 0;
     for (const p of inProgressProjects) {
       kolFeeSum += parseKolAmount(p.KOL費用未稅);
-      if (p.結帳狀態 === "未入帳") pendingSettlement += 1;
-      if (p.結帳狀態 === "可請款" && !projectHasCredential(p)) missingKolInvoice += 1;
     }
-    for (const p of projectsBySettlement["可請款"]) {
+    // 與下方分頁同一口徑（含已結案但仍待請款／未入帳的專案），避免摘要與分頁數字不一致
+    const pendingSettlement = projectsBySettlement["未入帳"].length;
+    const claimable = projectsBySettlement["可請款"];
+    const missingKolInvoice = claimable.filter((p) => !projectHasCredential(p)).length;
+    let unclaimedTotal = 0;
+    for (const p of claimable) {
       unclaimedTotal += parseKolAmount(p.KOL費用未稅);
     }
     return {
@@ -886,15 +886,15 @@ export default function KolHomePage() {
                 {summary.kolFeeSum > 0 ? summary.kolFeeSum.toLocaleString("zh-TW") : "—"}
               </p>
             </div>
-            <div className="rounded-xl border border-sky-200/80 bg-sky-50/70 px-4 py-3 shadow-sm ring-1 ring-sky-100/50">
-              <p className="text-xs font-medium text-sky-900/80">未請款總額</p>
-              <p className="mt-1 text-2xl font-bold tabular-nums text-sky-950">
+            <div className="rounded-xl border-2 border-red-500 bg-red-50 px-4 py-3 shadow-md shadow-red-200/60 ring-2 ring-red-200/80">
+              <p className="text-xs font-bold tracking-wide text-red-700">未請款總額</p>
+              <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-red-600">
                 {summary.unclaimedTotal > 0 ? summary.unclaimedTotal.toLocaleString("zh-TW") : "—"}
               </p>
-              <p className="mt-0.5 text-[10px] text-sky-800/70">可請款 · KOL分潤未稅合計</p>
+              <p className="mt-0.5 text-[10px] font-medium text-red-700/80">可請款 · KOL分潤未稅合計</p>
             </div>
             <div className="rounded-xl border border-stone-200/90 bg-white/90 px-4 py-3 shadow-sm ring-1 ring-amber-100/40">
-              <p className="text-xs font-medium text-stone-500">進行中 · 未入帳</p>
+              <p className="text-xs font-medium text-stone-500">未入帳</p>
               <p className="mt-1 text-2xl font-bold tabular-nums text-amber-900">{summary.pendingSettlement}</p>
             </div>
             <div className="rounded-xl border border-stone-200/90 bg-white/90 px-4 py-3 shadow-sm ring-1 ring-amber-100/40">
