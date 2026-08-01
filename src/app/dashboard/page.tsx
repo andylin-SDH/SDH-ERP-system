@@ -897,6 +897,50 @@ function parseNumericField(v: string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** 發票金額含稅 vs 專案總金額未稅×1.05（軟警示用） */
+type InvoiceAmountMismatch = {
+  專案ID: string;
+  專案總金額未稅: number;
+  expectedTaxIncluded: number;
+  actualTaxIncluded: number;
+  delta: number;
+};
+
+function getInvoiceAmountMismatch(
+  row: { 專案ID?: string | null; 發票金額含稅?: string | null },
+  untaxedByProjectId: Map<string, number> | ReadonlyMap<string, number>
+): InvoiceAmountMismatch | null {
+  const pid = String(row.專案ID ?? "").trim();
+  if (!pid) return null;
+  const untaxed = untaxedByProjectId.get(pid);
+  if (untaxed == null || !Number.isFinite(untaxed) || untaxed <= 0) return null;
+  const expectedStr = projectUntaxedToInvoiceTaxIncluded(untaxed);
+  if (!expectedStr) return null;
+  const expected = Number(expectedStr);
+  const actualRaw = String(row.發票金額含稅 ?? "").trim();
+  if (!actualRaw) return null;
+  const actual = Math.round(parseNumericField(actualRaw));
+  if (!Number.isFinite(expected) || !Number.isFinite(actual)) return null;
+  if (actual === expected) return null;
+  return {
+    專案ID: pid,
+    專案總金額未稅: untaxed,
+    expectedTaxIncluded: expected,
+    actualTaxIncluded: actual,
+    delta: actual - expected,
+  };
+}
+
+function formatInvoiceAmountMismatchDetail(m: InvoiceAmountMismatch): string {
+  return `預期 ${formatAmount(String(m.專案總金額未稅))}×1.05=${formatAmount(String(m.expectedTaxIncluded))}，實際 ${formatAmount(String(m.actualTaxIncluded))}`;
+}
+
+function formatInvoiceAmountMismatchNotice(m: InvoiceAmountMismatch, invoiceNo?: string): string {
+  const no = String(invoiceNo ?? "").trim();
+  const prefix = no ? `發票 ${no} 已儲存，但` : "已儲存，但";
+  return `${prefix}發票金額與專案總金額未稅×1.05 不一致（預期 ${formatAmount(String(m.expectedTaxIncluded))}，實際 ${formatAmount(String(m.actualTaxIncluded))}）`;
+}
+
 function sumNumericColumn(rows: Array<Record<string, unknown>>, key: string): number {
   let sum = 0;
   for (const r of rows) sum += parseNumericField(r[key] as string | null | undefined);
@@ -1607,6 +1651,8 @@ export default function DashboardPage() {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [invoiceEditSavingId, setInvoiceEditSavingId] = useState<string | null>(null);
   const [invoiceEditError, setInvoiceEditError] = useState<string | null>(null);
+  /** 發票金額 vs 專案未稅×1.05 軟警示（不擋存檔） */
+  const [invoiceAmountMismatchNotice, setInvoiceAmountMismatchNotice] = useState<string | null>(null);
   /** 發票清冊：入帳狀態（全部／已入帳／未入帳） */
   const [invoiceLedgerTab, setInvoiceLedgerTab] = useState<InvoiceLedgerTab>("all");
   const [invoiceMonthTab, setInvoiceMonthTab] = useState("all");
@@ -1818,6 +1864,15 @@ export default function DashboardPage() {
       const byName = invoiceProjectDisplayName(a, a.id).localeCompare(invoiceProjectDisplayName(b, b.id), "zh-TW");
       return byName || a.id.localeCompare(b.id, "zh-TW");
     });
+  }, [masterList]);
+  /** 專案ID → 專案總金額未稅（發票金額差異比對） */
+  const masterUntaxedByProjectId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const m of masterList) {
+      const id = String(m.專案ID ?? "").trim();
+      if (id) map.set(id, masterRowUntaxedTotal(m));
+    }
+    return map;
   }, [masterList]);
   const invoicePasteImport = useMemo(() => parseInvoiceImportText(invoicePasteText), [invoicePasteText]);
   /** 刪除專案確認視窗：連動筆數（任務、分潤列） */
@@ -3816,6 +3871,7 @@ export default function DashboardPage() {
       invoiceSaveInflightRef.current.add(id);
       setInvoiceEditSavingId(id);
       setInvoiceEditError(null);
+      setInvoiceAmountMismatchNotice(null);
       try {
         const res = await fetch("/api/invoices", {
           method: "PATCH",
@@ -3827,6 +3883,7 @@ export default function DashboardPage() {
           setInvoiceEditError(String(data.error ?? "儲存失敗"));
           return;
         }
+        const saved = data.invoice ? { ...row, ...data.invoice } : row;
         if (data.invoice) {
           const savedId = String(data.invoice.id ?? id);
           setInvoiceLedgerSnapshot((prev) => ({
@@ -3838,6 +3895,12 @@ export default function DashboardPage() {
           );
         }
         setInvoiceDirtyIds((prev) => prev.filter((dirtyId) => dirtyId !== id));
+        const mismatch = getInvoiceAmountMismatch(saved, masterUntaxedByProjectId);
+        if (mismatch) {
+          setInvoiceAmountMismatchNotice(
+            formatInvoiceAmountMismatchNotice(mismatch, saved.發票號碼)
+          );
+        }
         await refreshDashboardData(["finance", "payout"]);
       } catch (e) {
         setInvoiceEditError(e instanceof Error ? e.message : "儲存失敗");
@@ -3852,7 +3915,7 @@ export default function DashboardPage() {
         }
       }
     },
-    [refreshDashboardData]
+    [masterUntaxedByProjectId, refreshDashboardData]
   );
 
   /** 同一張發票再綁另一專案（新增一列；金額依該專案總金額未稅×1.05） */
@@ -9200,9 +9263,29 @@ export default function DashboardPage() {
               {invoiceEditError && (
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{invoiceEditError}</p>
               )}
+              {invoiceAmountMismatchNotice && (
+                <div
+                  role="status"
+                  className="mb-2 flex flex-wrap items-start justify-between gap-2 rounded-lg border-2 border-red-500 bg-red-50 px-3 py-2.5 text-xs font-semibold text-red-800 shadow-sm shadow-red-200/50"
+                >
+                  <p>
+                    <span className="mr-1.5 inline-block rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white">
+                      金額不符
+                    </span>
+                    {invoiceAmountMismatchNotice}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setInvoiceAmountMismatchNotice(null)}
+                    className="shrink-0 rounded border border-red-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-red-700 hover:bg-red-100"
+                  >
+                    關閉
+                  </button>
+                </div>
+              )}
               {invoices.length > 0 && (
                 <p className="mb-2 text-[11px] text-stone-500">
-                  各欄可直接編輯；系統不會自動儲存，填好後請按該列「存檔」。發票號碼不可空白。
+                  各欄可直接編輯；系統不會自動儲存，填好後請按該列「存檔」。發票號碼不可空白。金額若與「專案總金額未稅×1.05」不符會標示警示（仍可存檔）。
                 </p>
               )}
               <ListAmountSummary
@@ -9289,10 +9372,15 @@ export default function DashboardPage() {
                           const rowId = typeof inv.id === "string" && inv.id ? inv.id : null;
                           const saving = rowId != null && invoiceEditSavingId === rowId;
                           const dirty = rowId != null && invoiceDirtyIdSet.has(rowId);
+                          const amountMismatch = getInvoiceAmountMismatch(inv, masterUntaxedByProjectId);
                           return (
                             <tr
                               key={rowId ?? `inv-row-${i}`}
-                              className="hover:bg-amber-50/80"
+                              className={
+                                amountMismatch
+                                  ? "bg-red-50/90 shadow-[inset_3px_0_0_0] shadow-red-500 hover:bg-red-100/80"
+                                  : "hover:bg-amber-50/80"
+                              }
                             >
                               <td className="px-3 py-2 align-middle">
                                 {rowId ? (
@@ -9427,6 +9515,11 @@ export default function DashboardPage() {
                                         inputMode="decimal"
                                         value={val}
                                         disabled={saving}
+                                        title={
+                                          amountMismatch
+                                            ? formatInvoiceAmountMismatchDetail(amountMismatch)
+                                            : undefined
+                                        }
                                         onChange={(e) => {
                                           setInvoiceEditError(null);
                                           setInvoiceDirtyIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
@@ -9434,8 +9527,23 @@ export default function DashboardPage() {
                                             prev.map((r) => (r.id === rowId ? { ...r, 發票金額含稅: e.target.value } : r))
                                           );
                                         }}
-                                        className={INVOICE_AMOUNT_INPUT_CLS}
+                                        className={
+                                          amountMismatch
+                                            ? `${INVOICE_AMOUNT_INPUT_CLS} border-red-400 bg-red-50 ring-1 ring-red-300`
+                                            : INVOICE_AMOUNT_INPUT_CLS
+                                        }
                                       />
+                                      {amountMismatch ? (
+                                        <p
+                                          className="mt-1 text-[10px] font-semibold leading-snug text-red-700"
+                                          title={formatInvoiceAmountMismatchDetail(amountMismatch)}
+                                        >
+                                          <span className="mr-1 inline-block rounded bg-red-600 px-1 py-px text-[9px] font-bold text-white">
+                                            金額不符
+                                          </span>
+                                          {formatInvoiceAmountMismatchDetail(amountMismatch)}
+                                        </p>
+                                      ) : null}
                                     </td>
                                   );
                                 }
@@ -10205,6 +10313,21 @@ export default function DashboardPage() {
                     if (data.invoices?.length) {
                       setInvoiceLedgerSnapshot((prev) => ({ ...prev, ...buildInvoiceLedgerSnapshot(data.invoices!) }));
                       setInvoices((prev) => sortInvoicesByInvoiceNumber([...data.invoices!, ...prev]));
+                      const mismatched = data.invoices
+                        .map((inv) => {
+                          const m = getInvoiceAmountMismatch(inv, masterUntaxedByProjectId);
+                          if (!m) return null;
+                          const no = String(inv.發票號碼 ?? "").trim() || "（無號碼）";
+                          return `${no}（預期 ${formatAmount(String(m.expectedTaxIncluded))}／實際 ${formatAmount(String(m.actualTaxIncluded))}）`;
+                        })
+                        .filter((s): s is string => Boolean(s));
+                      if (mismatched.length > 0) {
+                        setInvoiceAmountMismatchNotice(
+                          `已新增 ${data.invoices.length} 筆，其中 ${mismatched.length} 筆金額與專案總金額未稅×1.05 不一致：${mismatched.join("、")}`
+                        );
+                      } else {
+                        setInvoiceAmountMismatchNotice(null);
+                      }
                     } else {
                       await refreshDashboardData(["invoices", "finance"]);
                     }
