@@ -516,25 +516,51 @@ export async function createPaymentRecordsBatch(
   return (data ?? []).map((r: Record<string, unknown>) => mapPaymentRecord(r));
 }
 
+function isKolPaymentRecord(row: { 匯款類型?: string | null; 備註?: string | null }): boolean {
+  if (String(row.匯款類型 ?? "").trim() === "KOL") return true;
+  const note = String(row.備註 ?? "");
+  return note.includes("KOL匯款") || note.includes("KOL勞報匯款");
+}
+
 export async function updatePaymentRecordById(id: string, row: PaymentRecordInput): Promise<PaymentRecordRow> {
   const pid = String(id ?? "").trim();
   if (!pid) throw new Error("缺少付款記錄 id");
 
-  const payload = {
+  const supabase = getSupabase();
+  const { data: prevRaw, error: prevErr } = await supabase.from("付款記錄").select("*").eq("id", pid).maybeSingle();
+  if (prevErr) throw prevErr;
+  if (!prevRaw) throw new Error("找不到該付款記錄或更新失敗");
+  const prev = mapPaymentRecord(prevRaw as Record<string, unknown>);
+
+  const payload: Record<string, string | null> = {
     發票號碼: trimOrNull(row.發票號碼 ?? undefined),
     付款日期: trimOrNull(row.付款日期 ?? undefined),
     付款專案: trimOrNull(row.付款專案 ?? undefined),
     付款對象: trimOrNull(row.付款對象 ?? undefined),
     付款金額: normalizeMoneyOrNull(row.付款金額 ?? undefined),
     備註: trimOrNull(row.備註 ?? undefined),
-    匯款類型: trimOrNull(row.匯款類型 ?? undefined),
     updated_at: new Date().toISOString(),
   };
+  // 未帶入或空白時沿用原值，避免 UI 存檔把「匯款類型」清成 null
+  const nextType = row.匯款類型 !== undefined ? trimOrNull(row.匯款類型) : null;
+  payload.匯款類型 = nextType ?? trimOrNull(prev.匯款類型 ?? undefined);
 
-  const { data, error } = await getSupabase().from("付款記錄").update(payload).eq("id", pid).select("*").maybeSingle();
+  const { data, error } = await supabase.from("付款記錄").update(payload).eq("id", pid).select("*").maybeSingle();
   if (error) throw error;
   if (!data) throw new Error("找不到該付款記錄或更新失敗");
-  return mapPaymentRecord(data as Record<string, unknown>);
+  const updated = mapPaymentRecord(data as Record<string, unknown>);
+
+  // KOL 匯款列：付款日期連動寫回 KOL發票.KOL匯款日期（KOL 入口「結帳日期」）
+  if (isKolPaymentRecord(updated) || isKolPaymentRecord(prev)) {
+    const projectId = String(updated.付款專案 ?? "").trim();
+    const payDate = String(updated.付款日期 ?? "").trim().slice(0, 10);
+    if (projectId && /^\d{4}-\d{2}-\d{2}$/.test(payDate)) {
+      const { updateKolRemittanceDate } = await import("@/lib/db/kol-invoices");
+      await updateKolRemittanceDate(projectId, payDate);
+    }
+  }
+
+  return updated;
 }
 
 export async function getFinance(): Promise<FinanceRow[]> {

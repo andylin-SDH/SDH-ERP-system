@@ -45,5 +45,7 @@ export interface PaymentRecordRow {
   付款對象?: string;
   付款金額?: string;
   備註?: string;
+  /** 例如 KOL：登記匯款時寫入，供付款記錄連動結帳日期 */
+  匯款類型?: string;
   [key: string]: string | undefined;
 }

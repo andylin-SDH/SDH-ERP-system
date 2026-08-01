@@ -856,6 +856,7 @@ function paymentRecordRowToInput(row: PaymentRecordRow): PaymentRecordInput {
     付款對象: row.付款對象 ?? "",
     付款金額: row.付款金額 ?? "",
     備註: row.備註 ?? "",
+    匯款類型: row.匯款類型 ?? "",
   };
 }
 
@@ -9716,7 +9717,7 @@ export default function DashboardPage() {
               )}
               {paymentRecords.length > 0 && (
                 <p className="mb-2 text-[11px] text-stone-500">
-                  各欄可直接編輯；系統不會自動儲存，填好後請按該列「存檔」。欄位比照付款表：發票號碼、付款日期、付款專案、付款對象、付款金額。
+                  各欄可直接編輯；系統不會自動儲存，填好後請按該列「存檔」。KOL 匯款列修改「付款日期」會同步更新 KOL 入口的結帳日期。
                 </p>
               )}
               <ListAmountSummary
