@@ -730,13 +730,23 @@ export default function KolHomePage() {
     let kolFeeSum = 0;
     let pendingSettlement = 0;
     let missingKolInvoice = 0;
+    let unclaimedTotal = 0;
     for (const p of inProgressProjects) {
       kolFeeSum += parseKolAmount(p.KOL費用未稅);
       if (p.結帳狀態 === "未入帳") pendingSettlement += 1;
       if (p.結帳狀態 === "可請款" && !projectHasCredential(p)) missingKolInvoice += 1;
     }
-    return { inProgressCount: inProgressProjects.length, kolFeeSum, pendingSettlement, missingKolInvoice };
-  }, [inProgressProjects]);
+    for (const p of projectsBySettlement["可請款"]) {
+      unclaimedTotal += parseKolAmount(p.KOL費用未稅);
+    }
+    return {
+      inProgressCount: inProgressProjects.length,
+      kolFeeSum,
+      pendingSettlement,
+      missingKolInvoice,
+      unclaimedTotal,
+    };
+  }, [inProgressProjects, projectsBySettlement]);
 
   const visibleProjects = projectsBySettlement[settlementTab];
   const settlementTabInitialized = useRef(false);
@@ -865,7 +875,7 @@ export default function KolHomePage() {
             {partnerId ? <span className="ml-2 text-stone-500">（{partnerId}）</span> : null}
           </p>
 
-          <div className="mb-6 grid gap-3 sm:grid-cols-4">
+          <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <div className="rounded-xl border border-stone-200/90 bg-white/90 px-4 py-3 shadow-sm ring-1 ring-amber-100/40">
               <p className="text-xs font-medium text-stone-500">進行中專案</p>
               <p className="mt-1 text-2xl font-bold tabular-nums text-stone-900">{summary.inProgressCount}</p>
@@ -875,6 +885,13 @@ export default function KolHomePage() {
               <p className="mt-1 text-2xl font-bold tabular-nums text-amber-900">
                 {summary.kolFeeSum > 0 ? summary.kolFeeSum.toLocaleString("zh-TW") : "—"}
               </p>
+            </div>
+            <div className="rounded-xl border border-sky-200/80 bg-sky-50/70 px-4 py-3 shadow-sm ring-1 ring-sky-100/50">
+              <p className="text-xs font-medium text-sky-900/80">未請款總額</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums text-sky-950">
+                {summary.unclaimedTotal > 0 ? summary.unclaimedTotal.toLocaleString("zh-TW") : "—"}
+              </p>
+              <p className="mt-0.5 text-[10px] text-sky-800/70">可請款 · KOL分潤未稅合計</p>
             </div>
             <div className="rounded-xl border border-stone-200/90 bg-white/90 px-4 py-3 shadow-sm ring-1 ring-amber-100/40">
               <p className="text-xs font-medium text-stone-500">進行中 · 未入帳</p>
