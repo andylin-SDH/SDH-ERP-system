@@ -3,7 +3,6 @@
 import Image from "next/image";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseKolAmount } from "@/lib/kol/format";
-import { isKolProjectInProgress } from "@/lib/kol/project-lifecycle";
 import { SessionExpiryMonitor } from "@/components/SessionExpiryMonitor";
 import { SignaturePad } from "@/components/SignaturePad";
 import type { KolPortalProject } from "@/lib/kol/types";
@@ -459,6 +458,169 @@ function KolRequestCredentialPanel({
   );
 }
 
+function formatSummaryAmount(n: number): string {
+  if (!(n > 0)) return "—";
+  return n.toLocaleString("zh-TW");
+}
+
+/** KOL 入口頂部三指標：醒目、可掃讀、點擊切換對應分頁 */
+function KolFinanceSummaryStrip({
+  unclaimedTotal,
+  remittedTotal,
+  pendingCredentialCount,
+  onOpenClaimable,
+  onOpenRemitted,
+}: {
+  unclaimedTotal: number;
+  remittedTotal: number;
+  pendingCredentialCount: number;
+  onOpenClaimable: () => void;
+  onOpenRemitted: () => void;
+}) {
+  const needsAction = pendingCredentialCount > 0 || unclaimedTotal > 0;
+  return (
+    <section aria-label="請款摘要" className="mb-7">
+      <style>{`
+        @keyframes kol-summary-in {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .kol-summary-card {
+          animation: kol-summary-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .kol-summary-card { animation: none; }
+        }
+      `}</style>
+      <div className="relative overflow-hidden rounded-2xl border border-stone-200/90 bg-[linear-gradient(135deg,#fffaf5_0%,#fff7ed_42%,#f5f5f4_100%)] p-3 shadow-sm sm:p-4">
+        <div
+          className="pointer-events-none absolute -right-10 -top-16 h-44 w-44 rounded-full bg-amber-200/30 blur-3xl"
+          aria-hidden
+        />
+        <div
+          className="pointer-events-none absolute -bottom-20 -left-8 h-40 w-40 rounded-full bg-red-200/25 blur-3xl"
+          aria-hidden
+        />
+        <div className="relative mb-3 flex flex-wrap items-end justify-between gap-2 px-0.5">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-stone-500">財務快覽</p>
+            <p className="mt-0.5 text-sm font-semibold text-stone-800">
+              {needsAction ? "有待處理項目，請先看紅色與琥珀色區塊" : "目前無需填寫請款憑證"}
+            </p>
+          </div>
+        </div>
+        <div className="relative grid gap-2.5 sm:grid-cols-3">
+          <button
+            type="button"
+            onClick={onOpenClaimable}
+            className="kol-summary-card group relative overflow-hidden rounded-xl border-2 border-red-500/90 bg-gradient-to-br from-red-600 to-rose-700 px-4 py-4 text-left text-white shadow-md shadow-red-300/40 transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-red-300/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2"
+            style={{ animationDelay: "0ms" }}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-[11px] font-bold tracking-[0.14em] text-red-100">未請款</p>
+              <span className="rounded bg-white/15 px-1.5 py-0.5 text-[10px] font-bold text-white/95 backdrop-blur-sm">
+                待處理
+              </span>
+            </div>
+            <p className="mt-2 text-[11px] font-medium text-red-100/90">金額（未稅）</p>
+            <p className="mt-0.5 text-3xl font-black tabular-nums tracking-tight sm:text-[2.15rem]">
+              {formatSummaryAmount(unclaimedTotal)}
+            </p>
+            <p className="mt-2 text-[11px] font-medium text-red-100/85 transition group-hover:text-white">
+              可請款合計 · 點此查看
+            </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenRemitted}
+            className="kol-summary-card group relative overflow-hidden rounded-xl border border-emerald-300/80 bg-white/90 px-4 py-4 text-left shadow-sm ring-1 ring-emerald-100/70 transition hover:-translate-y-0.5 hover:border-emerald-400 hover:bg-emerald-50/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2"
+            style={{ animationDelay: "80ms" }}
+          >
+            <div className="absolute inset-y-3 left-0 w-1 rounded-r-full bg-emerald-500" aria-hidden />
+            <div className="pl-2">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-[11px] font-bold tracking-[0.14em] text-emerald-800">已匯款</p>
+                <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                  已完成
+                </span>
+              </div>
+              <p className="mt-2 text-[11px] font-medium text-emerald-800/70">金額合計</p>
+              <p className="mt-0.5 text-3xl font-black tabular-nums tracking-tight text-emerald-900 sm:text-[2.15rem]">
+                {formatSummaryAmount(remittedTotal)}
+              </p>
+              <p className="mt-2 text-[11px] font-medium text-emerald-800/75 transition group-hover:text-emerald-900">
+                點此查看已匯款專案
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenClaimable}
+            className={`kol-summary-card group relative overflow-hidden rounded-xl border px-4 py-4 text-left shadow-sm transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 ${
+              pendingCredentialCount > 0
+                ? "border-amber-400 bg-gradient-to-br from-amber-50 to-orange-50 ring-1 ring-amber-200/80 hover:border-amber-500"
+                : "border-stone-200 bg-white/90 ring-1 ring-stone-100 hover:border-stone-300"
+            }`}
+            style={{ animationDelay: "160ms" }}
+          >
+            <div
+              className={`absolute inset-y-3 left-0 w-1 rounded-r-full ${
+                pendingCredentialCount > 0 ? "bg-amber-500" : "bg-stone-300"
+              }`}
+              aria-hidden
+            />
+            <div className="pl-2">
+              <div className="flex items-start justify-between gap-2">
+                <p
+                  className={`text-[11px] font-bold tracking-[0.14em] ${
+                    pendingCredentialCount > 0 ? "text-amber-900" : "text-stone-600"
+                  }`}
+                >
+                  待填憑證
+                </p>
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                    pendingCredentialCount > 0
+                      ? "bg-amber-500 text-slate-900"
+                      : "bg-stone-100 text-stone-600"
+                  }`}
+                >
+                  {pendingCredentialCount > 0 ? "要填寫" : "無"}
+                </span>
+              </div>
+              <p
+                className={`mt-2 text-[11px] font-medium ${
+                  pendingCredentialCount > 0 ? "text-amber-900/70" : "text-stone-500"
+                }`}
+              >
+                可請款筆數
+              </p>
+              <p
+                className={`mt-0.5 text-3xl font-black tabular-nums tracking-tight sm:text-[2.15rem] ${
+                  pendingCredentialCount > 0 ? "text-amber-950" : "text-stone-700"
+                }`}
+              >
+                {pendingCredentialCount}
+              </p>
+              <p
+                className={`mt-2 text-[11px] font-medium ${
+                  pendingCredentialCount > 0
+                    ? "text-amber-900/80 group-hover:text-amber-950"
+                    : "text-stone-500"
+                }`}
+              >
+                待填請款憑證 · 點此處理
+              </p>
+            </div>
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 const PAYOUT_FLOW_STEPS = [
   {
     status: "未入帳",
@@ -703,11 +865,6 @@ export default function KolHomePage() {
     void load();
   }, [load]);
 
-  const inProgressProjects = useMemo(
-    () => projects.filter((p) => isKolProjectInProgress(p.專案狀態)),
-    [projects]
-  );
-
   const projectsBySettlement = useMemo(() => {
     const buckets: Record<SettlementTab, KolPortalProject[]> = {
       未入帳: [],
@@ -727,26 +884,23 @@ export default function KolHomePage() {
   }, [projects]);
 
   const summary = useMemo(() => {
-    let kolFeeSum = 0;
-    for (const p of inProgressProjects) {
-      kolFeeSum += parseKolAmount(p.KOL費用未稅);
-    }
-    // 與下方分頁同一口徑（含已結案但仍待請款／未入帳的專案），避免摘要與分頁數字不一致
-    const pendingSettlement = projectsBySettlement["未入帳"].length;
     const claimable = projectsBySettlement["可請款"];
+    const remitted = projectsBySettlement["已匯款"];
     const missingKolInvoice = claimable.filter((p) => !projectHasCredential(p)).length;
     let unclaimedTotal = 0;
     for (const p of claimable) {
       unclaimedTotal += parseKolAmount(p.KOL費用未稅);
     }
+    let remittedTotal = 0;
+    for (const p of remitted) {
+      remittedTotal += parseKolAmount(p.KOL匯款金額 || p.KOL費用未稅);
+    }
     return {
-      inProgressCount: inProgressProjects.length,
-      kolFeeSum,
-      pendingSettlement,
       missingKolInvoice,
       unclaimedTotal,
+      remittedTotal,
     };
-  }, [inProgressProjects, projectsBySettlement]);
+  }, [projectsBySettlement]);
 
   const visibleProjects = projectsBySettlement[settlementTab];
   const settlementTabInitialized = useRef(false);
@@ -875,33 +1029,13 @@ export default function KolHomePage() {
             {partnerId ? <span className="ml-2 text-stone-500">（{partnerId}）</span> : null}
           </p>
 
-          <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <div className="rounded-xl border border-stone-200/90 bg-white/90 px-4 py-3 shadow-sm ring-1 ring-amber-100/40">
-              <p className="text-xs font-medium text-stone-500">進行中專案</p>
-              <p className="mt-1 text-2xl font-bold tabular-nums text-stone-900">{summary.inProgressCount}</p>
-            </div>
-            <div className="rounded-xl border border-stone-200/90 bg-white/90 px-4 py-3 shadow-sm ring-1 ring-amber-100/40">
-              <p className="text-xs font-medium text-stone-500">進行中 KOL 分潤未稅合計</p>
-              <p className="mt-1 text-2xl font-bold tabular-nums text-amber-900">
-                {summary.kolFeeSum > 0 ? summary.kolFeeSum.toLocaleString("zh-TW") : "—"}
-              </p>
-            </div>
-            <div className="rounded-xl border-2 border-red-500 bg-red-50 px-4 py-3 shadow-md shadow-red-200/60 ring-2 ring-red-200/80">
-              <p className="text-xs font-bold tracking-wide text-red-700">未請款總額</p>
-              <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-red-600">
-                {summary.unclaimedTotal > 0 ? summary.unclaimedTotal.toLocaleString("zh-TW") : "—"}
-              </p>
-              <p className="mt-0.5 text-[10px] font-medium text-red-700/80">可請款 · KOL分潤未稅合計</p>
-            </div>
-            <div className="rounded-xl border border-stone-200/90 bg-white/90 px-4 py-3 shadow-sm ring-1 ring-amber-100/40">
-              <p className="text-xs font-medium text-stone-500">未入帳</p>
-              <p className="mt-1 text-2xl font-bold tabular-nums text-amber-900">{summary.pendingSettlement}</p>
-            </div>
-            <div className="rounded-xl border border-stone-200/90 bg-white/90 px-4 py-3 shadow-sm ring-1 ring-amber-100/40">
-              <p className="text-xs font-medium text-stone-500">可請款 · 待填請款憑證</p>
-              <p className="mt-1 text-2xl font-bold tabular-nums text-red-700">{summary.missingKolInvoice}</p>
-            </div>
-          </div>
+          <KolFinanceSummaryStrip
+            unclaimedTotal={summary.unclaimedTotal}
+            remittedTotal={summary.remittedTotal}
+            pendingCredentialCount={summary.missingKolInvoice}
+            onOpenClaimable={() => setSettlementTab("可請款")}
+            onOpenRemitted={() => setSettlementTab("已匯款")}
+          />
 
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="inline-flex max-w-full flex-wrap rounded-lg border border-stone-200 bg-stone-100/80 p-0.5 text-sm">
