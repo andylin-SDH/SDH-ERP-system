@@ -5,6 +5,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { parseKolAmount } from "@/lib/kol/format";
 import { SessionExpiryMonitor } from "@/components/SessionExpiryMonitor";
 import { SignaturePad } from "@/components/SignaturePad";
+import { useKolTheme } from "@/components/KolThemeShell";
 import type { KolPortalProject } from "@/lib/kol/types";
 import { kolHasRequestCredential, type KolRequestMode } from "@/lib/kol/finance-status";
 import { calcLaborWithholding, type LaborPaymentMethod } from "@/lib/kol/labor-receipt";
@@ -470,12 +471,14 @@ function KolFinanceSummaryStrip({
   pendingCredentialCount,
   onOpenClaimable,
   onOpenRemitted,
+  isDark,
 }: {
   unclaimedTotal: number;
   remittedTotal: number;
   pendingCredentialCount: number;
   onOpenClaimable: () => void;
   onOpenRemitted: () => void;
+  isDark: boolean;
 }) {
   const cards = [
     {
@@ -484,8 +487,8 @@ function KolFinanceSummaryStrip({
       hint: "匯款金額合計",
       value: formatSummaryAmount(remittedTotal),
       onClick: onOpenRemitted,
-      accent: "bg-teal-600",
-      valueClass: remittedTotal > 0 ? "text-teal-800" : "text-stone-400",
+      accent: isDark ? "bg-teal-400" : "bg-teal-600",
+      valueClass: remittedTotal > 0 ? (isDark ? "text-teal-300" : "text-teal-800") : isDark ? "text-stone-600" : "text-stone-400",
       delay: "0ms",
     },
     {
@@ -494,8 +497,8 @@ function KolFinanceSummaryStrip({
       hint: "可請款 · 未稅合計",
       value: formatSummaryAmount(unclaimedTotal),
       onClick: onOpenClaimable,
-      accent: "bg-rose-500",
-      valueClass: unclaimedTotal > 0 ? "text-rose-700" : "text-stone-400",
+      accent: isDark ? "bg-rose-400" : "bg-rose-500",
+      valueClass: unclaimedTotal > 0 ? (isDark ? "text-rose-300" : "text-rose-700") : isDark ? "text-stone-600" : "text-stone-400",
       delay: "70ms",
     },
     {
@@ -504,8 +507,15 @@ function KolFinanceSummaryStrip({
       hint: "可請款 · 待填筆數",
       value: String(pendingCredentialCount),
       onClick: onOpenClaimable,
-      accent: pendingCredentialCount > 0 ? "bg-amber-500" : "bg-stone-300",
-      valueClass: pendingCredentialCount > 0 ? "text-stone-900" : "text-stone-400",
+      accent: pendingCredentialCount > 0 ? (isDark ? "bg-amber-400" : "bg-amber-500") : isDark ? "bg-stone-600" : "bg-stone-300",
+      valueClass:
+        pendingCredentialCount > 0
+          ? isDark
+            ? "text-amber-100"
+            : "text-stone-900"
+          : isDark
+            ? "text-stone-600"
+            : "text-stone-400",
       delay: "140ms",
     },
   ] as const;
@@ -531,16 +541,28 @@ function KolFinanceSummaryStrip({
             type="button"
             onClick={card.onClick}
             style={{ animationDelay: card.delay }}
-            className="kol-summary-card group rounded-xl border border-stone-200/90 bg-white px-4 py-4 text-left transition hover:border-stone-300 hover:bg-stone-50/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2"
+            className={
+              isDark
+                ? "kol-summary-card group rounded-xl border border-white/10 bg-[#161616] px-4 py-4 text-left transition hover:border-white/20 hover:bg-[#1c1c1c] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b0b0c]"
+                : "kol-summary-card group rounded-xl border border-stone-200/90 bg-white px-4 py-4 text-left transition hover:border-stone-300 hover:bg-stone-50/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2"
+            }
           >
             <div className={`mb-3 h-0.5 w-8 rounded-full ${card.accent}`} aria-hidden />
-            <p className="text-xs font-medium tracking-wide text-stone-500">{card.label}</p>
+            <p className={`text-xs font-medium tracking-wide ${isDark ? "text-stone-400" : "text-stone-500"}`}>
+              {card.label}
+            </p>
             <p
               className={`mt-1.5 text-[1.85rem] font-semibold leading-none tabular-nums tracking-tight sm:text-[2rem] ${card.valueClass}`}
             >
               {card.value}
             </p>
-            <p className="mt-2 text-[11px] text-stone-400 transition group-hover:text-stone-600">{card.hint}</p>
+            <p
+              className={`mt-2 text-[11px] transition ${
+                isDark ? "text-stone-500 group-hover:text-stone-400" : "text-stone-400 group-hover:text-stone-600"
+              }`}
+            >
+              {card.hint}
+            </p>
           </button>
         ))}
       </div>
@@ -607,16 +629,24 @@ function FlowArrowIcon({ dir }: { dir: "right" | "down" }) {
 function PayoutFlowCard({
   step,
   idx,
+  isDark,
 }: {
   step: (typeof PAYOUT_FLOW_STEPS)[number];
   idx: number;
+  isDark: boolean;
 }) {
   return (
     <li
-      className={`flex min-w-0 gap-2 rounded-lg border border-stone-200/70 border-l-[3px] bg-white/90 px-2.5 py-2 shadow-sm ${step.bar}`}
+      className={`flex min-w-0 gap-2 rounded-lg border-l-[3px] px-2.5 py-2 shadow-sm ${step.bar} ${
+        isDark
+          ? "border border-white/10 bg-[#161616]"
+          : "border border-stone-200/70 bg-white/90"
+      }`}
     >
       <span
-        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${step.num}`}
+        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+          isDark ? "bg-white/10 text-stone-200" : step.num
+        }`}
       >
         {idx + 1}
       </span>
@@ -626,17 +656,23 @@ function PayoutFlowCard({
         >
           {step.status}
         </span>
-        <p className="mt-1 text-xs leading-snug text-stone-700">{step.action}</p>
+        <p className={`mt-1 text-xs leading-snug ${isDark ? "text-stone-400" : "text-stone-700"}`}>{step.action}</p>
       </div>
     </li>
   );
 }
 
-function KolPayoutFlowGuide() {
+function KolPayoutFlowGuide({ isDark }: { isDark: boolean }) {
   return (
-    <section className="mb-6 rounded-xl border border-amber-200/70 bg-amber-50/45 px-4 py-3.5 shadow-sm ring-1 ring-amber-100/40 sm:px-5">
-      <h2 className="text-sm font-bold text-stone-900">請款怎麼走？</h2>
-      <p className="mt-0.5 text-xs leading-relaxed text-stone-600">
+    <section
+      className={`mb-6 rounded-xl px-4 py-3.5 shadow-sm sm:px-5 ${
+        isDark
+          ? "border border-white/10 bg-[#141414] ring-1 ring-amber-500/10"
+          : "border border-amber-200/70 bg-amber-50/45 ring-1 ring-amber-100/40"
+      }`}
+    >
+      <h2 className={`text-sm font-bold ${isDark ? "text-stone-100" : "text-stone-900"}`}>請款怎麼走？</h2>
+      <p className={`mt-0.5 text-xs leading-relaxed ${isDark ? "text-stone-400" : "text-stone-600"}`}>
         看列表「結帳狀態」對照下方四步；需要操作時，點專案列展開即可。
       </p>
       <div className="mt-1.5 flex flex-wrap items-center gap-1">
@@ -665,28 +701,28 @@ function KolPayoutFlowGuide() {
                 <FlowArrowIcon dir="down" />
               </li>
             ) : null}
-            <PayoutFlowCard step={step} idx={idx} />
+            <PayoutFlowCard step={step} idx={idx} isDark={isDark} />
           </Fragment>
         ))}
       </ol>
 
       {/* 平板 2×2：Z 型箭頭 1→2 ↓ 3→4 */}
       <ol className="mt-2.5 hidden gap-x-1 gap-y-1 sm:grid sm:grid-cols-[1fr_auto_1fr] lg:hidden">
-        <PayoutFlowCard step={PAYOUT_FLOW_STEPS[0]} idx={0} />
+        <PayoutFlowCard step={PAYOUT_FLOW_STEPS[0]} idx={0} isDark={isDark} />
         <li className="list-none flex items-center justify-center px-0.5" aria-hidden>
           <FlowArrowIcon dir="right" />
         </li>
-        <PayoutFlowCard step={PAYOUT_FLOW_STEPS[1]} idx={1} />
+        <PayoutFlowCard step={PAYOUT_FLOW_STEPS[1]} idx={1} isDark={isDark} />
         <li className="list-none" aria-hidden />
         <li className="list-none flex justify-center py-0.5" aria-hidden>
           <FlowArrowIcon dir="down" />
         </li>
         <li className="list-none" aria-hidden />
-        <PayoutFlowCard step={PAYOUT_FLOW_STEPS[2]} idx={2} />
+        <PayoutFlowCard step={PAYOUT_FLOW_STEPS[2]} idx={2} isDark={isDark} />
         <li className="list-none flex items-center justify-center px-0.5" aria-hidden>
           <FlowArrowIcon dir="right" />
         </li>
-        <PayoutFlowCard step={PAYOUT_FLOW_STEPS[3]} idx={3} />
+        <PayoutFlowCard step={PAYOUT_FLOW_STEPS[3]} idx={3} isDark={isDark} />
       </ol>
 
       {/* 大螢幕：橫向一列 */}
@@ -698,7 +734,7 @@ function KolPayoutFlowGuide() {
                 <FlowArrowIcon dir="right" />
               </li>
             ) : null}
-            <PayoutFlowCard step={step} idx={idx} />
+            <PayoutFlowCard step={step} idx={idx} isDark={isDark} />
           </Fragment>
         ))}
       </ol>
@@ -707,6 +743,7 @@ function KolPayoutFlowGuide() {
 }
 
 export default function KolHomePage() {
+  const { isDark } = useKolTheme();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [partnerName, setPartnerName] = useState<string>("");
@@ -898,12 +935,26 @@ export default function KolHomePage() {
   return (
     <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-4 py-8 sm:px-6">
       <SessionExpiryMonitor active={sessionActive && !loading && !error} onSessionEnd={handleSessionEnd} />
-      <header className="mb-8 flex flex-col gap-4 border-b border-amber-200/80 pb-6 sm:flex-row sm:items-center sm:justify-between">
+      <header
+        className={`mb-8 flex flex-col gap-4 border-b pb-6 sm:flex-row sm:items-center sm:justify-between ${
+          isDark ? "border-white/10" : "border-amber-200/80"
+        }`}
+      >
         <div className="flex items-center gap-4">
-          <Image src="/logo.png" alt="SDH" width={200} height={48} className="h-10 w-auto object-contain" />
+          <Image
+            src="/logo.png"
+            alt="SDH"
+            width={200}
+            height={48}
+            className={`h-10 w-auto object-contain ${isDark ? "brightness-0 invert opacity-90" : ""}`}
+          />
           <div>
-            <h1 className="text-lg font-bold tracking-tight text-stone-900">我的專案</h1>
-            <p className="text-xs text-stone-500">結帳狀態：未入帳 → 可請款 → 待匯款 → 已匯款</p>
+            <h1 className={`text-lg font-bold tracking-tight ${isDark ? "text-stone-50" : "text-stone-900"}`}>
+              我的專案
+            </h1>
+            <p className={`text-xs ${isDark ? "text-stone-500" : "text-stone-500"}`}>
+              結帳狀態：未入帳 → 可請款 → 待匯款 → 已匯款
+            </p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -911,14 +962,22 @@ export default function KolHomePage() {
             type="button"
             onClick={() => void load()}
             disabled={loading}
-            className="rounded-xl border border-amber-300/80 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-950 shadow-sm hover:bg-amber-100 disabled:opacity-50"
+            className={
+              isDark
+                ? "rounded-xl border border-amber-400/40 bg-amber-500/15 px-4 py-2 text-sm font-semibold text-amber-200 transition hover:bg-amber-500/25 disabled:opacity-50"
+                : "rounded-xl border border-amber-300/80 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-950 shadow-sm hover:bg-amber-100 disabled:opacity-50"
+            }
           >
             重新整理
           </button>
           <button
             type="button"
             onClick={handleLogout}
-            className="rounded-xl border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-600 shadow-sm hover:bg-stone-50"
+            className={
+              isDark
+                ? "rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-stone-300 transition hover:bg-white/10"
+                : "rounded-xl border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-600 shadow-sm hover:bg-stone-50"
+            }
           >
             登出
           </button>
@@ -926,34 +985,56 @@ export default function KolHomePage() {
       </header>
 
       {loading && (
-        <div className="rounded-xl border border-stone-200 bg-white/80 px-4 py-8 text-center">
-          <p className="text-stone-600">載入中…</p>
-          <p className="mt-2 text-xs text-stone-400">若超過 30 秒仍無回應，請按右上角「重新整理」</p>
+        <div
+          className={`rounded-xl px-4 py-8 text-center ${
+            isDark ? "border border-white/10 bg-[#161616]" : "border border-stone-200 bg-white/80"
+          }`}
+        >
+          <p className={isDark ? "text-stone-300" : "text-stone-600"}>載入中…</p>
+          <p className={`mt-2 text-xs ${isDark ? "text-stone-500" : "text-stone-400"}`}>
+            若超過 30 秒仍無回應，請按右上角「重新整理」
+          </p>
         </div>
       )}
       {error && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+        <div
+          className={`rounded-xl px-4 py-3 text-sm ${
+            isDark
+              ? "border border-amber-400/30 bg-amber-500/10 text-amber-100"
+              : "border border-amber-200 bg-amber-50 text-amber-950"
+          }`}
+        >
           <p>{error}</p>
           {error.includes("KOL發票") || error.includes("migration") ? (
-            <p className="mt-2 text-xs text-amber-900/80">
+            <p className={`mt-2 text-xs ${isDark ? "text-amber-200/80" : "text-amber-900/80"}`}>
               管理員請至 Supabase SQL Editor 依序執行：053_kol_invoices.sql、055_kol_remittance.sql、056_kol_labor_remuneration.sql、057_kol_labor_receipt_fields.sql
             </p>
           ) : null}
         </div>
       )}
       {saveNotice && (
-        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+        <div
+          className={`mb-4 rounded-xl px-4 py-3 text-sm ${
+            isDark
+              ? "border border-emerald-400/30 bg-emerald-500/10 text-emerald-100"
+              : "border border-emerald-200 bg-emerald-50 text-emerald-900"
+          }`}
+        >
           {saveNotice}
         </div>
       )}
 
       {!loading && !error && (
         <>
-          <KolPayoutFlowGuide />
+          <KolPayoutFlowGuide isDark={isDark} />
 
-          <p className="mb-4 text-sm text-stone-600">
-            <span className="font-semibold text-stone-800">{partnerName || "—"}</span>
-            {partnerId ? <span className="ml-2 text-stone-500">（{partnerId}）</span> : null}
+          <p className={`mb-4 text-sm ${isDark ? "text-stone-400" : "text-stone-600"}`}>
+            <span className={`font-semibold ${isDark ? "text-stone-100" : "text-stone-800"}`}>
+              {partnerName || "—"}
+            </span>
+            {partnerId ? (
+              <span className={`ml-2 ${isDark ? "text-stone-500" : "text-stone-500"}`}>（{partnerId}）</span>
+            ) : null}
           </p>
 
           <KolFinanceSummaryStrip
@@ -962,17 +1043,26 @@ export default function KolHomePage() {
             pendingCredentialCount={summary.missingKolInvoice}
             onOpenClaimable={() => setSettlementTab("可請款")}
             onOpenRemitted={() => setSettlementTab("已匯款")}
+            isDark={isDark}
           />
 
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="inline-flex max-w-full flex-wrap rounded-lg border border-stone-200 bg-stone-100/80 p-0.5 text-sm">
+            <div
+              className={`inline-flex max-w-full flex-wrap rounded-lg p-0.5 text-sm ${
+                isDark ? "border border-white/10 bg-white/5" : "border border-stone-200 bg-stone-100/80"
+              }`}
+            >
               {SETTLEMENT_TABS.map((tab) => (
                 <button
                   key={tab.key}
                   type="button"
                   onClick={() => setSettlementTab(tab.key)}
                   className={`rounded-md px-3 py-1.5 font-semibold transition ${
-                    settlementTab === tab.key ? tab.activeClass : "text-stone-600 hover:text-stone-900"
+                    settlementTab === tab.key
+                      ? tab.activeClass
+                      : isDark
+                        ? "text-stone-400 hover:text-stone-100"
+                        : "text-stone-600 hover:text-stone-900"
                   }`}
                 >
                   {tab.label}
@@ -982,9 +1072,19 @@ export default function KolHomePage() {
                 </button>
               ))}
             </div>
-            <p className="text-xs text-stone-500">
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100/80 px-2 py-0.5 font-medium text-amber-900">
-                <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden className="text-amber-700">
+            <p className={`text-xs ${isDark ? "text-stone-500" : "text-stone-500"}`}>
+              <span
+                className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-medium ${
+                  isDark ? "bg-amber-500/15 text-amber-200" : "bg-amber-100/80 text-amber-900"
+                }`}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  aria-hidden
+                  className={isDark ? "text-amber-300" : "text-amber-700"}
+                >
                   <path
                     d="M6 4l4 4-4 4"
                     fill="none"
@@ -1000,17 +1100,41 @@ export default function KolHomePage() {
           </div>
 
           {projects.length === 0 ? (
-            <p className="rounded-xl border border-stone-200 bg-white/80 px-4 py-10 text-center text-stone-500">
+            <p
+              className={`rounded-xl px-4 py-10 text-center ${
+                isDark
+                  ? "border border-white/10 bg-[#161616] text-stone-400"
+                  : "border border-stone-200 bg-white/80 text-stone-500"
+              }`}
+            >
               目前沒有與您對應的專案。請確認大總表「KOL 名稱」與您的合作夥伴名稱一致。
             </p>
           ) : visibleProjects.length === 0 ? (
-            <p className="rounded-xl border border-stone-200 bg-white/80 px-4 py-10 text-center text-stone-500">
+            <p
+              className={`rounded-xl px-4 py-10 text-center ${
+                isDark
+                  ? "border border-white/10 bg-[#161616] text-stone-400"
+                  : "border border-stone-200 bg-white/80 text-stone-500"
+              }`}
+            >
               目前沒有「{settlementTab}」的專案。
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-stone-200/90 bg-white shadow-sm ring-1 ring-amber-100/50">
+            <div
+              className={`overflow-x-auto rounded-xl shadow-sm ${
+                isDark
+                  ? "border border-white/10 bg-[#121212] ring-1 ring-white/5"
+                  : "border border-stone-200/90 bg-white ring-1 ring-amber-100/50"
+              }`}
+            >
               <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-amber-200/60 bg-gradient-to-r from-amber-100/95 to-amber-50/90 text-amber-950">
+                <thead
+                  className={
+                    isDark
+                      ? "border-b border-white/10 bg-[#1a1a1a] text-stone-300"
+                      : "border-b border-amber-200/60 bg-gradient-to-r from-amber-100/95 to-amber-50/90 text-amber-950"
+                  }
+                >
                   <tr>
                     <th className="w-9 px-2 py-3" aria-hidden />
                     <th className="whitespace-nowrap px-3 py-3 text-xs font-bold tracking-wide">專案ID</th>
@@ -1035,12 +1159,18 @@ export default function KolHomePage() {
                           tabIndex={0}
                           aria-expanded={expanded}
                           aria-label={`${p.專案名稱}，${expanded ? "收合" : "展開"}專案詳情`}
-                          className={`group cursor-pointer border-b border-stone-100 transition-all last:border-b-0 ${
-                            expanded
-                              ? "bg-amber-50/90 shadow-[inset_3px_0_0_0] shadow-amber-500"
-                              : needsAction
-                                ? "bg-white hover:bg-sky-50/50 hover:shadow-[inset_3px_0_0_0] hover:shadow-sky-400"
-                                : "bg-white even:bg-stone-50/40 hover:bg-amber-50/70 hover:shadow-[inset_3px_0_0_0] hover:shadow-amber-400"
+                          className={`group cursor-pointer border-b transition-all last:border-b-0 ${
+                            isDark
+                              ? expanded
+                                ? "border-white/10 bg-amber-500/10 shadow-[inset_3px_0_0_0] shadow-amber-400"
+                                : needsAction
+                                  ? "border-white/5 bg-[#141414] hover:bg-sky-500/10 hover:shadow-[inset_3px_0_0_0] hover:shadow-sky-400"
+                                  : "border-white/5 bg-[#121212] even:bg-[#161616] hover:bg-amber-500/10 hover:shadow-[inset_3px_0_0_0] hover:shadow-amber-400"
+                              : expanded
+                                ? "border-stone-100 bg-amber-50/90 shadow-[inset_3px_0_0_0] shadow-amber-500"
+                                : needsAction
+                                  ? "border-stone-100 bg-white hover:bg-sky-50/50 hover:shadow-[inset_3px_0_0_0] hover:shadow-sky-400"
+                                  : "border-stone-100 bg-white even:bg-stone-50/40 hover:bg-amber-50/70 hover:shadow-[inset_3px_0_0_0] hover:shadow-amber-400"
                           }`}
                           onClick={() => setExpandedPid(expanded ? null : p.專案ID)}
                           onKeyDown={(e) => {
@@ -1055,7 +1185,9 @@ export default function KolHomePage() {
                               className={`inline-flex h-6 w-6 items-center justify-center rounded-full transition ${
                                 expanded
                                   ? "rotate-90 bg-amber-500 text-slate-900"
-                                  : "bg-stone-100 text-stone-500 group-hover:bg-amber-200 group-hover:text-amber-950"
+                                  : isDark
+                                    ? "bg-white/10 text-stone-400 group-hover:bg-amber-500/30 group-hover:text-amber-100"
+                                    : "bg-stone-100 text-stone-500 group-hover:bg-amber-200 group-hover:text-amber-950"
                               }`}
                               aria-hidden
                             >
@@ -1071,12 +1203,28 @@ export default function KolHomePage() {
                               </svg>
                             </span>
                           </td>
-                          <td className="whitespace-nowrap px-3 py-3.5 font-mono text-[11px] text-stone-600 group-hover:text-stone-800">
+                          <td
+                            className={`whitespace-nowrap px-3 py-3.5 font-mono text-[11px] ${
+                              isDark ? "text-stone-500 group-hover:text-stone-300" : "text-stone-600 group-hover:text-stone-800"
+                            }`}
+                          >
                             {p.專案ID}
                           </td>
                           <td className="max-w-[220px] px-3 py-3.5">
-                            <p className="font-semibold text-stone-900 group-hover:text-amber-950">{p.專案名稱}</p>
-                            <p className="mt-0.5 text-[10px] text-stone-400 opacity-0 transition group-hover:opacity-100">
+                            <p
+                              className={`font-semibold ${
+                                isDark
+                                  ? "text-stone-100 group-hover:text-amber-100"
+                                  : "text-stone-900 group-hover:text-amber-950"
+                              }`}
+                            >
+                              {p.專案名稱}
+                            </p>
+                            <p
+                              className={`mt-0.5 text-[10px] opacity-0 transition group-hover:opacity-100 ${
+                                isDark ? "text-stone-500" : "text-stone-400"
+                              }`}
+                            >
                               {expanded ? "點一下收合" : "點一下展開"}
                             </p>
                           </td>
@@ -1088,42 +1236,78 @@ export default function KolHomePage() {
                             </span>
                           </td>
                           <td className="whitespace-nowrap px-3 py-3.5">
-                            <span className="inline-flex min-w-[4.5rem] items-center justify-center rounded-lg bg-amber-100 px-2.5 py-1 text-base font-bold tabular-nums text-amber-950 ring-1 ring-amber-300/70">
+                            <span
+                              className={`inline-flex min-w-[4.5rem] items-center justify-center rounded-lg px-2.5 py-1 text-base font-bold tabular-nums ring-1 ${
+                                isDark
+                                  ? "bg-amber-500/15 text-amber-200 ring-amber-400/30"
+                                  : "bg-amber-100 text-amber-950 ring-amber-300/70"
+                              }`}
+                            >
                               {p.KOL費用未稅}
                             </span>
                           </td>
-                          <td className="whitespace-nowrap px-3 py-3.5 tabular-nums text-stone-600">
+                          <td
+                            className={`whitespace-nowrap px-3 py-3.5 tabular-nums ${
+                              isDark ? "text-stone-400" : "text-stone-600"
+                            }`}
+                          >
                             {p.專案總金額未稅}
                           </td>
                           <td className="whitespace-nowrap px-3 py-3.5 text-xs">
                             {p.請款憑證摘要 ? (
-                              <span className="text-stone-800">
-                                <span className="text-stone-500">{p.請款方式 === "勞務報酬" ? "勞報" : "發票"}</span>
+                              <span className={isDark ? "text-stone-200" : "text-stone-800"}>
+                                <span className={isDark ? "text-stone-500" : "text-stone-500"}>
+                                  {p.請款方式 === "勞務報酬" ? "勞報" : "發票"}
+                                </span>
                                 <span className="ml-1 font-mono font-semibold">{p.請款憑證摘要}</span>
                               </span>
                             ) : needsAction ? (
-                              <span className="inline-flex rounded-full bg-red-50 px-2 py-0.5 font-semibold text-red-700 ring-1 ring-red-200/80">
+                              <span
+                                className={`inline-flex rounded-md px-2 py-0.5 font-semibold ring-1 ${
+                                  isDark
+                                    ? "bg-rose-500/15 text-rose-300 ring-rose-400/30"
+                                    : "bg-red-50 text-red-700 ring-red-200/80"
+                                }`}
+                              >
                                 待填
                               </span>
                             ) : (
-                              <span className="text-stone-400">—</span>
+                              <span className={isDark ? "text-stone-600" : "text-stone-400"}>—</span>
                             )}
                           </td>
-                          <td className="whitespace-nowrap px-3 py-3.5 tabular-nums text-stone-700">
+                          <td
+                            className={`whitespace-nowrap px-3 py-3.5 tabular-nums ${
+                              isDark ? "text-stone-300" : "text-stone-700"
+                            }`}
+                          >
                             {p.廠商付款日期}
                           </td>
-                          <td className="whitespace-nowrap px-3 py-3.5 tabular-nums text-stone-700">
+                          <td
+                            className={`whitespace-nowrap px-3 py-3.5 tabular-nums ${
+                              isDark ? "text-stone-300" : "text-stone-700"
+                            }`}
+                          >
                             {p.KOL匯款日期 || (p.結帳狀態 === "待匯款" ? (
-                              <span className="text-amber-700">待匯款</span>
+                              <span className={isDark ? "text-amber-300" : "text-amber-700"}>待匯款</span>
                             ) : (
                               "—"
                             ))}
                           </td>
                         </tr>
                         {expanded && (
-                          <tr className="border-b border-amber-100 bg-gradient-to-b from-amber-50/40 to-white">
+                          <tr
+                            className={
+                              isDark
+                                ? "border-b border-white/10 bg-[#0f0f0f]"
+                                : "border-b border-amber-100 bg-gradient-to-b from-amber-50/40 to-white"
+                            }
+                          >
                             <td colSpan={9} className="px-4 py-4">
-                              <p className="mb-3 text-xs font-bold uppercase tracking-wide text-amber-800/80">
+                              <p
+                                className={`mb-3 text-xs font-bold uppercase tracking-wide ${
+                                  isDark ? "text-amber-200/80" : "text-amber-800/80"
+                                }`}
+                              >
                                 專案詳情 · {p.專案ID}
                               </p>
                               <div className="grid grid-cols-2 gap-4">
