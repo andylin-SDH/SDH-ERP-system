@@ -8,3 +8,8 @@ export function isKolProjectInProgress(專案狀態: string | null | undefined):
   }
   return true;
 }
+
+/** 大總表專案狀態為「暫緩」 */
+export function isKolProjectOnHold(專案狀態: string | null | undefined): boolean {
+  return String(專案狀態 ?? "").trim() === "暫緩";
+}

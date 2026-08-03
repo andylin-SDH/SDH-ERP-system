@@ -5,8 +5,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireKol } from "@/lib/auth/api";
 import { getKolInvoicesByProjectIds, upsertKolInvoice } from "@/lib/db/kol-invoices";
+import { getMasterList } from "@/lib/db/master";
 import { getKolAccessibleProjectIds, resolveKolPartnerForUser } from "@/lib/kol/partner-bind";
 import { savePartnerLaborProfile } from "@/lib/kol/partner-labor-profile";
+import { isKolProjectOnHold } from "@/lib/kol/project-lifecycle";
 import { getFinance } from "@/modules/finance";
 import { kolClientHasCredited, kolFinanceProgressShort } from "@/lib/kol/finance-status";
 
@@ -51,15 +53,21 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "無權限編輯此專案" }, { status: 403 });
     }
 
-    const [financeList, kolInvByPid] = await Promise.all([
+    const [financeList, kolInvByPid, masters] = await Promise.all([
       getFinance(),
       getKolInvoicesByProjectIds([...access.projectIds]),
+      getMasterList(),
     ]);
     const financeByPid = new Map<string, (typeof financeList)[number]>();
     for (const f of financeList) {
       const pid = String(f.專案ID ?? "").trim();
       if (pid) financeByPid.set(pid, f);
     }
+    const masterByPid = new Map(
+      masters
+        .map((m) => [String(m.專案ID ?? "").trim(), m] as const)
+        .filter(([pid]) => Boolean(pid))
+    );
 
     const statusOf = (pid: string) => {
       const f = financeByPid.get(pid);
@@ -72,6 +80,13 @@ export async function PATCH(request: NextRequest) {
     const targetIds = [專案ID];
 
     for (const pid of targetIds) {
+      const master = masterByPid.get(pid);
+      if (isKolProjectOnHold(master?.專案狀態)) {
+        return NextResponse.json(
+          { ok: false, error: `專案 ${pid} 目前為暫緩狀態，無法修改請款憑證` },
+          { status: 400 }
+        );
+      }
       const f = financeByPid.get(pid);
       if (!kolClientHasCredited(f?.廠商付款日期)) {
         return NextResponse.json(

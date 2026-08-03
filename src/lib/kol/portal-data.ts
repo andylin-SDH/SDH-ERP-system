@@ -17,6 +17,7 @@ import {
 import { formatKolAmountInt, parseKolAmount, sumKolInvoiceAmount含稅 } from "@/lib/kol/format";
 import { resolveKolPartnerForUser } from "@/lib/kol/partner-bind";
 import { getPartnerLaborProfile } from "@/lib/kol/partner-labor-profile";
+import { isKolProjectOnHold } from "@/lib/kol/project-lifecycle";
 import type { KolPortalProject } from "@/lib/kol/types";
 
 export type { KolPortalProject } from "@/lib/kol/types";
@@ -119,7 +120,9 @@ export async function buildKolPortalData(user: User): Promise<
       KOL發票填寫人: String(kolInv?.填寫人 ?? "").trim() || "",
       KOL匯款日期: String(kolInv?.KOL匯款日期 ?? "").trim().slice(0, 10) || "",
       KOL匯款金額: formatKolAmountInt(parseKolAmount(kolInv?.KOL匯款金額)),
-      canEditKolInvoice: kolCanEditRequestCredential(f?.廠商付款日期, kolInv, kolInv?.KOL匯款日期),
+      canEditKolInvoice:
+        !isKolProjectOnHold(row.專案狀態) &&
+        kolCanEditRequestCredential(f?.廠商付款日期, kolInv, kolInv?.KOL匯款日期),
     });
   }
 

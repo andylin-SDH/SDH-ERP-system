@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseKolAmount } from "@/lib/kol/format";
+import { isKolProjectOnHold } from "@/lib/kol/project-lifecycle";
 import { SessionExpiryMonitor } from "@/components/SessionExpiryMonitor";
 import { SignaturePad } from "@/components/SignaturePad";
 import { useKolTheme } from "@/components/KolThemeShell";
@@ -22,6 +23,7 @@ async function safeResJson(r: Response): Promise<Record<string, unknown>> {
 }
 
 function settlementBadgeClass(status: string): string {
+  if (status === "暫緩") return "bg-violet-100 text-violet-950 ring-1 ring-violet-300/60";
   if (status === "未入帳") return "bg-stone-200 text-stone-800";
   if (status === "可請款") return "bg-sky-100 text-sky-950 ring-1 ring-sky-300/60";
   if (status === "待匯款") return "bg-amber-100 text-amber-950 ring-1 ring-amber-300/60";
@@ -29,13 +31,20 @@ function settlementBadgeClass(status: string): string {
   return "bg-stone-100 text-stone-600";
 }
 
-type SettlementTab = "未入帳" | "可請款" | "待匯款" | "已匯款";
+/** 列表顯示用：專案狀態暫緩優先，否則顯示結帳狀態 */
+function kolListStatusLabel(p: KolPortalProject): string {
+  if (isKolProjectOnHold(p.專案狀態)) return "暫緩";
+  return p.結帳狀態;
+}
+
+type SettlementTab = "未入帳" | "可請款" | "待匯款" | "已匯款" | "暫緩";
 
 const SETTLEMENT_TABS: { key: SettlementTab; label: string; activeClass: string }[] = [
   { key: "未入帳", label: "未入帳", activeClass: "bg-stone-500 text-white shadow-sm" },
   { key: "可請款", label: "可請款", activeClass: "bg-sky-500 text-white shadow-sm" },
   { key: "待匯款", label: "待匯款", activeClass: "bg-amber-500 text-slate-900 shadow-sm" },
   { key: "已匯款", label: "已匯款", activeClass: "bg-emerald-600 text-white shadow-sm" },
+  { key: "暫緩", label: "暫緩", activeClass: "bg-violet-600 text-white shadow-sm" },
 ];
 
 type EditDraft = {
@@ -191,12 +200,20 @@ function KolRequestCredentialPanel({
 }) {
   const showLaborReadonly = p.請款方式 === "勞務報酬" && Boolean(p.勞報簽署時間);
   const editingLabor = draft.請款方式 === "勞務報酬" && !showLaborReadonly;
+  const lockedOnHold = isKolProjectOnHold(p.專案狀態);
   const lockedBeforeCredit = p.結帳狀態 === "未入帳";
 
   return (
     <div className="rounded-lg border border-amber-200/80 bg-amber-50/40 p-3">
       <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-amber-900">KOL 請款憑證</h3>
-      {lockedBeforeCredit ? (
+      {lockedOnHold ? (
+        <div className="rounded-lg border border-violet-200 bg-violet-50/90 px-3 py-3 text-sm text-violet-950">
+          <p className="font-medium">專案暫緩中</p>
+          <p className="mt-1 text-xs leading-relaxed text-violet-900/80">
+            此專案目前為「暫緩」狀態，暫不開放填寫或修改請款憑證。恢復進行後再處理即可。
+          </p>
+        </div>
+      ) : lockedBeforeCredit ? (
         <div className="rounded-lg border border-stone-200 bg-stone-50/90 px-3 py-3 text-sm text-stone-600">
           <p className="font-medium text-stone-800">尚未開放請款</p>
           <p className="mt-1 text-xs leading-relaxed">
@@ -207,7 +224,7 @@ function KolRequestCredentialPanel({
         <p className="mb-2 text-xs text-stone-500">此專案已匯款，請款資料不可再修改。</p>
       ) : null}
 
-      {!lockedBeforeCredit && (
+      {!lockedOnHold && !lockedBeforeCredit && (
         <>
       {p.canEditKolInvoice && !showLaborReadonly && (
         <div className="mb-3 inline-flex rounded-lg border border-stone-200 bg-white p-0.5 text-xs" onClick={(e) => e.stopPropagation()}>
@@ -835,12 +852,17 @@ export default function KolHomePage() {
       可請款: [],
       待匯款: [],
       已匯款: [],
+      暫緩: [],
     };
     for (const p of projects) {
+      if (isKolProjectOnHold(p.專案狀態)) {
+        buckets.暫緩.push(p);
+        continue;
+      }
       const key = (["未入帳", "可請款", "待匯款", "已匯款"] as const).includes(
-        p.結帳狀態 as SettlementTab
+        p.結帳狀態 as "未入帳" | "可請款" | "待匯款" | "已匯款"
       )
-        ? (p.結帳狀態 as SettlementTab)
+        ? (p.結帳狀態 as "未入帳" | "可請款" | "待匯款" | "已匯款")
         : "未入帳";
       buckets[key].push(p);
     }
@@ -871,7 +893,7 @@ export default function KolHomePage() {
 
   useEffect(() => {
     if (projects.length === 0 || settlementTabInitialized.current) return;
-    const preferred: SettlementTab[] = ["可請款", "待匯款", "未入帳", "已匯款"];
+    const preferred: SettlementTab[] = ["可請款", "待匯款", "未入帳", "已匯款", "暫緩"];
     const firstWithItems = preferred.find((k) => projectsBySettlement[k].length > 0);
     if (firstWithItems) setSettlementTab(firstWithItems);
     settlementTabInitialized.current = true;
@@ -953,7 +975,7 @@ export default function KolHomePage() {
               我的專案
             </h1>
             <p className={`text-xs ${isDark ? "text-stone-500" : "text-stone-500"}`}>
-              結帳狀態：未入帳 → 可請款 → 待匯款 → 已匯款
+              結帳狀態：未入帳 → 可請款 → 待匯款 → 已匯款；專案狀態「暫緩」另列
             </p>
           </div>
         </div>
@@ -1151,7 +1173,11 @@ export default function KolHomePage() {
                   {visibleProjects.map((p) => {
                     const expanded = expandedPid === p.專案ID;
                     const draft = drafts[p.專案ID] ?? emptyDraft(p, laborProfile);
-                    const needsAction = p.結帳狀態 === "可請款" && !projectHasCredential(p);
+                    const listStatus = kolListStatusLabel(p);
+                    const needsAction =
+                      !isKolProjectOnHold(p.專案狀態) &&
+                      p.結帳狀態 === "可請款" &&
+                      !projectHasCredential(p);
                     return (
                       <Fragment key={p.專案ID}>
                         <tr
@@ -1230,9 +1256,9 @@ export default function KolHomePage() {
                           </td>
                           <td className="whitespace-nowrap px-3 py-3.5">
                             <span
-                              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${settlementBadgeClass(p.結帳狀態)}`}
+                              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${settlementBadgeClass(listStatus)}`}
                             >
-                              {p.結帳狀態}
+                              {listStatus}
                             </span>
                           </td>
                           <td className="whitespace-nowrap px-3 py-3.5">
