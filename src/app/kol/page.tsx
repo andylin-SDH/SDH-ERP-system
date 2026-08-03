@@ -24,23 +24,24 @@ async function safeResJson(r: Response): Promise<Record<string, unknown>> {
 
 function settlementBadgeClass(status: string): string {
   if (status === "暫緩") return "bg-violet-100 text-violet-950 ring-1 ring-violet-300/60";
-  if (status === "未入帳") return "bg-stone-200 text-stone-800";
+  if (status === "執行中" || status === "未入帳") return "bg-stone-200 text-stone-800";
   if (status === "可請款") return "bg-sky-100 text-sky-950 ring-1 ring-sky-300/60";
   if (status === "待匯款") return "bg-amber-100 text-amber-950 ring-1 ring-amber-300/60";
   if (status === "已匯款") return "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300/50";
   return "bg-stone-100 text-stone-600";
 }
 
-/** 列表顯示用：專案狀態暫緩優先，否則顯示結帳狀態 */
+/** 列表顯示用：暫緩優先；未入帳對外顯示為「執行中」 */
 function kolListStatusLabel(p: KolPortalProject): string {
   if (isKolProjectOnHold(p.專案狀態)) return "暫緩";
+  if (p.結帳狀態 === "未入帳") return "執行中";
   return p.結帳狀態;
 }
 
-type SettlementTab = "未入帳" | "可請款" | "待匯款" | "已匯款" | "暫緩";
+type SettlementTab = "執行中" | "可請款" | "待匯款" | "已匯款" | "暫緩";
 
 const SETTLEMENT_TABS: { key: SettlementTab; label: string; activeClass: string }[] = [
-  { key: "未入帳", label: "未入帳", activeClass: "bg-stone-500 text-white shadow-sm" },
+  { key: "執行中", label: "執行中", activeClass: "bg-stone-500 text-white shadow-sm" },
   { key: "可請款", label: "可請款", activeClass: "bg-sky-500 text-white shadow-sm" },
   { key: "待匯款", label: "待匯款", activeClass: "bg-amber-500 text-slate-900 shadow-sm" },
   { key: "已匯款", label: "已匯款", activeClass: "bg-emerald-600 text-white shadow-sm" },
@@ -589,7 +590,7 @@ function KolFinanceSummaryStrip({
 
 const PAYOUT_FLOW_STEPS = [
   {
-    status: "未入帳",
+    status: "執行中",
     action: "等客戶付款入帳；財務填寫客戶入帳日後，才會開放請款。",
     bar: "border-l-stone-400",
     num: "bg-stone-100 text-stone-700",
@@ -771,7 +772,7 @@ export default function KolHomePage() {
     戶籍地址: "",
   });
   const [projects, setProjects] = useState<KolPortalProject[]>([]);
-  const [settlementTab, setSettlementTab] = useState<SettlementTab>("未入帳");
+  const [settlementTab, setSettlementTab] = useState<SettlementTab>("執行中");
   const [sessionActive, setSessionActive] = useState(false);
   const [expandedPid, setExpandedPid] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, EditDraft>>({});
@@ -848,7 +849,7 @@ export default function KolHomePage() {
 
   const projectsBySettlement = useMemo(() => {
     const buckets: Record<SettlementTab, KolPortalProject[]> = {
-      未入帳: [],
+      執行中: [],
       可請款: [],
       待匯款: [],
       已匯款: [],
@@ -859,11 +860,15 @@ export default function KolHomePage() {
         buckets.暫緩.push(p);
         continue;
       }
-      const key = (["未入帳", "可請款", "待匯款", "已匯款"] as const).includes(
-        p.結帳狀態 as "未入帳" | "可請款" | "待匯款" | "已匯款"
+      if (p.結帳狀態 === "未入帳") {
+        buckets.執行中.push(p);
+        continue;
+      }
+      const key = (["可請款", "待匯款", "已匯款"] as const).includes(
+        p.結帳狀態 as "可請款" | "待匯款" | "已匯款"
       )
-        ? (p.結帳狀態 as "未入帳" | "可請款" | "待匯款" | "已匯款")
-        : "未入帳";
+        ? (p.結帳狀態 as "可請款" | "待匯款" | "已匯款")
+        : "執行中";
       buckets[key].push(p);
     }
     return buckets;
@@ -893,7 +898,7 @@ export default function KolHomePage() {
 
   useEffect(() => {
     if (projects.length === 0 || settlementTabInitialized.current) return;
-    const preferred: SettlementTab[] = ["可請款", "待匯款", "未入帳", "已匯款", "暫緩"];
+    const preferred: SettlementTab[] = ["可請款", "待匯款", "執行中", "已匯款", "暫緩"];
     const firstWithItems = preferred.find((k) => projectsBySettlement[k].length > 0);
     if (firstWithItems) setSettlementTab(firstWithItems);
     settlementTabInitialized.current = true;
@@ -975,7 +980,7 @@ export default function KolHomePage() {
               我的專案
             </h1>
             <p className={`text-xs ${isDark ? "text-stone-500" : "text-stone-500"}`}>
-              結帳狀態：未入帳 → 可請款 → 待匯款 → 已匯款；專案狀態「暫緩」另列
+              結帳狀態：執行中 → 可請款 → 待匯款 → 已匯款；專案狀態「暫緩」另列
             </p>
           </div>
         </div>
