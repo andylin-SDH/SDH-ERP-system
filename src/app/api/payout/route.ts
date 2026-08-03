@@ -44,6 +44,9 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
+  if (auth.user.role !== "董事長") {
+    return NextResponse.json({ ok: false, error: "僅董事長可標記員工分潤已付款" }, { status: 403 });
+  }
   try {
     const body = (await request.json()) as {
       id?: string;

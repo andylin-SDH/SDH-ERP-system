@@ -4236,9 +4236,13 @@ export default function DashboardPage() {
     }
   }, [refreshDashboardData]);
 
-  /** 財務「員工分潤付款」：勾選已付／取消（寫入分潤匯款日期，並同步專案員工分潤日期） */
+  /** 財務「員工分潤付款」：勾選已付／取消（寫入分潤匯款日期，並同步專案員工分潤日期）；僅董事長 */
   const persistEmployeePayoutPaid = useCallback(
     async (row: PayoutRow, paid: boolean) => {
+      if (me?.role !== "董事長") {
+        setFinancePayoutEditError("僅董事長可標記員工分潤已付款");
+        return;
+      }
       const id = String(row.id ?? "").trim();
       if (!id) {
         setFinancePayoutEditError("此列缺少 id，無法更新");
@@ -4266,7 +4270,7 @@ export default function DashboardPage() {
         setFinancePayoutSavingIds((prev) => prev.filter((x) => x !== id));
       }
     },
-    [refreshDashboardData]
+    [me?.role, refreshDashboardData]
   );
 
   const loadKolRemittanceList = useCallback(async () => {
@@ -8698,6 +8702,7 @@ export default function DashboardPage() {
               )}
               <p className="mb-2 text-[11px] text-stone-500">
                 僅列出分潤表上<strong className="text-stone-600">廠商付款日已有值</strong>的列（由發票入帳自動同步）。若發票已入帳仍為空，請按「同步入帳至分潤」。
+                「已付款」勾選<strong className="text-stone-600">僅董事長</strong>可操作。
               </p>
               <ListAmountSummary
                 count={searchedFinanceEmployeePayout.length}
@@ -8745,15 +8750,22 @@ export default function DashboardPage() {
                         const isPaid = String(row.分潤匯款日期 ?? "").trim() !== "";
                         const pid = String(row.專案ID ?? "").trim();
                         const pname = String(row.專案名稱 ?? "").trim();
+                        const canTogglePaid = me?.role === "董事長";
                         return (
                           <tr key={id || `${pid}-${row.領取人}-${row.分潤類型}`} className="hover:bg-amber-50/40">
                             <td className="px-3 py-3 align-middle">
-                              <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-stone-700">
+                              <label
+                                className={`inline-flex items-center gap-2 text-xs text-stone-700 ${
+                                  canTogglePaid && id && !saving ? "cursor-pointer" : "cursor-not-allowed opacity-70"
+                                }`}
+                                title={canTogglePaid ? undefined : "僅董事長可勾選已付款"}
+                              >
                                 <input
                                   type="checkbox"
                                   checked={isPaid}
-                                  disabled={saving || !id}
+                                  disabled={saving || !id || !canTogglePaid}
                                   onChange={(e) => {
+                                    if (!canTogglePaid) return;
                                     void persistEmployeePayoutPaid(row, e.target.checked);
                                   }}
                                   className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400 disabled:opacity-50"
