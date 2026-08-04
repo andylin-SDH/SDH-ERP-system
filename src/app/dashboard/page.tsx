@@ -568,7 +568,7 @@ function InvoiceProjectMultiSelect({
   );
 
   return (
-    <div className="relative min-w-[12rem] max-w-[18rem]">
+    <div className="relative w-full min-w-0">
       {selectedOptions.length > 0 ? (
         <div className="mb-1 flex flex-wrap gap-1">
           {selectedOptions.map((opt) => (
@@ -604,10 +604,10 @@ function InvoiceProjectMultiSelect({
         onBlur={() => {
           window.setTimeout(() => setOpen(false), 120);
         }}
-        className="w-full rounded border border-stone-200 bg-white px-2 py-1.5 text-xs font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none disabled:opacity-60"
+        className="w-full rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none disabled:opacity-60"
       />
       {open && !disabled ? (
-        <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-72 overflow-auto rounded-lg border border-stone-200 bg-white py-1 text-xs shadow-xl">
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-auto rounded-lg border border-stone-200 bg-white py-1 text-sm shadow-xl">
           <button
             type="button"
             onMouseDown={(e) => {
@@ -616,12 +616,12 @@ function InvoiceProjectMultiSelect({
               setQuery("");
               setOpen(false);
             }}
-            className="block w-full px-3 py-2 text-left text-stone-500 hover:bg-amber-50 hover:text-stone-900"
+            className="block w-full px-3 py-2.5 text-left text-stone-500 hover:bg-amber-50 hover:text-stone-900"
           >
             清空／不綁定專案
           </button>
           {filteredOptions.length === 0 ? (
-            <div className="px-3 py-2 text-stone-400">
+            <div className="px-3 py-2.5 text-stone-400">
               {selectedIds.length > 0 && !query.trim() ? "已選專案皆在上方；可搜尋再加入" : "沒有符合的專案"}
             </div>
           ) : (
@@ -634,10 +634,10 @@ function InvoiceProjectMultiSelect({
                   onChange(joinInvoiceDraftProjectIds([...selectedIds, opt.id]));
                   setQuery("");
                 }}
-                className="block w-full px-3 py-2 text-left hover:bg-amber-50"
+                className="block w-full px-3 py-2.5 text-left hover:bg-amber-50"
               >
                 <span className="block truncate font-medium text-stone-900">{opt.name || opt.id}</span>
-                <span className="block truncate text-[10px] text-stone-500">{opt.id}</span>
+                <span className="block truncate text-[11px] text-stone-500">{opt.id}</span>
               </button>
             ))
           )}
@@ -10133,8 +10133,8 @@ export default function DashboardPage() {
 
       {/* 新增發票（可批次多列） */}
       {showInvoiceCreateModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/30 p-4 backdrop-blur-sm">
-          <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
+        <div className="fixed inset-0 z-[60] flex items-stretch justify-center bg-stone-900/35 p-2 backdrop-blur-sm sm:items-center sm:p-4">
+          <div className="flex h-[min(100dvh-1rem,96vh)] w-full max-w-[96rem] flex-col overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
             <header className="flex shrink-0 flex-wrap items-start justify-between gap-2 border-b border-stone-200/90 bg-stone-100/90 px-4 py-3 sm:px-6">
               <div className="min-w-0">
                 <h2 className="text-lg font-bold tracking-tight text-stone-900 sm:text-xl">新增發票</h2>
@@ -10153,7 +10153,7 @@ export default function DashboardPage() {
                 關閉
               </button>
             </header>
-            <div className="min-h-0 flex-1 overflow-auto px-3 py-3 sm:px-6">
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3 sm:px-6">
               {invoiceCreateError && (
                 <p className="mb-3 rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-800">{invoiceCreateError}</p>
               )}
@@ -10280,98 +10280,114 @@ export default function DashboardPage() {
                   例：前綴空白、起始 1、筆數 3、補零 8 → 00000001、00000002、00000003。例：前綴 SDH-、起始 100、不補零 → SDH-100、SDH-101…
                 </p>
               </div>
-              <div className="overflow-x-auto rounded-lg border border-stone-200/90">
-                <table className="min-w-[920px] w-full border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-stone-100 text-left">
-                      {INVOICE_DRAFT_KEYS.map((k) => (
-                        <th
-                          key={k}
-                          className="whitespace-nowrap border-b border-stone-200 px-2 py-2 font-semibold text-stone-600"
+              <div className="space-y-3">
+                {invoiceDraftRows.map((row, rowIdx) => {
+                  const draftInputCls =
+                    "w-full rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none";
+                  const patchDraft = (key: string, value: string) => {
+                    setInvoiceDraftRows((prev) => {
+                      const next = [...prev];
+                      next[rowIdx] = { ...next[rowIdx], [key]: value };
+                      return next;
+                    });
+                  };
+                  return (
+                    <section
+                      key={rowIdx}
+                      className="rounded-xl border border-stone-200 bg-stone-50/60 p-3 shadow-sm sm:p-4"
+                    >
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <p className="text-xs font-bold text-stone-700">第 {rowIdx + 1} 筆</p>
+                        <button
+                          type="button"
+                          disabled={invoiceDraftRows.length <= 1}
+                          onClick={() => setInvoiceDraftRows((prev) => prev.filter((_, j) => j !== rowIdx))}
+                          className="rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-30"
                         >
-                          {tableColumnLabels.invoices?.[k] ?? k}
-                        </th>
-                      ))}
-                      <th className="w-14 border-b border-stone-200 px-1 py-2 text-center font-semibold text-stone-500">　</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {invoiceDraftRows.map((row, rowIdx) => (
-                      <tr key={rowIdx} className="bg-white">
-                        {INVOICE_DRAFT_KEYS.map((k) => (
-                          <td key={k} className="border-b border-stone-100 p-1 align-top">
-                            {k === "專案ID" ? (
-                              <InvoiceProjectMultiSelect
-                                value={row[k] ?? ""}
-                                options={invoiceProjectOptions}
-                                onChange={(projectIds) => {
-                                  setInvoiceDraftRows((prev) => {
-                                    const next = [...prev];
-                                    next[rowIdx] = { ...next[rowIdx], [k]: projectIds };
-                                    return next;
-                                  });
-                                }}
-                              />
-                            ) : k === "發票金額含稅" ? (
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                value={row[k] ?? ""}
-                                onChange={(e) => {
-                                  const v = e.target.value;
-                                  setInvoiceDraftRows((prev) => {
-                                    const next = [...prev];
-                                    next[rowIdx] = { ...next[rowIdx], [k]: v };
-                                    return next;
-                                  });
-                                }}
-                                className={INVOICE_AMOUNT_INPUT_CLS}
-                              />
-                            ) : INVOICE_DATE_INPUT_KEYS.has(k) ? (
-                              <input
-                                type="date"
-                                value={normalizeDateForInput(row[k] ?? "")}
-                                onChange={(e) => {
-                                  const v = e.target.value;
-                                  setInvoiceDraftRows((prev) => {
-                                    const next = [...prev];
-                                    next[rowIdx] = { ...next[rowIdx], [k]: v };
-                                    return next;
-                                  });
-                                }}
-                                className="w-full min-w-[9.5rem] max-w-[11rem] rounded border border-stone-200 bg-stone-50 px-1.5 py-1.5 text-stone-900 focus:border-amber-400/70 focus:outline-none [color-scheme:light]"
-                              />
-                            ) : (
-                              <input
-                                type="text"
-                                value={row[k] ?? ""}
-                                onChange={(e) => {
-                                  const v = e.target.value;
-                                  setInvoiceDraftRows((prev) => {
-                                    const next = [...prev];
-                                    next[rowIdx] = { ...next[rowIdx], [k]: v };
-                                    return next;
-                                  });
-                                }}
-                                className="w-full min-w-[5rem] rounded border border-stone-200 bg-stone-50 px-1.5 py-1.5 text-stone-900 focus:border-amber-400/70 focus:outline-none"
-                              />
-                            )}
-                          </td>
-                        ))}
-                        <td className="border-b border-stone-100 p-1 text-center align-top">
-                          <button
-                            type="button"
-                            disabled={invoiceDraftRows.length <= 1}
-                            onClick={() => setInvoiceDraftRows((prev) => prev.filter((_, j) => j !== rowIdx))}
-                            className="text-[11px] font-medium text-stone-400 hover:text-red-600 disabled:opacity-30"
-                          >
-                            刪列
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          刪除
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div className="sm:col-span-2 xl:col-span-4">
+                          <label className="mb-1 block text-[11px] font-semibold text-stone-500">
+                            {tableColumnLabels.invoices?.專案ID ?? "對應專案"}
+                          </label>
+                          <InvoiceProjectMultiSelect
+                            value={row.專案ID ?? ""}
+                            options={invoiceProjectOptions}
+                            onChange={(projectIds) => patchDraft("專案ID", projectIds)}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-semibold text-stone-500">發票號碼</label>
+                          <input
+                            type="text"
+                            value={row.發票號碼 ?? ""}
+                            onChange={(e) => patchDraft("發票號碼", e.target.value)}
+                            className={draftInputCls}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-semibold text-stone-500">發票日期</label>
+                          <input
+                            type="date"
+                            value={normalizeDateForInput(row.發票日期 ?? "")}
+                            onChange={(e) => patchDraft("發票日期", e.target.value)}
+                            className={`${draftInputCls} [color-scheme:light]`}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-semibold text-stone-500">收款對象</label>
+                          <input
+                            type="text"
+                            value={row.收款對象 ?? ""}
+                            onChange={(e) => patchDraft("收款對象", e.target.value)}
+                            className={draftInputCls}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-semibold text-stone-500">發票金額含稅</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={row.發票金額含稅 ?? ""}
+                            onChange={(e) => patchDraft("發票金額含稅", e.target.value)}
+                            className={`${INVOICE_AMOUNT_INPUT_CLS} max-w-none rounded-lg px-2.5 py-2 text-sm`}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-semibold text-stone-500">廠商預計付款日</label>
+                          <input
+                            type="date"
+                            value={normalizeDateForInput(row.廠商預計付款日 ?? "")}
+                            onChange={(e) => patchDraft("廠商預計付款日", e.target.value)}
+                            className={`${draftInputCls} [color-scheme:light]`}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-semibold text-stone-500">
+                            {tableColumnLabels.invoices?.廠商付款日期 ?? "廠商實際付款日（入帳）"}
+                          </label>
+                          <input
+                            type="date"
+                            value={normalizeDateForInput(row.廠商付款日期 ?? "")}
+                            onChange={(e) => patchDraft("廠商付款日期", e.target.value)}
+                            className={`${draftInputCls} [color-scheme:light]`}
+                          />
+                        </div>
+                        <div className="sm:col-span-2 xl:col-span-2">
+                          <label className="mb-1 block text-[11px] font-semibold text-stone-500">備註</label>
+                          <input
+                            type="text"
+                            value={row.備註 ?? ""}
+                            onChange={(e) => patchDraft("備註", e.target.value)}
+                            className={draftInputCls}
+                          />
+                        </div>
+                      </div>
+                    </section>
+                  );
+                })}
               </div>
               <button
                 type="button"
