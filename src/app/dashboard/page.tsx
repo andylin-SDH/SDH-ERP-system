@@ -791,15 +791,26 @@ function ClickableProjectName({
   );
 }
 
-function TaskProjectInfoButton({ project }: { project: MasterRow | undefined }) {
+function TaskProjectInfoButton({
+  project,
+  showAmounts = false,
+}: {
+  project: MasterRow | undefined;
+  /** 金額僅專案相關人員／全權角色可見 */
+  showAmounts?: boolean;
+}) {
   if (!project) return null;
   const fields = [
-    ["專案總金額未稅", formatAmount(project.專案總金額未稅)],
+    ...(showAmounts
+      ? ([
+          ["專案總金額未稅", formatAmount(project.專案總金額未稅)],
+          ["專案成本", formatAmount(project.專案成本)],
+          ["專案營收", formatAmount(project.專案營收)],
+        ] as const)
+      : ([] as const)),
     ["專案狀態", project.專案狀態 || "—"],
     ["廠商名稱", project.廠商名稱 || "—"],
     ["預計付款日", formatPartnerDateDisplay(project.廠商預計付款日)],
-    ["專案成本", formatAmount(project.專案成本)],
-    ["專案營收", formatAmount(project.專案營收)],
   ] as const;
 
   return (
@@ -1057,6 +1068,14 @@ const OVERVIEW_SCOPE_STORAGE_KEY = "sdh-dashboard-overview-scope";
 
 /** 大總表上與「這個人與專案有關」可能對得上的欄位（姓名／Email 需與 Users 一致） */
 const MASTER_RELATED_FIELD_KEYS = ["專案BDPM", "專案引薦人", "專案開發人", "專案管理員", "執行管理員", "KOL名稱", "經紀人", "主管", "KOL開發者"] as const;
+
+/** 列表不顯示；僅專案詳情內、且相關人員／全權角色可見 */
+const MASTER_LIST_HIDDEN_AMOUNT_KEYS = new Set([
+  "專案總金額未稅",
+  "專案營收",
+  "專案成本",
+  "KOL費用未稅",
+]);
 
 function fieldMatchesUser(val: string | null | undefined, userName: string, userEmail: string): boolean {
   const v = String(val ?? "").trim();
@@ -2816,7 +2835,7 @@ export default function DashboardPage() {
    * 單一專案類型分頁時通常只會出現一組角色欄；「全部」且兩種專案並存時仍顯示兩組。
    */
   const { masterColsForDisplay, masterFilteredListHasBothPayoutModes } = useMemo(() => {
-    const cols = masterVisibleCols;
+    const cols = masterVisibleCols.filter((k) => !MASTER_LIST_HIDDEN_AMOUNT_KEYS.has(k));
     if (masterTabFilteredList.length === 0) {
       return { masterColsForDisplay: cols, masterFilteredListHasBothPayoutModes: false };
     }
@@ -2838,6 +2857,26 @@ export default function DashboardPage() {
       masterFilteredListHasBothPayoutModes: hasModeA && hasModeB,
     };
   }, [masterVisibleCols, masterTabFilteredList]);
+
+  /** 專案詳情／任務提示金額：董事長／管理者，或列上相關人員／任務負責人 */
+  const canViewMasterAmountsForRow = useCallback(
+    (row: MasterRow | undefined | null) => {
+      if (!me || !row) return false;
+      if (isFullAccessRole(me.role)) return true;
+      return isMasterRowRelatedToUser(
+        row,
+        (me.name ?? "").trim(),
+        (me.email ?? "").trim(),
+        taskVisibleProjectIdsForMasterAugment ?? new Set<string>(),
+        partnerByKolName
+      );
+    },
+    [me, taskVisibleProjectIdsForMasterAugment, partnerByKolName]
+  );
+  const canViewSelectedMasterAmounts = useMemo(
+    () => canViewMasterAmountsForRow(selectedMaster),
+    [canViewMasterAmountsForRow, selectedMaster]
+  );
 
   const searchedPartners = useMemo(
     () =>
@@ -5635,9 +5674,20 @@ export default function DashboardPage() {
                                 );
                               }
                               if (k === "專案名稱") {
+                                const projectName = String(val ?? "").trim() || "—";
+                                const kolName = String(row.KOL名稱 ?? "").trim();
                                 return (
-                                  <td key={k} className="sticky left-[5rem] z-20 w-48 min-w-[12rem] max-w-[12rem] truncate bg-white/90 px-4 py-3.5 text-sm font-medium text-stone-900" title={String(val ?? "")}>
-                                    {String(val ?? "—")}
+                                  <td
+                                    key={k}
+                                    className="sticky left-[5rem] z-20 w-48 min-w-[12rem] max-w-[12rem] bg-white/90 px-4 py-3.5"
+                                    title={kolName ? `${projectName} · ${kolName}` : projectName}
+                                  >
+                                    <p className="truncate text-sm font-medium text-stone-900">{projectName}</p>
+                                    {kolName ? (
+                                      <p className="mt-0.5 truncate text-[11px] font-semibold tracking-wide text-amber-900/85">
+                                        {kolName}
+                                      </p>
+                                    ) : null}
                                   </td>
                                 );
                               }
@@ -7930,7 +7980,10 @@ export default function DashboardPage() {
                       <p className="truncate text-sm font-medium text-stone-900">{t.任務 ?? "—"}</p>
                       <p className="mt-0.5 flex items-center gap-1.5 text-xs text-stone-500" onClick={(e) => e.stopPropagation()}>
                         <span className="min-w-0 truncate">{t.專案名稱 ?? "—"}</span>
-                        <TaskProjectInfoButton project={masterByProjectId.get(String(t.專案ID ?? "").trim())} />
+                        <TaskProjectInfoButton
+                          project={masterByProjectId.get(String(t.專案ID ?? "").trim())}
+                          showAmounts={canViewMasterAmountsForRow(masterByProjectId.get(String(t.專案ID ?? "").trim()))}
+                        />
                       </p>
                     </div>
                     <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${t.任務完成 ? "bg-amber-100 text-amber-800" : "bg-stone-200 text-stone-500"}`}>{t.任務完成 ? "已完成" : "進行中"}</span>
@@ -8232,7 +8285,12 @@ export default function DashboardPage() {
                             <td key={k} className="max-w-[220px] px-4 py-3.5 text-sm font-medium text-stone-600" title={str}>
                               <span className="flex min-w-0 items-center gap-1.5">
                                 <span className="min-w-0 truncate">{str}</span>
-                                <TaskProjectInfoButton project={masterByProjectId.get(String(t.專案ID ?? "").trim())} />
+                                <TaskProjectInfoButton
+                                  project={masterByProjectId.get(String(t.專案ID ?? "").trim())}
+                                  showAmounts={canViewMasterAmountsForRow(
+                                    masterByProjectId.get(String(t.專案ID ?? "").trim())
+                                  )}
+                                />
                               </span>
                             </td>
                           );
@@ -11790,6 +11848,13 @@ export default function DashboardPage() {
 
               <section>
                 <h3 className="mb-3 text-base font-bold text-amber-800">金額與成本</h3>
+                {!canViewSelectedMasterAmounts ? (
+                  <p className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-3 text-sm text-stone-600">
+                    金額僅<strong className="text-stone-800">本專案相關人員</strong>
+                    （或董事長／管理者）可查看；列表亦不對外顯示。
+                  </p>
+                ) : (
+                  <>
                 {isEditingMaster && !canEditMasterNumbers && (
                   <p className="mb-3 rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-600">
                     金額欄位僅董事長／管理者（或於「專案權限設定」勾選「編輯金額／數字」的角色）可修改；其餘欄位仍可儲存。
@@ -11871,7 +11936,10 @@ export default function DashboardPage() {
                       <Field label="SDH開發件分潤%數（由 KOL 帶出）" value={selectedMasterPartner?.["SDH開發分件分潤"]} />
                     </>
                   ) : null}
-
+                </div>
+                  </>
+                )}
+                <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
                   {isEditingMaster ? (
                     <SelectField
                       label="專案費用類型"
