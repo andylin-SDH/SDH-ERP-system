@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   createPaymentRecordsBatch,
+  deletePaymentRecordsByIds,
   getPaymentRecords,
   updatePaymentRecordById,
   type PaymentRecordInput,
@@ -59,6 +60,31 @@ export async function PATCH(request: NextRequest) {
     console.error("PATCH /api/finance-payments error:", error);
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "更新付款記錄失敗" },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * DELETE：批量刪除付款記錄
+ * Body: { ids: string[] }
+ * 僅刪除付款記錄列，不連動修改其他表。
+ */
+export async function DELETE(request: NextRequest) {
+  const auth = await requireEmployee(request);
+  if (auth instanceof NextResponse) return auth;
+  try {
+    const body = (await request.json()) as { ids?: string[] } | null;
+    const ids = Array.isArray(body?.ids) ? body.ids : [];
+    if (ids.length === 0) {
+      return NextResponse.json({ ok: false, error: "請提供 ids 陣列" }, { status: 400 });
+    }
+    const count = await deletePaymentRecordsByIds(ids);
+    return NextResponse.json({ ok: true, count });
+  } catch (error) {
+    console.error("DELETE /api/finance-payments error:", error);
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "刪除付款記錄失敗" },
       { status: 500 }
     );
   }

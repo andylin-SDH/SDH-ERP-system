@@ -1692,6 +1692,7 @@ export default function DashboardPage() {
   const [paymentEditSavingId, setPaymentEditSavingId] = useState<string | null>(null);
   const [paymentEditError, setPaymentEditError] = useState<string | null>(null);
   const [paymentDirtyIds, setPaymentDirtyIds] = useState<string[]>([]);
+  const [deletingPaymentIds, setDeletingPaymentIds] = useState<string[]>([]);
   const paymentRecordsRef = useRef<PaymentRecordRow[]>([]);
   const paymentSaveInflightRef = useRef<Set<string>>(new Set());
   const paymentSavePendingRef = useRef<Set<string>>(new Set());
@@ -2746,6 +2747,7 @@ export default function DashboardPage() {
   }, [invoices, selectedInvoiceIdSet]);
   const deletingInvoiceIdSet = useMemo(() => new Set(deletingInvoiceIds), [deletingInvoiceIds]);
   const invoiceDirtyIdSet = useMemo(() => new Set(invoiceDirtyIds), [invoiceDirtyIds]);
+  const deletingPaymentIdSet = useMemo(() => new Set(deletingPaymentIds), [deletingPaymentIds]);
   const paymentDirtyIdSet = useMemo(() => new Set(paymentDirtyIds), [paymentDirtyIds]);
 
   const financeByProjectId = useMemo(() => {
@@ -4384,6 +4386,38 @@ export default function DashboardPage() {
       }
     },
     [kolRemitDrafts, loadKolRemittanceList, refreshDashboardData]
+  );
+
+  const deletePaymentRecordsByIdList = useCallback(
+    async (ids: string[]) => {
+      const cleanIds = [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
+      if (cleanIds.length === 0) return;
+      const label = cleanIds.length === 1 ? "這筆付款記錄" : `已選取的 ${cleanIds.length} 筆付款記錄`;
+      if (!window.confirm(`確定要刪除${label}？此操作無法復原。`)) return;
+      setPaymentEditError(null);
+      setDeletingPaymentIds((prev) => [...new Set([...prev, ...cleanIds])]);
+      try {
+        const res = await fetch("/api/finance-payments", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: cleanIds }),
+        });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string; count?: number };
+        if (!res.ok || data.ok === false) {
+          setPaymentEditError(String(data.error ?? "刪除失敗"));
+          return;
+        }
+        const deletedSet = new Set(cleanIds);
+        setPaymentRecords((prev) => prev.filter((r) => !r.id || !deletedSet.has(r.id)));
+        setPaymentDirtyIds((prev) => prev.filter((id) => !deletedSet.has(id)));
+      } catch (e) {
+        setPaymentEditError(e instanceof Error ? e.message : "刪除失敗");
+      } finally {
+        const done = new Set(cleanIds);
+        setDeletingPaymentIds((prev) => prev.filter((id) => !done.has(id)));
+      }
+    },
+    []
   );
 
   useEffect(() => {
@@ -10021,18 +10055,28 @@ export default function DashboardPage() {
                               })}
                               <td className="whitespace-nowrap px-3 py-2 text-right align-middle">
                                 {rowId ? (
-                                  <button
-                                    type="button"
-                                    disabled={saving || !dirty}
-                                    onClick={() => void persistPaymentRecordById(rowId)}
-                                    className={`rounded-lg px-3 py-1 text-xs font-bold transition ${
-                                      dirty
-                                        ? "border border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-400"
-                                        : "border border-stone-200 bg-stone-50 text-stone-400"
-                                    } disabled:opacity-60`}
-                                  >
-                                    {saving ? "存檔中…" : dirty ? "存檔" : "已儲存"}
-                                  </button>
+                                  <div className="flex flex-wrap items-center justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={saving || !dirty || deletingPaymentIdSet.has(rowId)}
+                                      onClick={() => void persistPaymentRecordById(rowId)}
+                                      className={`rounded-lg px-3 py-1 text-xs font-bold transition ${
+                                        dirty
+                                          ? "border border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-400"
+                                          : "border border-stone-200 bg-stone-50 text-stone-400"
+                                      } disabled:opacity-60`}
+                                    >
+                                      {saving ? "存檔中…" : dirty ? "存檔" : "已儲存"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={saving || deletingPaymentIdSet.has(rowId)}
+                                      onClick={() => void deletePaymentRecordsByIdList([rowId])}
+                                      className="rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50"
+                                    >
+                                      {deletingPaymentIdSet.has(rowId) ? "刪除中…" : "刪除"}
+                                    </button>
+                                  </div>
                                 ) : null}
                               </td>
                             </tr>

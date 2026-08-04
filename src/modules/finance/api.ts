@@ -12,5 +12,6 @@ export {
   updateInvoiceById,
   createPaymentRecordsBatch,
   updatePaymentRecordById,
+  deletePaymentRecordsByIds,
 } from "@/lib/db/finance";
 export type { InvoiceInsertInput, PaymentRecordInput } from "@/lib/db/finance";

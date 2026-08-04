@@ -563,6 +563,15 @@ export async function updatePaymentRecordById(id: string, row: PaymentRecordInpu
   return updated;
 }
 
+export async function deletePaymentRecordsByIds(ids: string[]): Promise<number> {
+  const cleanIds = [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  if (cleanIds.length === 0) throw new Error("請至少選擇一筆付款記錄");
+
+  const { error, count } = await getSupabase().from("付款記錄").delete({ count: "exact" }).in("id", cleanIds);
+  if (error) throw error;
+  return count ?? cleanIds.length;
+}
+
 export async function getFinance(): Promise<FinanceRow[]> {
   const { data, error } = await getSupabase().from("財務").select("*").order("created_at", { ascending: false });
   if (error) {

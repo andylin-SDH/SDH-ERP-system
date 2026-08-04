@@ -13,4 +13,5 @@ export {
   updateInvoiceById,
   createPaymentRecordsBatch,
   updatePaymentRecordById,
+  deletePaymentRecordsByIds,
 } from "./api";
