@@ -1077,6 +1077,16 @@ const MASTER_LIST_HIDDEN_AMOUNT_KEYS = new Set([
   "KOL費用未稅",
 ]);
 
+/** 列表精簡隱藏（詳情／新增編輯仍可填）；KOL 名稱改顯示於「專案名稱」下方 */
+const MASTER_LIST_HIDDEN_KEYS = new Set([
+  ...MASTER_LIST_HIDDEN_AMOUNT_KEYS,
+  "KOL名稱",
+  "專案費用類型",
+  "廠商名稱",
+  "廠商預計付款日",
+  "專案引薦人",
+]);
+
 function fieldMatchesUser(val: string | null | undefined, userName: string, userEmail: string): boolean {
   const v = String(val ?? "").trim();
   if (!v) return false;
@@ -2837,7 +2847,7 @@ export default function DashboardPage() {
    * 單一專案類型分頁時通常只會出現一組角色欄；「全部」且兩種專案並存時仍顯示兩組。
    */
   const { masterColsForDisplay, masterFilteredListHasBothPayoutModes } = useMemo(() => {
-    const cols = masterVisibleCols.filter((k) => !MASTER_LIST_HIDDEN_AMOUNT_KEYS.has(k));
+    const cols = masterVisibleCols.filter((k) => !MASTER_LIST_HIDDEN_KEYS.has(k));
     if (masterTabFilteredList.length === 0) {
       return { masterColsForDisplay: cols, masterFilteredListHasBothPayoutModes: false };
     }
