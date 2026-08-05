@@ -4,6 +4,7 @@
 
 import { getMasterList } from "@/lib/db/master";
 import { getAllKolInvoices, setKolRemittance } from "@/lib/db/kol-invoices";
+import { getPartnersApprovedWithError } from "@/lib/db/partners";
 import { createPaymentRecordsBatch } from "@/lib/db/finance";
 import { getFinance } from "@/modules/finance";
 import {
@@ -18,6 +19,8 @@ export interface KolRemittanceListItem {
   專案ID: string;
   專案名稱: string;
   KOL名稱: string;
+  /** 對應合作夥伴 PartnerID（供開啟老師視角預覽） */
+  PartnerID: string;
   KOL費用未稅: string;
   廠商付款日期: string;
   請款方式: string;
@@ -47,16 +50,24 @@ function formatMoney(raw: unknown): string {
 }
 
 export async function getKolRemittanceList(): Promise<KolRemittanceListItem[]> {
-  const [masters, financeList, kolInvoices] = await Promise.all([
+  const [masters, financeList, kolInvoices, { partners }] = await Promise.all([
     getMasterList(),
     getFinance(),
     getAllKolInvoices(),
+    getPartnersApprovedWithError(),
   ]);
 
   const financeByPid = new Map<string, (typeof financeList)[number]>();
   for (const f of financeList) {
     const pid = String(f.專案ID ?? "").trim();
     if (pid) financeByPid.set(pid, f);
+  }
+
+  const partnerIdByName = new Map<string, string>();
+  for (const p of partners) {
+    const name = String(p.合作夥伴名稱 ?? "").trim();
+    const id = String(p.PartnerID ?? "").trim();
+    if (name && id && !partnerIdByName.has(name)) partnerIdByName.set(name, id);
   }
 
   const kolInvByPid = new Map(kolInvoices.map((k) => [k.專案ID, k]));
@@ -76,6 +87,7 @@ export async function getKolRemittanceList(): Promise<KolRemittanceListItem[]> {
       專案ID: pid,
       專案名稱: String(row.專案名稱 ?? "").trim() || "—",
       KOL名稱: kolName,
+      PartnerID: partnerIdByName.get(kolName) ?? "",
       KOL費用未稅: formatMoney(row.KOL費用未稅),
       廠商付款日期: String(f?.廠商付款日期 ?? "").trim().slice(0, 10) || "",
       請款方式: kolRequestMode(kolInv),

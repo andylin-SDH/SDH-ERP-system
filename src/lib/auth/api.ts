@@ -79,3 +79,26 @@ export async function requireKol(request: NextRequest | Request): Promise<{ user
   }
   return result;
 }
+
+/** 可預覽 KOL 老師入口的員工角色（董事長／管理者／會計） */
+export const KOL_PORTAL_PREVIEW_ROLES = ["董事長", "管理者", "會計"] as const;
+
+export function canPreviewKolPortal(role: string | undefined | null): boolean {
+  const r = String(role ?? "").trim();
+  return (KOL_PORTAL_PREVIEW_ROLES as readonly string[]).includes(r);
+}
+
+/** 員工且具備 KOL 老師視角預覽權限 */
+export async function requireKolPortalPreview(
+  request: NextRequest | Request
+): Promise<{ user: User } | NextResponse> {
+  const result = await requireEmployee(request);
+  if (result instanceof NextResponse) return result;
+  if (!canPreviewKolPortal(result.user.role)) {
+    return NextResponse.json(
+      { ok: false, error: "僅董事長、管理者或會計可預覽 KOL 老師視角" },
+      { status: 403 }
+    );
+  }
+  return result;
+}

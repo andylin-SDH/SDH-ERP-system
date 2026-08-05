@@ -1,7 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseKolAmount } from "@/lib/kol/format";
 import { isKolProjectOnHold } from "@/lib/kol/project-lifecycle";
 import { SessionExpiryMonitor } from "@/components/SessionExpiryMonitor";
@@ -760,8 +761,11 @@ function KolPayoutFlowGuide({ isDark }: { isDark: boolean }) {
   );
 }
 
-export default function KolHomePage() {
+function KolHomeInner() {
   const { isDark } = useKolTheme();
+  const searchParams = useSearchParams();
+  const previewPartnerId = String(searchParams.get("previewPartner") ?? "").trim();
+  const isPreview = Boolean(previewPartnerId);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [partnerName, setPartnerName] = useState<string>("");
@@ -787,7 +791,10 @@ export default function KolHomePage() {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 45000);
     try {
-      const res = await fetch("/api/kol/overview", {
+      const url = isPreview
+        ? `/api/kol/preview?partnerId=${encodeURIComponent(previewPartnerId)}`
+        : "/api/kol/overview";
+      const res = await fetch(url, {
         credentials: "include",
         cache: "no-store",
         signal: controller.signal,
@@ -806,7 +813,12 @@ export default function KolHomePage() {
         return;
       }
       if (res.status === 403) {
-        setError(data.error ?? "此帳號不是 KOL 專用入口，請聯絡管理員。");
+        setError(
+          data.error ??
+            (isPreview
+              ? "僅董事長、管理者或會計可預覽 KOL 老師視角。"
+              : "此帳號不是 KOL 專用入口，請聯絡管理員。")
+        );
         return;
       }
       if (!res.ok || !data.ok) {
@@ -817,14 +829,16 @@ export default function KolHomePage() {
       setPartnerId(data.partnerId ?? "");
       const profile = data.laborProfile ?? { 身分證字號: "", 聯絡電話: "", 戶籍地址: "" };
       setLaborProfile(profile);
-      const list = Array.isArray(data.projects) ? data.projects : [];
+      const list = (Array.isArray(data.projects) ? data.projects : []).map((p) =>
+        isPreview ? { ...p, canEditKolInvoice: false } : p
+      );
       setProjects(list);
       const nextDrafts: Record<string, EditDraft> = {};
       for (const p of list) {
         nextDrafts[p.專案ID] = emptyDraft(p, profile);
       }
       setDrafts(nextDrafts);
-      setSessionActive(true);
+      setSessionActive(!isPreview);
     } catch (e) {
       if (seq !== loadSeqRef.current) return;
       if (e instanceof DOMException && e.name === "AbortError") {
@@ -836,7 +850,7 @@ export default function KolHomePage() {
       window.clearTimeout(timeoutId);
       if (seq === loadSeqRef.current) setLoading(false);
     }
-  }, []);
+  }, [isPreview, previewPartnerId]);
 
   const handleSessionEnd = useCallback(() => {
     setSessionActive(false);
@@ -905,6 +919,10 @@ export default function KolHomePage() {
   }, [projects.length, projectsBySettlement]);
 
   async function saveKolInvoice(p: KolPortalProject) {
+    if (isPreview) {
+      setSaveNotice("預覽模式為唯讀，無法代老師存檔。");
+      return;
+    }
     const draft = drafts[p.專案ID] ?? emptyDraft(p);
     setSavingPid(p.專案ID);
     setSaveNotice(null);
@@ -961,7 +979,23 @@ export default function KolHomePage() {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-4 py-8 sm:px-6">
-      <SessionExpiryMonitor active={sessionActive && !loading && !error} onSessionEnd={handleSessionEnd} />
+      <SessionExpiryMonitor active={sessionActive && !loading && !error && !isPreview} onSessionEnd={handleSessionEnd} />
+      {isPreview ? (
+        <div
+          className={`mb-4 rounded-xl px-4 py-3 text-sm ${
+            isDark
+              ? "border border-sky-400/30 bg-sky-500/10 text-sky-100"
+              : "border border-sky-200 bg-sky-50 text-sky-950"
+          }`}
+        >
+          <p className="font-semibold">
+            預覽：{partnerName || "KOL"} 的老師入口（唯讀）
+          </p>
+          <p className={`mt-0.5 text-xs ${isDark ? "text-sky-200/80" : "text-sky-900/70"}`}>
+            與老師看到的分頁與狀態相同；不可代填請款。請從財務返回後再操作匯款。
+          </p>
+        </div>
+      ) : null}
       <header
         className={`mb-8 flex flex-col gap-4 border-b pb-6 sm:flex-row sm:items-center sm:justify-between ${
           isDark ? "border-white/10" : "border-amber-200/80"
@@ -977,7 +1011,7 @@ export default function KolHomePage() {
           />
           <div>
             <h1 className={`text-lg font-bold tracking-tight ${isDark ? "text-stone-50" : "text-stone-900"}`}>
-              我的專案
+              {isPreview ? `${partnerName || "KOL"}｜老師視角` : "我的專案"}
             </h1>
             <p className={`text-xs ${isDark ? "text-stone-500" : "text-stone-500"}`}>
               結帳狀態：執行中 → 可請款 → 待匯款 → 已匯款；專案狀態「暫緩」另列
@@ -997,17 +1031,30 @@ export default function KolHomePage() {
           >
             重新整理
           </button>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className={
-              isDark
-                ? "rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-stone-300 transition hover:bg-white/10"
-                : "rounded-xl border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-600 shadow-sm hover:bg-stone-50"
-            }
-          >
-            登出
-          </button>
+          {isPreview ? (
+            <a
+              href="/dashboard?section=finance&financeSubTab=kolPortalView"
+              className={
+                isDark
+                  ? "rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-stone-300 transition hover:bg-white/10"
+                  : "rounded-xl border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-600 shadow-sm hover:bg-stone-50"
+              }
+            >
+              返回財務
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={handleLogout}
+              className={
+                isDark
+                  ? "rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-stone-300 transition hover:bg-white/10"
+                  : "rounded-xl border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-600 shadow-sm hover:bg-stone-50"
+              }
+            >
+              登出
+            </button>
+          )}
         </div>
       </header>
 
@@ -1367,5 +1414,19 @@ export default function KolHomePage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function KolHomePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto flex min-h-screen max-w-6xl items-center justify-center px-4">
+          <p className="text-sm text-stone-500">載入中…</p>
+        </div>
+      }
+    >
+      <KolHomeInner />
+    </Suspense>
   );
 }

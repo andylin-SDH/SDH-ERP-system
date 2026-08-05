@@ -1776,10 +1776,20 @@ export default function DashboardPage() {
   });
   /** 財務分頁內：依專案列 vs 發票清冊 vs 付款記錄 */
   const [financeSubTab, setFinanceSubTab] = useState<
-    "byProject" | "employeePayout" | "kolRemittance" | "invoices" | "payments" | "collectionSubmissions"
-  >(
-    "employeePayout"
-  );
+    | "byProject"
+    | "employeePayout"
+    | "kolRemittance"
+    | "kolPortalView"
+    | "invoices"
+    | "payments"
+    | "collectionSubmissions"
+  >("employeePayout");
+  const [kolPortalPreviewOptions, setKolPortalPreviewOptions] = useState<
+    Array<{ partnerId: string; partnerName: string; projectCount: number }>
+  >([]);
+  const [kolPortalPreviewLoading, setKolPortalPreviewLoading] = useState(false);
+  const [kolPortalPreviewError, setKolPortalPreviewError] = useState<string | null>(null);
+  const [kolPortalPreviewSearch, setKolPortalPreviewSearch] = useState("");
   const [financeEmployeePayoutTab, setFinanceEmployeePayoutTab] = useState<"pending" | "paid">("pending");
   const [financeKolRemittanceTab, setFinanceKolRemittanceTab] = useState<"pending" | "remitted">("pending");
   const [kolRemittanceItems, setKolRemittanceItems] = useState<
@@ -1787,6 +1797,7 @@ export default function DashboardPage() {
       專案ID: string;
       專案名稱: string;
       KOL名稱: string;
+      PartnerID: string;
       KOL費用未稅: string;
       廠商付款日期: string;
       請款方式: string;
@@ -1960,6 +1971,8 @@ export default function DashboardPage() {
 
   /** 董事長／管理者可為使用者設定可見範圍、調整系統設定 */
   const canEditVisibility = me && ["董事長", "管理者"].includes(me.role);
+  /** 董事長／管理者／會計：可預覽 KOL 老師入口 */
+  const canPreviewKolPortalView = Boolean(me?.role && ["董事長", "管理者", "會計"].includes(me.role));
   /** 大總表金額／營收／成本（分潤成數仍僅 Config／此權限）；其餘欄位登入即可編輯 */
   const canEditMasterNumbers = useMemo(
     () => Boolean(me?.role && canEditMasterNumericFields(me.role, rolePermissions)),
@@ -4031,7 +4044,7 @@ export default function DashboardPage() {
     [masterList, refreshDashboardData]
   );
 
-  /** 郵件深連結：?project=專案ID&task=任務ID → 開啟專案詳情與任務 */
+  /** 郵件深連結：?project=專案ID&task=任務ID → 開啟專案詳情與任務；?section=finance&financeSubTab=… */
   useEffect(() => {
     if (typeof window === "undefined") return;
     const sp = new URLSearchParams(window.location.search);
@@ -4039,6 +4052,22 @@ export default function DashboardPage() {
     const task = sp.get("task")?.trim();
     if (project || task) {
       pendingDeepLinkRef.current = { project: project || undefined, task: task || undefined };
+    }
+    const section = sp.get("section")?.trim();
+    const finSub = sp.get("financeSubTab")?.trim();
+    if (section === "finance") {
+      setActiveSection("finance");
+      if (
+        finSub === "invoices" ||
+        finSub === "byProject" ||
+        finSub === "payments" ||
+        finSub === "collectionSubmissions" ||
+        finSub === "kolRemittance" ||
+        finSub === "kolPortalView" ||
+        finSub === "employeePayout"
+      ) {
+        setFinanceSubTab(finSub);
+      }
     }
   }, []);
 
@@ -4435,6 +4464,59 @@ export default function DashboardPage() {
     void loadKolRemittanceList();
   }, [activeSection, loadKolRemittanceList]);
 
+  const loadKolPortalPreviewOptions = useCallback(async () => {
+    if (!canPreviewKolPortalView) return;
+    setKolPortalPreviewLoading(true);
+    setKolPortalPreviewError(null);
+    try {
+      const res = await fetch("/api/kol/preview", { cache: "no-store" });
+      const data = (await safeResJson(res)) as {
+        ok?: boolean;
+        error?: string;
+        options?: Array<{ partnerId: string; partnerName: string; projectCount: number }>;
+      };
+      if (!res.ok || !data.ok) {
+        setKolPortalPreviewError(data.error ?? "讀取 KOL 清單失敗");
+        return;
+      }
+      setKolPortalPreviewOptions(Array.isArray(data.options) ? data.options : []);
+    } catch (e) {
+      setKolPortalPreviewError(e instanceof Error ? e.message : "讀取失敗");
+    } finally {
+      setKolPortalPreviewLoading(false);
+    }
+  }, [canPreviewKolPortalView]);
+
+  useEffect(() => {
+    if (financeSubTab === "kolPortalView" && !canPreviewKolPortalView) {
+      setFinanceSubTab("kolRemittance");
+    }
+  }, [financeSubTab, canPreviewKolPortalView]);
+
+  useEffect(() => {
+    if (activeSection !== "finance" || financeSubTab !== "kolPortalView") return;
+    void loadKolPortalPreviewOptions();
+  }, [activeSection, financeSubTab, loadKolPortalPreviewOptions]);
+
+  const openKolPortalPreview = useCallback((partnerId: string) => {
+    const id = String(partnerId ?? "").trim();
+    if (!id) {
+      window.alert("此 KOL 尚未對應合作夥伴 PartnerID，無法開啟老師視角。");
+      return;
+    }
+    window.open(`/kol?previewPartner=${encodeURIComponent(id)}`, "_blank", "noopener,noreferrer");
+  }, []);
+
+  const searchedKolPortalPreviewOptions = useMemo(() => {
+    const q = kolPortalPreviewSearch.trim().toLowerCase();
+    if (!q) return kolPortalPreviewOptions;
+    return kolPortalPreviewOptions.filter(
+      (o) =>
+        o.partnerName.toLowerCase().includes(q) ||
+        o.partnerId.toLowerCase().includes(q)
+    );
+  }, [kolPortalPreviewOptions, kolPortalPreviewSearch]);
+
   const refetchTasksOnly = useCallback(async () => {
     try {
       const res = await fetch("/api/tasks", { cache: "no-store" });
@@ -4615,7 +4697,15 @@ export default function DashboardPage() {
   useEffect(() => {
     try {
       const v = localStorage.getItem("sdh-finance-subtab");
-      if (v === "invoices" || v === "byProject" || v === "payments" || v === "collectionSubmissions" || v === "kolRemittance")
+      if (
+        v === "invoices" ||
+        v === "byProject" ||
+        v === "payments" ||
+        v === "collectionSubmissions" ||
+        v === "kolRemittance" ||
+        v === "kolPortalView" ||
+        v === "employeePayout"
+      )
         setFinanceSubTab(v);
     } catch {
       /* ignore */
@@ -8652,7 +8742,7 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-xl font-bold tracking-tight text-stone-900">財務</h2>
               <p className="mt-1 text-xs text-stone-500">
-                員工分潤付款：內部員工匯款；KOL 匯款：匯給 KOL 老師；發票清冊：客戶入帳；付款記錄：對外支出流水。
+                員工分潤付款：內部員工匯款；KOL 匯款：匯給 KOL 老師；KOL 老師視角：唯讀預覽老師入口；發票清冊：客戶入帳；付款記錄：對外支出流水。
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-stone-200 bg-amber-50/90 p-1">
@@ -8683,6 +8773,19 @@ export default function DashboardPage() {
                   </span>
                 ) : null}
               </button>
+              {canPreviewKolPortalView ? (
+                <button
+                  type="button"
+                  onClick={() => setFinanceSubTab("kolPortalView")}
+                  className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                    financeSubTab === "kolPortalView"
+                      ? "bg-amber-500 text-slate-900 shadow shadow-amber-200/40"
+                      : "text-stone-500 hover:text-stone-900"
+                  }`}
+                >
+                  KOL 老師視角
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setFinanceSubTab("byProject")}
@@ -8973,6 +9076,7 @@ export default function DashboardPage() {
               )}
               <p className="mb-2 text-[11px] text-stone-500">
                 KOL 填寫請款憑證（發票或勞務報酬單）後會出現在「待匯款」。登記匯款會同時寫入付款記錄（類型 KOL），KOL 入口即顯示已匯款與匯款日期。
+                {canPreviewKolPortalView ? " 可按「老師視角」以唯讀方式查看該 KOL 入口。" : ""}
               </p>
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
                 {kolRemittanceLoading ? (
@@ -9004,6 +9108,9 @@ export default function DashboardPage() {
                           <>
                             <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">匯款日期</th>
                             <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-stone-600">匯款金額</th>
+                            {canPreviewKolPortalView ? (
+                              <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-stone-600">視角</th>
+                            ) : null}
                           </>
                         )}
                       </tr>
@@ -9028,7 +9135,19 @@ export default function DashboardPage() {
                                 {pid}
                               </div>
                             </td>
-                            <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-stone-900">{row.KOL名稱}</td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-stone-900">
+                              <div>{row.KOL名稱}</div>
+                              {canPreviewKolPortalView ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openKolPortalPreview(row.PartnerID)}
+                                  className="mt-0.5 text-[11px] font-semibold text-sky-800 underline-offset-2 hover:underline"
+                                  title="以唯讀開啟該 KOL 老師入口"
+                                >
+                                  老師視角
+                                </button>
+                              ) : null}
+                            </td>
                             <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold tabular-nums text-stone-900">
                               {formatAmount(row.KOL費用未稅)}
                             </td>
@@ -9094,14 +9213,25 @@ export default function DashboardPage() {
                                   />
                                 </td>
                                 <td className="whitespace-nowrap px-3 py-2 text-center align-middle">
-                                  <button
-                                    type="button"
-                                    disabled={saving}
-                                    onClick={() => void registerKolRemittance(row)}
-                                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-60"
-                                  >
-                                    {saving ? "登記中…" : "登記匯款"}
-                                  </button>
+                                  <div className="flex flex-col items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      disabled={saving}
+                                      onClick={() => void registerKolRemittance(row)}
+                                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-60"
+                                    >
+                                      {saving ? "登記中…" : "登記匯款"}
+                                    </button>
+                                    {canPreviewKolPortalView ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => openKolPortalPreview(row.PartnerID)}
+                                        className="text-[11px] font-semibold text-sky-800 underline-offset-2 hover:underline"
+                                      >
+                                        老師視角
+                                      </button>
+                                    ) : null}
+                                  </div>
                                 </td>
                               </>
                             ) : (
@@ -9112,11 +9242,82 @@ export default function DashboardPage() {
                                 <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold tabular-nums text-stone-900">
                                   {formatAmount(row.KOL匯款金額 || row.KOL費用未稅)}
                                 </td>
+                                {canPreviewKolPortalView ? (
+                                  <td className="whitespace-nowrap px-3 py-2 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => openKolPortalPreview(row.PartnerID)}
+                                      className="rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-900 hover:bg-sky-100"
+                                    >
+                                      老師視角
+                                    </button>
+                                  </td>
+                                ) : null}
                               </>
                             )}
                           </tr>
                         );
                       })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          )}
+
+          {financeSubTab === "kolPortalView" && canPreviewKolPortalView && (
+            <>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-[11px] text-stone-500">
+                  選擇 KOL 後以<strong className="text-stone-700">新分頁唯讀</strong>開啟與老師相同的入口（執行中／可請款／待匯款／已匯款／暫緩）。不可代填請款。
+                </p>
+                <input
+                  type="text"
+                  value={kolPortalPreviewSearch}
+                  onChange={(e) => setKolPortalPreviewSearch(e.target.value)}
+                  placeholder="搜尋 KOL 名稱、PartnerID…"
+                  className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
+                />
+              </div>
+              {kolPortalPreviewError && (
+                <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{kolPortalPreviewError}</p>
+              )}
+              <div className="overflow-x-auto rounded-xl border border-stone-200/90">
+                {kolPortalPreviewLoading ? (
+                  <p className="px-4 py-8 text-center text-stone-500">載入中…</p>
+                ) : searchedKolPortalPreviewOptions.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-stone-500">
+                    {kolPortalPreviewOptions.length === 0
+                      ? "尚無掛名專案的 KOL 可預覽。"
+                      : "沒有符合搜尋的 KOL。"}
+                  </p>
+                ) : (
+                  <table className="min-w-full divide-y divide-stone-200">
+                    <thead className="bg-stone-100">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">KOL</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">PartnerID</th>
+                        <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-stone-600">專案數</th>
+                        <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-stone-600">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-200 bg-white">
+                      {searchedKolPortalPreviewOptions.map((opt) => (
+                        <tr key={opt.partnerId} className="hover:bg-amber-50/40">
+                          <td className="px-4 py-3 text-sm font-semibold text-stone-900">{opt.partnerName}</td>
+                          <td className="px-4 py-3 text-xs font-mono text-stone-500">{opt.partnerId}</td>
+                          <td className="px-4 py-3 text-right text-sm tabular-nums text-stone-700">{opt.projectCount}</td>
+                          <td className="px-4 py-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => openKolPortalPreview(opt.partnerId)}
+                              className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-sky-500"
+                            >
+                              開啟老師視角
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 )}

@@ -7,6 +7,7 @@ import type { FinanceRow } from "@/modules/finance";
 import type { InvoiceRow } from "@/modules/finance";
 import { getMasterList } from "@/lib/db/master";
 import { getKolInvoicesByProjectIds } from "@/lib/db/kol-invoices";
+import { getPartnersApprovedWithError } from "@/lib/db/partners";
 import { getFinance, getInvoices } from "@/modules/finance";
 import {
   kolCanEditRequestCredential,
@@ -22,23 +23,73 @@ import type { KolPortalProject } from "@/lib/kol/types";
 
 export type { KolPortalProject } from "@/lib/kol/types";
 
-export async function buildKolPortalData(user: User): Promise<
-  | {
-      ok: true;
-      partnerId: string;
-      partnerName: string;
-      laborProfile: { 身分證字號: string; 聯絡電話: string; 戶籍地址: string };
-      projects: KolPortalProject[];
-    }
-  | { ok: false; error: string }
-> {
-  const resolved = await resolveKolPartnerForUser(user);
-  if (!resolved.ok) return resolved;
+export type KolPortalDataOk = {
+  ok: true;
+  partnerId: string;
+  partnerName: string;
+  laborProfile: { 身分證字號: string; 聯絡電話: string; 戶籍地址: string };
+  projects: KolPortalProject[];
+};
 
-  const { partnerId, partnerName } = resolved.binding;
+export type KolPortalDataResult = KolPortalDataOk | { ok: false; error: string };
+
+export type KolPortalPreviewOption = {
+  partnerId: string;
+  partnerName: string;
+  projectCount: number;
+};
+
+/** 員工預覽可用：大總表有掛名的 KOL（合作夥伴）清單 */
+export async function listKolPortalPreviewOptions(): Promise<KolPortalPreviewOption[]> {
+  const [{ partners }, masters] = await Promise.all([getPartnersApprovedWithError(), getMasterList()]);
+  const countByName = new Map<string, number>();
+  for (const row of masters) {
+    const name = String(row.KOL名稱 ?? "").trim();
+    if (!name) continue;
+    countByName.set(name, (countByName.get(name) ?? 0) + 1);
+  }
+  const options: KolPortalPreviewOption[] = [];
+  for (const p of partners) {
+    const partnerId = String(p.PartnerID ?? "").trim();
+    const partnerName = String(p.合作夥伴名稱 ?? "").trim();
+    if (!partnerId || !partnerName) continue;
+    const projectCount = countByName.get(partnerName) ?? 0;
+    if (projectCount <= 0) continue;
+    options.push({ partnerId, partnerName, projectCount });
+  }
+  options.sort((a, b) => a.partnerName.localeCompare(b.partnerName, "zh-Hant"));
+  return options;
+}
+
+export async function buildKolPortalDataByPartnerId(
+  partnerIdInput: string,
+  options?: { forceReadOnly?: boolean }
+): Promise<KolPortalDataResult> {
+  const partnerId = String(partnerIdInput ?? "").trim();
+  if (!partnerId) return { ok: false, error: "缺少 PartnerID" };
+
+  const { partners, error } = await getPartnersApprovedWithError();
+  if (error && !partners.length) {
+    return { ok: false, error: error || "無法讀取合作夥伴資料" };
+  }
+  const partner = partners.find((x) => String(x.PartnerID ?? "").trim() === partnerId);
+  if (!partner) {
+    return { ok: false, error: `找不到 PartnerID「${partnerId}」的 KOL。` };
+  }
+  const partnerName = String(partner.合作夥伴名稱 ?? "").trim();
   if (!partnerName) {
     return { ok: false, error: "合作夥伴名稱空白，無法對應專案。" };
   }
+
+  return buildKolPortalDataForPartner(partnerId, partnerName, options);
+}
+
+async function buildKolPortalDataForPartner(
+  partnerId: string,
+  partnerName: string,
+  options?: { forceReadOnly?: boolean }
+): Promise<KolPortalDataResult> {
+  const forceReadOnly = Boolean(options?.forceReadOnly);
 
   const [masterList, financeList, invoiceList, laborProfile] = await Promise.all([
     getMasterList(),
@@ -83,6 +134,10 @@ export async function buildKolPortalData(user: User): Promise<
     const kolInv = kolInvoiceByPid.get(pid);
     const 結帳狀態 = kolFinanceProgressShort(f?.廠商付款日期, kolInv, kolInv?.KOL匯款日期);
     const mode = kolRequestMode(kolInv);
+    const canEdit =
+      !forceReadOnly &&
+      !isKolProjectOnHold(row.專案狀態) &&
+      kolCanEditRequestCredential(f?.廠商付款日期, kolInv, kolInv?.KOL匯款日期);
     projects.push({
       專案ID: pid,
       專案名稱: String(row.專案名稱 ?? "—"),
@@ -120,9 +175,7 @@ export async function buildKolPortalData(user: User): Promise<
       KOL發票填寫人: String(kolInv?.填寫人 ?? "").trim() || "",
       KOL匯款日期: String(kolInv?.KOL匯款日期 ?? "").trim().slice(0, 10) || "",
       KOL匯款金額: formatKolAmountInt(parseKolAmount(kolInv?.KOL匯款金額)),
-      canEditKolInvoice:
-        !isKolProjectOnHold(row.專案狀態) &&
-        kolCanEditRequestCredential(f?.廠商付款日期, kolInv, kolInv?.KOL匯款日期),
+      canEditKolInvoice: canEdit,
     });
   }
 
@@ -135,4 +188,16 @@ export async function buildKolPortalData(user: User): Promise<
     laborProfile,
     projects,
   };
+}
+
+export async function buildKolPortalData(user: User): Promise<KolPortalDataResult> {
+  const resolved = await resolveKolPartnerForUser(user);
+  if (!resolved.ok) return resolved;
+
+  const { partnerId, partnerName } = resolved.binding;
+  if (!partnerName) {
+    return { ok: false, error: "合作夥伴名稱空白，無法對應專案。" };
+  }
+
+  return buildKolPortalDataForPartner(partnerId, partnerName);
 }
