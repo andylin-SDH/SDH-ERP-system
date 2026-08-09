@@ -19,7 +19,7 @@ import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, Pa
 import { sortInvoicesByInvoiceNumber } from "@/modules/finance";
 import type { FinanceUpdateFields } from "@/lib/db/finance";
 import type { PayoutRow } from "@/lib/db/payout";
-import { applyHighestRatePerRecipient } from "@/lib/payout-dedupe";
+import { applyHighestRatePerRecipient, isExtraBonusPayoutType } from "@/lib/payout-dedupe";
 import { canEditMasterNumericFields } from "@/config/master-permissions";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
 import { PROJECT_TYPES, costFromTotalByProjectType } from "@/config/project-types";
@@ -1729,6 +1729,11 @@ export default function DashboardPage() {
   const pendingDeepLinkRef = useRef<{ project?: string; task?: string } | null>(null);
   const sessionBootstrappedRef = useRef(false);
   const [payoutList, setPayoutList] = useState<PayoutRow[]>([]);
+  const [extraBonusDraftRecipient, setExtraBonusDraftRecipient] = useState("");
+  const [extraBonusDraftAmount, setExtraBonusDraftAmount] = useState("");
+  const [extraBonusEditingId, setExtraBonusEditingId] = useState<string | null>(null);
+  const [extraBonusSaving, setExtraBonusSaving] = useState(false);
+  const [extraBonusError, setExtraBonusError] = useState<string | null>(null);
   /** Dashboard 分頁搜尋關鍵字（各區塊獨立） */
   const [masterSearch, setMasterSearch] = useState("");
   /** 大總表：依專案類型子分頁（「全部」= 不篩類型） */
@@ -1937,6 +1942,14 @@ export default function DashboardPage() {
     const payoutsN = payoutList.filter((p) => String(p.專案ID ?? "").trim() === pid).length;
     return { tasks: tasksN, payouts: payoutsN };
   }, [selectedMaster, tasks, payoutList]);
+  const selectedMasterExtraBonuses = useMemo(() => {
+    if (!selectedMaster) return [] as PayoutRow[];
+    const pid = String(selectedMaster.專案ID ?? "").trim();
+    if (!pid) return [];
+    return payoutList.filter(
+      (p) => String(p.專案ID ?? "").trim() === pid && isExtraBonusPayoutType(p.分潤類型)
+    );
+  }, [selectedMaster, payoutList]);
   const selectedMasterHasInvoices = useMemo(() => {
     if (!selectedMaster) return false;
     const pid = String(selectedMaster.專案ID ?? "").trim();
@@ -1986,6 +1999,8 @@ export default function DashboardPage() {
   const canEditVisibility = me && ["董事長", "管理者"].includes(me.role);
   /** 董事長／管理者／會計：可預覽 KOL 老師入口 */
   const canPreviewKolPortalView = Boolean(me?.role && ["董事長", "管理者", "會計"].includes(me.role));
+  /** 董事長／會計：可編輯專案額外獎金 */
+  const canEditExtraBonus = Boolean(me?.role && ["董事長", "會計"].includes(me.role));
   /** 大總表金額／營收／成本（分潤成數仍僅 Config／此權限）；其餘欄位登入即可編輯 */
   const canEditMasterNumbers = useMemo(
     () => Boolean(me?.role && canEditMasterNumericFields(me.role, rolePermissions)),
@@ -2025,6 +2040,106 @@ export default function DashboardPage() {
     }
     void loadMasterTaskTemplates(selectedMaster.專案ID);
   }, [selectedMaster?.專案ID, selectedMaster?.長期案, loadMasterTaskTemplates]);
+
+  useEffect(() => {
+    setExtraBonusDraftRecipient("");
+    setExtraBonusDraftAmount("");
+    setExtraBonusEditingId(null);
+    setExtraBonusError(null);
+  }, [selectedMaster?.專案ID]);
+
+  const saveExtraBonus = useCallback(async () => {
+    if (!selectedMaster || !canEditExtraBonus) return;
+    const pid = String(selectedMaster.專案ID ?? "").trim();
+    const recipient = extraBonusDraftRecipient.trim();
+    const amount = extraBonusDraftAmount.trim();
+    if (!pid) {
+      setExtraBonusError("缺少專案ID");
+      return;
+    }
+    if (!recipient) {
+      setExtraBonusError("請選擇領取人");
+      return;
+    }
+    if (!amount) {
+      setExtraBonusError("請填寫金額");
+      return;
+    }
+    setExtraBonusSaving(true);
+    setExtraBonusError(null);
+    try {
+      const editingId = extraBonusEditingId;
+      const res = await fetch("/api/payout/extra-bonus", {
+        method: editingId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          editingId
+            ? { id: editingId, 領取人: recipient, 分潤金額: amount }
+            : { 專案ID: pid, 領取人: recipient, 分潤金額: amount }
+        ),
+        cache: "no-store",
+      });
+      const data = (await safeResJson(res)) as { ok?: boolean; error?: string; payout?: PayoutRow };
+      if (!res.ok || !data.ok || !data.payout) {
+        setExtraBonusError(data.error ?? "儲存失敗");
+        return;
+      }
+      setPayoutList((prev) => {
+        if (editingId) {
+          return prev.map((r) => (String(r.id ?? "") === editingId ? { ...r, ...data.payout! } : r));
+        }
+        return [...prev, data.payout!];
+      });
+      setExtraBonusDraftRecipient("");
+      setExtraBonusDraftAmount("");
+      setExtraBonusEditingId(null);
+    } catch (e) {
+      setExtraBonusError(e instanceof Error ? e.message : "儲存失敗");
+    } finally {
+      setExtraBonusSaving(false);
+    }
+  }, [
+    selectedMaster,
+    canEditExtraBonus,
+    extraBonusDraftRecipient,
+    extraBonusDraftAmount,
+    extraBonusEditingId,
+  ]);
+
+  const removeExtraBonus = useCallback(
+    async (id: string) => {
+      if (!canEditExtraBonus) return;
+      const rowId = String(id ?? "").trim();
+      if (!rowId) return;
+      if (!window.confirm("確定刪除此筆額外獎金？")) return;
+      setExtraBonusSaving(true);
+      setExtraBonusError(null);
+      try {
+        const res = await fetch("/api/payout/extra-bonus", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: rowId }),
+          cache: "no-store",
+        });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string };
+        if (!res.ok || !data.ok) {
+          setExtraBonusError(data.error ?? "刪除失敗");
+          return;
+        }
+        setPayoutList((prev) => prev.filter((r) => String(r.id ?? "") !== rowId));
+        if (extraBonusEditingId === rowId) {
+          setExtraBonusDraftRecipient("");
+          setExtraBonusDraftAmount("");
+          setExtraBonusEditingId(null);
+        }
+      } catch (e) {
+        setExtraBonusError(e instanceof Error ? e.message : "刪除失敗");
+      } finally {
+        setExtraBonusSaving(false);
+      }
+    },
+    [canEditExtraBonus, extraBonusEditingId]
+  );
 
   useEffect(() => {
     const nextDrafts: Record<number, MasterTaskTemplateDraft> = {};
@@ -12513,6 +12628,118 @@ export default function DashboardPage() {
                     </>
                   )}
                 </div>
+              </section>
+
+              <section>
+                <h3 className="mb-1 text-base font-bold text-amber-800">額外獎金</h3>
+                <p className="mb-3 text-xs text-stone-500">
+                  可新增多筆、不同領取人；成數空白、金額手填。重算分潤不會覆蓋。僅董事長／會計可改。
+                </p>
+                {selectedMasterExtraBonuses.length > 0 ? (
+                  <div className="mb-3 overflow-hidden rounded-xl border border-stone-200">
+                    <table className="min-w-full text-left text-sm">
+                      <thead className="bg-stone-50 text-xs font-semibold uppercase tracking-wide text-stone-500">
+                        <tr>
+                          <th className="px-3 py-2">領取人</th>
+                          <th className="px-3 py-2">金額</th>
+                          {canEditExtraBonus ? <th className="px-3 py-2 text-right">操作</th> : null}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedMasterExtraBonuses.map((row) => {
+                          const id = String(row.id ?? "");
+                          return (
+                            <tr key={id || `${row.領取人}-${row.分潤金額}`} className="border-t border-stone-100">
+                              <td className="px-3 py-2 font-medium text-stone-800">{row.領取人 || "—"}</td>
+                              <td className="px-3 py-2 tabular-nums text-stone-700">
+                                {row.分潤金額 ? Number(row.分潤金額).toLocaleString("zh-TW") : "—"}
+                              </td>
+                              {canEditExtraBonus ? (
+                                <td className="px-3 py-2 text-right">
+                                  <button
+                                    type="button"
+                                    disabled={extraBonusSaving}
+                                    onClick={() => {
+                                      setExtraBonusEditingId(id || null);
+                                      setExtraBonusDraftRecipient(String(row.領取人 ?? ""));
+                                      setExtraBonusDraftAmount(String(row.分潤金額 ?? ""));
+                                      setExtraBonusError(null);
+                                    }}
+                                    className="mr-2 text-xs font-semibold text-amber-800 hover:underline disabled:opacity-50"
+                                  >
+                                    編輯
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={extraBonusSaving || !id}
+                                    onClick={() => void removeExtraBonus(id)}
+                                    className="text-xs font-semibold text-red-600 hover:underline disabled:opacity-50"
+                                  >
+                                    刪除
+                                  </button>
+                                </td>
+                              ) : null}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="mb-3 text-sm text-stone-500">尚無額外獎金</p>
+                )}
+                {canEditExtraBonus ? (
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-dashed border-amber-300/80 bg-amber-50/40 p-3">
+                    <SelectField
+                      label="領取人"
+                      value={extraBonusDraftRecipient}
+                      onChange={setExtraBonusDraftRecipient}
+                      options={[
+                        ...new Set(
+                          [...employeeUserNames, extraBonusDraftRecipient].filter(Boolean)
+                        ),
+                      ]}
+                    />
+                    <InputField
+                      label="金額"
+                      type="number"
+                      value={extraBonusDraftAmount}
+                      onChange={setExtraBonusDraftAmount}
+                    />
+                    <div className="col-span-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={extraBonusSaving}
+                        onClick={() => void saveExtraBonus()}
+                        className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 hover:bg-amber-400 disabled:opacity-60"
+                      >
+                        {extraBonusSaving
+                          ? "儲存中…"
+                          : extraBonusEditingId
+                            ? "更新額外獎金"
+                            : "新增加外獎金"}
+                      </button>
+                      {extraBonusEditingId ? (
+                        <button
+                          type="button"
+                          disabled={extraBonusSaving}
+                          onClick={() => {
+                            setExtraBonusEditingId(null);
+                            setExtraBonusDraftRecipient("");
+                            setExtraBonusDraftAmount("");
+                            setExtraBonusError(null);
+                          }}
+                          className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-600 hover:bg-stone-50 disabled:opacity-50"
+                        >
+                          取消編輯
+                        </button>
+                      ) : null}
+                      {extraBonusError ? (
+                        <p className="text-sm font-medium text-red-600">{extraBonusError}</p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </section>
 
               <section id="master-project-content">

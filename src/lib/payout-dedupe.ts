@@ -51,22 +51,42 @@ export function normalizeRecipientForDedupe(s: string | null | undefined): strin
     .trim();
 }
 
+/** 人工額外獎金：不進成數計算、重算時保留、同人去重時不與角色分潤合併 */
+export const EXTRA_BONUS_PAYOUT_TYPE = "額外獎金";
+
+export function isExtraBonusPayoutType(type: string | null | undefined): boolean {
+  return String(type ?? "").trim() === EXTRA_BONUS_PAYOUT_TYPE;
+}
+
 /**
  * 同一專案內，同一領取人僅保留一列：取分潤成數最高者；成數相同則取分潤金額較大者。
+ * 「額外獎金」列一律保留，不參與同人去重。
  */
 export function applyHighestRatePerRecipient<
-  T extends { 分潤成數?: string | null; 分潤金額?: string | null; 領取人?: string | null },
+  T extends {
+    分潤成數?: string | null;
+    分潤金額?: string | null;
+    領取人?: string | null;
+    分潤類型?: string | null;
+  },
 >(rows: T[]): T[] {
   if (rows.length <= 1) return rows;
 
-  const byRecipient = new Map<string, number[]>();
+  const bonusIndices: number[] = [];
+  const regularIndices: number[] = [];
   rows.forEach((row, i) => {
-    const key = normalizeRecipientForDedupe(row.領取人) || "__empty__";
-    if (!byRecipient.has(key)) byRecipient.set(key, []);
-    byRecipient.get(key)!.push(i);
+    if (isExtraBonusPayoutType(row.分潤類型)) bonusIndices.push(i);
+    else regularIndices.push(i);
   });
 
-  const keep = new Set<number>();
+  const byRecipient = new Map<string, number[]>();
+  for (const i of regularIndices) {
+    const key = normalizeRecipientForDedupe(rows[i].領取人) || "__empty__";
+    if (!byRecipient.has(key)) byRecipient.set(key, []);
+    byRecipient.get(key)!.push(i);
+  }
+
+  const keep = new Set<number>(bonusIndices);
   for (const indices of byRecipient.values()) {
     if (indices.length <= 1) {
       indices.forEach((idx) => keep.add(idx));

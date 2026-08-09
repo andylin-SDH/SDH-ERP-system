@@ -12,8 +12,15 @@ import { getMasterList } from "@/lib/db/master";
 import { getPartners } from "@/lib/db/partners";
 import type { PartnerRow } from "@/modules/partners/types";
 import { getSystemConfig, updateSystemConfig } from "@/lib/db/system-config";
-import { applyHighestRatePerRecipient, normalizeRecipientForDedupe } from "@/lib/payout-dedupe";
+import {
+  applyHighestRatePerRecipient,
+  EXTRA_BONUS_PAYOUT_TYPE,
+  isExtraBonusPayoutType,
+  normalizeRecipientForDedupe,
+} from "@/lib/payout-dedupe";
 import { normalizeDecimalString } from "@/lib/number-normalize";
+
+export { EXTRA_BONUS_PAYOUT_TYPE, isExtraBonusPayoutType };
 
 export interface PayoutRow {
   id?: string;
@@ -117,14 +124,176 @@ export async function getPayoutList(): Promise<PayoutRow[]> {
   return out;
 }
 
-/** 刪除某專案的所有分潤列 */
+/**
+ * 刪除某專案的自動分潤列。
+ * 「額外獎金」為人工列，重算時必須保留。
+ */
 export async function deletePayoutBy專案ID(專案ID: string): Promise<void> {
   const supabase = getSupabase();
-  const { error } = await supabase.from("分潤表").delete().eq("專案ID", 專案ID);
+  const pid = String(專案ID ?? "").trim();
+  if (!pid) return;
+
+  // 無分潤類型的舊列一併清掉
+  const { error: nullTypeErr } = await supabase
+    .from("分潤表")
+    .delete()
+    .eq("專案ID", pid)
+    .is("分潤類型", null);
+  if (nullTypeErr && nullTypeErr.code !== "42P01") throw nullTypeErr;
+
+  const { error } = await supabase
+    .from("分潤表")
+    .delete()
+    .eq("專案ID", pid)
+    .neq("分潤類型", EXTRA_BONUS_PAYOUT_TYPE);
   if (error) {
     if (error.code === "42P01") return;
     throw error;
   }
+}
+
+/** 同步後把專案層欄位回寫至額外獎金列（金額／成數／領取人不動） */
+async function refreshExtraBonusProjectFields(master: MasterRow): Promise<void> {
+  const pid = String(master.專案ID ?? "").trim();
+  if (!pid) return;
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from("分潤表")
+    .update({
+      專案名稱: master.專案名稱 ?? null,
+      專案總金額未稅: master.專案總金額未稅 ?? null,
+      專案營收: master.專案營收 ?? null,
+      廠商預計付款日: master.廠商預計付款日?.trim() || null,
+    })
+    .eq("專案ID", pid)
+    .eq("分潤類型", EXTRA_BONUS_PAYOUT_TYPE);
+  if (error && error.code !== "42P01") throw error;
+}
+
+export async function listExtraBonusesBy專案ID(專案ID: string): Promise<PayoutRow[]> {
+  const pid = String(專案ID ?? "").trim();
+  if (!pid) return [];
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("分潤表")
+    .select("*")
+    .eq("專案ID", pid)
+    .eq("分潤類型", EXTRA_BONUS_PAYOUT_TYPE)
+    .order("created_at", { ascending: true });
+  if (error) {
+    if (error.code === "42P01") return [];
+    throw error;
+  }
+  return (data ?? []).map((r) => rowToPayout(r as Record<string, unknown>));
+}
+
+export async function createExtraBonus(input: {
+  專案ID: string;
+  領取人: string;
+  分潤金額: string;
+}): Promise<PayoutRow> {
+  const pid = String(input.專案ID ?? "").trim();
+  const recipient = String(input.領取人 ?? "").trim();
+  const amountRaw = String(input.分潤金額 ?? "").trim();
+  if (!pid) throw new Error("缺少專案ID");
+  if (!recipient) throw new Error("請選擇領取人");
+  const amount = parseAmount(amountRaw);
+  if (!(amount > 0)) throw new Error("分潤金額須大於 0");
+
+  const supabase = getSupabase();
+  const { data: masterRaw, error: masterErr } = await supabase
+    .from("大總表")
+    .select("*")
+    .eq("專案ID", pid)
+    .maybeSingle();
+  if (masterErr) throw masterErr;
+  if (!masterRaw) throw new Error("找不到該專案");
+
+  const master = masterRaw as Record<string, unknown>;
+  const { data: finRaw } = await supabase.from("財務").select("廠商付款日期").eq("專案ID", pid).maybeSingle();
+  const vendorPaid = String((finRaw as { 廠商付款日期?: unknown } | null)?.廠商付款日期 ?? "").trim() || null;
+
+  const insertRow: PayoutInsertRow = {
+    專案ID: pid,
+    專案名稱: (master.專案名稱 as string | null | undefined) ?? null,
+    專案總金額未稅: normalizeDecimalString(master.專案總金額未稅, 2) ?? null,
+    專案營收: normalizeDecimalString(master.專案營收, 2) ?? null,
+    廠商預計付款日: String(master.廠商預計付款日 ?? "").trim() || null,
+    廠商付款日期: vendorPaid,
+    分潤匯款日期: null,
+    分潤類型: EXTRA_BONUS_PAYOUT_TYPE,
+    分潤成數: null,
+    分潤金額: String(Math.round(amount)),
+    領取人: recipient,
+  };
+
+  const { data, error } = await supabase.from("分潤表").insert(insertRow).select("*").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("新增額外獎金失敗");
+  return rowToPayout(data as Record<string, unknown>);
+}
+
+export async function updateExtraBonus(
+  id: string,
+  input: { 領取人?: string; 分潤金額?: string }
+): Promise<PayoutRow | null> {
+  const rowId = String(id ?? "").trim();
+  if (!rowId) return null;
+  const supabase = getSupabase();
+
+  const { data: existing, error: findErr } = await supabase
+    .from("分潤表")
+    .select("*")
+    .eq("id", rowId)
+    .maybeSingle();
+  if (findErr) throw findErr;
+  if (!existing) return null;
+  if (!isExtraBonusPayoutType((existing as Record<string, unknown>)["分潤類型"] as string)) {
+    throw new Error("僅可編輯額外獎金列");
+  }
+
+  const payload: Record<string, unknown> = {};
+  if (input.領取人 !== undefined) {
+    const recipient = String(input.領取人 ?? "").trim();
+    if (!recipient) throw new Error("請選擇領取人");
+    payload.領取人 = recipient;
+  }
+  if (input.分潤金額 !== undefined) {
+    const amount = parseAmount(input.分潤金額);
+    if (!(amount > 0)) throw new Error("分潤金額須大於 0");
+    payload.分潤金額 = String(Math.round(amount));
+  }
+  if (Object.keys(payload).length === 0) {
+    return rowToPayout(existing as Record<string, unknown>);
+  }
+
+  const { data, error } = await supabase
+    .from("分潤表")
+    .update(payload)
+    .eq("id", rowId)
+    .eq("分潤類型", EXTRA_BONUS_PAYOUT_TYPE)
+    .select("*")
+    .maybeSingle();
+  if (error) throw error;
+  return data ? rowToPayout(data as Record<string, unknown>) : null;
+}
+
+export async function deleteExtraBonus(id: string): Promise<boolean> {
+  const rowId = String(id ?? "").trim();
+  if (!rowId) return false;
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("分潤表")
+    .delete()
+    .eq("id", rowId)
+    .eq("分潤類型", EXTRA_BONUS_PAYOUT_TYPE)
+    .select("id")
+    .maybeSingle();
+  if (error) {
+    if (error.code === "42P01") return false;
+    throw error;
+  }
+  return Boolean(data);
 }
 
 /** 一筆分潤列（寫入 DB 用） */
@@ -301,7 +470,8 @@ export type SyncPayoutForProjectOptions = {
 };
 
 /**
- * 依大總表一筆專案與成數預設，產生分潤列並同步至分潤表（先刪該專案舊列再插入）
+ * 依大總表一筆專案與成數預設，產生分潤列並同步至分潤表
+ * （刪除自動分潤列後再插入；「額外獎金」人工列會保留）
  * 分潤金額基準：專案營收（未填則用專案總金額未稅）
  */
 export async function syncPayoutForProject(
@@ -318,6 +488,7 @@ export async function syncPayoutForProject(
   const filteredRows = applyHighestRatePerRecipient(rows);
   if (filteredRows.length > 0) await insertPayoutRows(filteredRows);
 
+  await refreshExtraBonusProjectFields(master);
   await restoreRemitDatesByRecipient(專案ID, remitByRecipient);
 
   if (options?.restoreVendorDates !== false) {

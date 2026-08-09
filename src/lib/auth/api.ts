@@ -80,6 +80,26 @@ export async function requireKol(request: NextRequest | Request): Promise<{ user
   return result;
 }
 
+/** 可編輯專案「額外獎金」的角色（董事長／會計） */
+export const EXTRA_BONUS_EDIT_ROLES = ["董事長", "會計"] as const;
+
+export function canEditExtraBonus(role: string | undefined | null): boolean {
+  const r = String(role ?? "").trim();
+  return (EXTRA_BONUS_EDIT_ROLES as readonly string[]).includes(r);
+}
+
+/** 員工且具備額外獎金編輯權限 */
+export async function requireExtraBonusEditor(
+  request: NextRequest | Request
+): Promise<{ user: User } | NextResponse> {
+  const result = await requireEmployee(request);
+  if (result instanceof NextResponse) return result;
+  if (!canEditExtraBonus(result.user.role)) {
+    return NextResponse.json({ ok: false, error: "僅董事長或會計可編輯額外獎金" }, { status: 403 });
+  }
+  return result;
+}
+
 /** 可預覽 KOL 老師入口的員工角色（董事長／管理者／會計） */
 export const KOL_PORTAL_PREVIEW_ROLES = ["董事長", "管理者", "會計"] as const;
 
