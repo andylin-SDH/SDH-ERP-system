@@ -87,6 +87,18 @@ export function PaymentCollectionLinkIcon({ 專案ID, onViewSubmissions }: Props
   const wrapRef = useRef<HTMLDivElement>(null);
 
   const submissionCount = submissions.length;
+  const latestCodes = (() => {
+    const seen = new Set<string>();
+    const codes: string[] = [];
+    for (const s of submissions) {
+      const code = String(s.匯款末五碼 ?? "").trim();
+      if (!/^\d{5}$/.test(code) || seen.has(code)) continue;
+      seen.add(code);
+      codes.push(code);
+      if (codes.length >= 3) break;
+    }
+    return codes;
+  })();
 
   const load = useCallback(async (force = false) => {
     if (!pid) return;
@@ -193,10 +205,12 @@ export function PaymentCollectionLinkIcon({ 專案ID, onViewSubmissions }: Props
   }
 
   const badgeTitle =
-    submissionCount > 0 ? `已有 ${submissionCount} 筆匯款申報，點開查看或複製連結` : "收款表單連結";
+    submissionCount > 0
+      ? `已有 ${submissionCount} 筆匯款申報${latestCodes.length ? `，末五碼 ${latestCodes.join("、")}` : ""}；點開查看或複製連結`
+      : "收款表單連結";
 
   return (
-    <div ref={wrapRef} className="relative inline-block">
+    <div ref={wrapRef} className="relative inline-flex items-center gap-1.5">
       <button
         type="button"
         title={badgeTitle}
@@ -223,8 +237,25 @@ export function PaymentCollectionLinkIcon({ 專案ID, onViewSubmissions }: Props
           </span>
         )}
       </button>
+      {latestCodes.length > 0 ? (
+        <button
+          type="button"
+          title={badgeTitle}
+          onClick={() => {
+            setOpen((v) => !v);
+            setNotice(null);
+          }}
+          className="max-w-[7.5rem] rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-left transition hover:bg-emerald-100"
+        >
+          <span className="block text-[9px] font-semibold leading-none text-emerald-800/80">末五碼</span>
+          <span className="block truncate font-mono text-[11px] font-bold tabular-nums tracking-wide text-emerald-950">
+            {latestCodes.join(" · ")}
+            {submissionCount > latestCodes.length ? "…" : ""}
+          </span>
+        </button>
+      ) : null}
       {open && (
-        <div className="absolute right-0 z-50 mt-1 w-72 rounded-xl border border-stone-200 bg-white p-3 text-left shadow-lg ring-1 ring-stone-100">
+        <div className="absolute right-0 top-full z-50 mt-1 w-80 rounded-xl border border-stone-200 bg-white p-3 text-left shadow-lg ring-1 ring-stone-100">
           <p className="mb-2 text-xs font-bold text-sky-900">收款表單 · {pid}</p>
           {loading && <p className="text-xs text-stone-500">載入中…</p>}
           {error && <p className="mb-2 text-xs text-red-700">{error}</p>}
@@ -275,25 +306,50 @@ export function PaymentCollectionLinkIcon({ 專案ID, onViewSubmissions }: Props
                   </div>
                 </>
               )}
-              {submissionCount > 0 && (
-                <p className="text-[11px] text-stone-600">
-                  已收到 <strong>{submissionCount}</strong> 筆匯款申報
-                  {onViewSubmissions && (
-                    <>
-                      {" · "}
+              {submissionCount > 0 ? (
+                <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-2">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-semibold text-emerald-950">
+                      客戶已填申報 <span className="tabular-nums">{submissionCount}</span> 筆
+                    </p>
+                    {onViewSubmissions ? (
                       <button
                         type="button"
                         onClick={() => {
                           setOpen(false);
                           onViewSubmissions();
                         }}
-                        className="font-semibold text-sky-700 underline"
+                        className="text-[11px] font-semibold text-sky-700 underline"
                       >
-                        查看
+                        全部申報
                       </button>
-                    </>
-                  )}
-                </p>
+                    ) : null}
+                  </div>
+                  <ul className="max-h-40 space-y-1.5 overflow-y-auto">
+                    {submissions.slice(0, 8).map((s) => (
+                      <li
+                        key={s.id}
+                        className="rounded-md border border-white/80 bg-white px-2 py-1.5 text-[11px] text-stone-700 shadow-sm"
+                      >
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="font-mono text-sm font-bold tabular-nums tracking-wider text-emerald-900">
+                            {s.匯款末五碼 || "—"}
+                          </span>
+                          <span className="shrink-0 tabular-nums text-stone-500">{s.匯款日期 || "—"}</span>
+                        </div>
+                        <p className="mt-0.5 truncate text-stone-600" title={s.匯款單位}>
+                          {s.匯款單位 || "（未填匯款單位）"}
+                          {s.匯款金額 ? ` · ${s.匯款金額}` : ""}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                  {submissionCount > 8 ? (
+                    <p className="mt-1 text-[10px] text-stone-500">僅顯示最近 8 筆，完整清單請至「收款申報」</p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="text-[11px] text-stone-500">尚無客戶填寫末五碼／匯款申報</p>
               )}
             </div>
           )}
