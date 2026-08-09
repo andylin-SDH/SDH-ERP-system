@@ -18,6 +18,15 @@ import {
 
 export const dynamic = "force-dynamic";
 
+function errorText(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const msg = String((error as { message?: unknown }).message ?? "").trim();
+    if (msg) return msg;
+  }
+  return fallback;
+}
+
 export async function GET(request: NextRequest) {
   const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
@@ -30,10 +39,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: true, list });
   } catch (error) {
     console.error("GET /api/payout/extra-bonus error:", error);
-    return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "讀取失敗" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: errorText(error, "讀取失敗") }, { status: 500 });
   }
 }
 
@@ -54,8 +60,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, payout: row });
   } catch (error) {
     console.error("POST /api/payout/extra-bonus error:", error);
-    const msg = error instanceof Error ? error.message : "新增失敗";
-    const status = /缺少|請選擇|須大於/.test(msg) ? 400 : 500;
+    const msg = errorText(error, "新增失敗");
+    const status = /缺少|請選擇|須大於|唯一索引|已有相同/.test(msg) ? 400 : 500;
     return NextResponse.json({ ok: false, error: msg }, { status });
   }
 }
@@ -83,8 +89,8 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ ok: true, payout: row });
   } catch (error) {
     console.error("PATCH /api/payout/extra-bonus error:", error);
-    const msg = error instanceof Error ? error.message : "更新失敗";
-    const status = /僅可編輯|請選擇|須大於/.test(msg) ? 400 : 500;
+    const msg = errorText(error, "更新失敗");
+    const status = /僅可編輯|請選擇|須大於|唯一索引|已有相同/.test(msg) ? 400 : 500;
     return NextResponse.json({ ok: false, error: msg }, { status });
   }
 }
@@ -105,9 +111,6 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("DELETE /api/payout/extra-bonus error:", error);
-    return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "刪除失敗" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: errorText(error, "刪除失敗") }, { status: 500 });
   }
 }

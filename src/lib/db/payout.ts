@@ -15,12 +15,33 @@ import { getSystemConfig, updateSystemConfig } from "@/lib/db/system-config";
 import {
   applyHighestRatePerRecipient,
   EXTRA_BONUS_PAYOUT_TYPE,
+  extraBonusPayoutTypeForRecipient,
   isExtraBonusPayoutType,
   normalizeRecipientForDedupe,
 } from "@/lib/payout-dedupe";
 import { normalizeDecimalString } from "@/lib/number-normalize";
 
 export { EXTRA_BONUS_PAYOUT_TYPE, isExtraBonusPayoutType };
+
+function dbErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (error && typeof error === "object") {
+    const e = error as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown };
+    const msg = String(e.message ?? "").trim();
+    const code = String(e.code ?? "").trim();
+    if (code === "23505" || /duplicate key|unique constraint/i.test(msg)) {
+      return "此專案已有相同分潤類型列（多為 DB 唯一索引限制）。請再試一次，或於 Supabase 執行 migration 060。";
+    }
+    if (msg) return msg;
+    const details = String(e.details ?? "").trim();
+    if (details) return details;
+  }
+  return fallback;
+}
+
+function throwDbError(error: unknown, fallback: string): never {
+  throw new Error(dbErrorMessage(error, fallback));
+}
 
 export interface PayoutRow {
   id?: string;
@@ -133,22 +154,25 @@ export async function deletePayoutBy專案ID(專案ID: string): Promise<void> {
   const pid = String(專案ID ?? "").trim();
   if (!pid) return;
 
-  // 無分潤類型的舊列一併清掉
-  const { error: nullTypeErr } = await supabase
+  const { data, error: selErr } = await supabase
     .from("分潤表")
-    .delete()
-    .eq("專案ID", pid)
-    .is("分潤類型", null);
-  if (nullTypeErr && nullTypeErr.code !== "42P01") throw nullTypeErr;
+    .select("id, 分潤類型")
+    .eq("專案ID", pid);
+  if (selErr) {
+    if (selErr.code === "42P01") return;
+    throwDbError(selErr, "刪除分潤列失敗");
+  }
 
-  const { error } = await supabase
-    .from("分潤表")
-    .delete()
-    .eq("專案ID", pid)
-    .neq("分潤類型", EXTRA_BONUS_PAYOUT_TYPE);
+  const idsToDelete = (data ?? [])
+    .filter((r) => !isExtraBonusPayoutType((r as { 分潤類型?: string }).分潤類型))
+    .map((r) => String((r as { id?: string }).id ?? "").trim())
+    .filter(Boolean);
+  if (idsToDelete.length === 0) return;
+
+  const { error } = await supabase.from("分潤表").delete().in("id", idsToDelete);
   if (error) {
     if (error.code === "42P01") return;
-    throw error;
+    throwDbError(error, "刪除分潤列失敗");
   }
 }
 
@@ -157,6 +181,20 @@ async function refreshExtraBonusProjectFields(master: MasterRow): Promise<void> 
   const pid = String(master.專案ID ?? "").trim();
   if (!pid) return;
   const supabase = getSupabase();
+  const { data, error: selErr } = await supabase
+    .from("分潤表")
+    .select("id, 分潤類型")
+    .eq("專案ID", pid);
+  if (selErr) {
+    if (selErr.code === "42P01") return;
+    throwDbError(selErr, "更新額外獎金專案欄位失敗");
+  }
+  const ids = (data ?? [])
+    .filter((r) => isExtraBonusPayoutType((r as { 分潤類型?: string }).分潤類型))
+    .map((r) => String((r as { id?: string }).id ?? "").trim())
+    .filter(Boolean);
+  if (ids.length === 0) return;
+
   const { error } = await supabase
     .from("分潤表")
     .update({
@@ -165,9 +203,8 @@ async function refreshExtraBonusProjectFields(master: MasterRow): Promise<void> 
       專案營收: master.專案營收 ?? null,
       廠商預計付款日: master.廠商預計付款日?.trim() || null,
     })
-    .eq("專案ID", pid)
-    .eq("分潤類型", EXTRA_BONUS_PAYOUT_TYPE);
-  if (error && error.code !== "42P01") throw error;
+    .in("id", ids);
+  if (error && error.code !== "42P01") throwDbError(error, "更新額外獎金專案欄位失敗");
 }
 
 export async function listExtraBonusesBy專案ID(專案ID: string): Promise<PayoutRow[]> {
@@ -178,13 +215,14 @@ export async function listExtraBonusesBy專案ID(專案ID: string): Promise<Payo
     .from("分潤表")
     .select("*")
     .eq("專案ID", pid)
-    .eq("分潤類型", EXTRA_BONUS_PAYOUT_TYPE)
     .order("created_at", { ascending: true });
   if (error) {
     if (error.code === "42P01") return [];
-    throw error;
+    throwDbError(error, "讀取額外獎金失敗");
   }
-  return (data ?? []).map((r) => rowToPayout(r as Record<string, unknown>));
+  return (data ?? [])
+    .map((r) => rowToPayout(r as Record<string, unknown>))
+    .filter((r) => isExtraBonusPayoutType(r.分潤類型));
 }
 
 export async function createExtraBonus(input: {
@@ -206,13 +244,14 @@ export async function createExtraBonus(input: {
     .select("*")
     .eq("專案ID", pid)
     .maybeSingle();
-  if (masterErr) throw masterErr;
+  if (masterErr) throwDbError(masterErr, "讀取專案失敗");
   if (!masterRaw) throw new Error("找不到該專案");
 
   const master = masterRaw as Record<string, unknown>;
   const { data: finRaw } = await supabase.from("財務").select("廠商付款日期").eq("專案ID", pid).maybeSingle();
   const vendorPaid = String((finRaw as { 廠商付款日期?: unknown } | null)?.廠商付款日期 ?? "").trim() || null;
 
+  // 使用「額外獎金｜領取人」避開舊 DB (專案ID, 分潤類型) 唯一索引（同一專案只能一筆同類型）
   const insertRow: PayoutInsertRow = {
     專案ID: pid,
     專案名稱: (master.專案名稱 as string | null | undefined) ?? null,
@@ -221,14 +260,14 @@ export async function createExtraBonus(input: {
     廠商預計付款日: String(master.廠商預計付款日 ?? "").trim() || null,
     廠商付款日期: vendorPaid,
     分潤匯款日期: null,
-    分潤類型: EXTRA_BONUS_PAYOUT_TYPE,
+    分潤類型: extraBonusPayoutTypeForRecipient(recipient),
     分潤成數: null,
     分潤金額: String(Math.round(amount)),
     領取人: recipient,
   };
 
   const { data, error } = await supabase.from("分潤表").insert(insertRow).select("*").maybeSingle();
-  if (error) throw error;
+  if (error) throwDbError(error, "新增額外獎金失敗");
   if (!data) throw new Error("新增額外獎金失敗");
   return rowToPayout(data as Record<string, unknown>);
 }
@@ -246,7 +285,7 @@ export async function updateExtraBonus(
     .select("*")
     .eq("id", rowId)
     .maybeSingle();
-  if (findErr) throw findErr;
+  if (findErr) throwDbError(findErr, "讀取額外獎金失敗");
   if (!existing) return null;
   if (!isExtraBonusPayoutType((existing as Record<string, unknown>)["分潤類型"] as string)) {
     throw new Error("僅可編輯額外獎金列");
@@ -257,6 +296,7 @@ export async function updateExtraBonus(
     const recipient = String(input.領取人 ?? "").trim();
     if (!recipient) throw new Error("請選擇領取人");
     payload.領取人 = recipient;
+    payload.分潤類型 = extraBonusPayoutTypeForRecipient(recipient);
   }
   if (input.分潤金額 !== undefined) {
     const amount = parseAmount(input.分潤金額);
@@ -271,10 +311,12 @@ export async function updateExtraBonus(
     .from("分潤表")
     .update(payload)
     .eq("id", rowId)
-    .eq("分潤類型", EXTRA_BONUS_PAYOUT_TYPE)
     .select("*")
     .maybeSingle();
-  if (error) throw error;
+  if (error) throwDbError(error, "更新額外獎金失敗");
+  if (data && !isExtraBonusPayoutType((data as Record<string, unknown>)["分潤類型"] as string)) {
+    throw new Error("僅可編輯額外獎金列");
+  }
   return data ? rowToPayout(data as Record<string, unknown>) : null;
 }
 
@@ -282,16 +324,27 @@ export async function deleteExtraBonus(id: string): Promise<boolean> {
   const rowId = String(id ?? "").trim();
   if (!rowId) return false;
   const supabase = getSupabase();
+  const { data: existing, error: findErr } = await supabase
+    .from("分潤表")
+    .select("id, 分潤類型")
+    .eq("id", rowId)
+    .maybeSingle();
+  if (findErr) {
+    if (findErr.code === "42P01") return false;
+    throwDbError(findErr, "刪除額外獎金失敗");
+  }
+  if (!existing || !isExtraBonusPayoutType((existing as Record<string, unknown>)["分潤類型"] as string)) {
+    return false;
+  }
   const { data, error } = await supabase
     .from("分潤表")
     .delete()
     .eq("id", rowId)
-    .eq("分潤類型", EXTRA_BONUS_PAYOUT_TYPE)
     .select("id")
     .maybeSingle();
   if (error) {
     if (error.code === "42P01") return false;
-    throw error;
+    throwDbError(error, "刪除額外獎金失敗");
   }
   return Boolean(data);
 }

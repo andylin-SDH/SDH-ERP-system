@@ -54,8 +54,26 @@ export function normalizeRecipientForDedupe(s: string | null | undefined): strin
 /** 人工額外獎金：不進成數計算、重算時保留、同人去重時不與角色分潤合併 */
 export const EXTRA_BONUS_PAYOUT_TYPE = "額外獎金";
 
+/**
+ * 相容舊列「額外獎金」，以及為避開 (專案ID, 分潤類型) 唯一索引而寫成「額外獎金｜領取人」的列。
+ */
 export function isExtraBonusPayoutType(type: string | null | undefined): boolean {
-  return String(type ?? "").trim() === EXTRA_BONUS_PAYOUT_TYPE;
+  const t = String(type ?? "").trim();
+  if (!t) return false;
+  if (t === EXTRA_BONUS_PAYOUT_TYPE) return true;
+  return t.startsWith(`${EXTRA_BONUS_PAYOUT_TYPE}｜`) || t.startsWith(`${EXTRA_BONUS_PAYOUT_TYPE}|`);
+}
+
+/** 畫面上統一顯示「額外獎金」 */
+export function displayPayoutTypeLabel(type: string | null | undefined): string {
+  if (isExtraBonusPayoutType(type)) return EXTRA_BONUS_PAYOUT_TYPE;
+  return String(type ?? "").trim();
+}
+
+/** 新建額外獎金列用的分潤類型（每人一鍵，避開唯一索引） */
+export function extraBonusPayoutTypeForRecipient(recipient: string): string {
+  const name = String(recipient ?? "").trim();
+  return name ? `${EXTRA_BONUS_PAYOUT_TYPE}｜${name}` : EXTRA_BONUS_PAYOUT_TYPE;
 }
 
 /**

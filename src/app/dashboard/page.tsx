@@ -19,7 +19,11 @@ import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, Pa
 import { sortInvoicesByInvoiceNumber } from "@/modules/finance";
 import type { FinanceUpdateFields } from "@/lib/db/finance";
 import type { PayoutRow } from "@/lib/db/payout";
-import { applyHighestRatePerRecipient, isExtraBonusPayoutType } from "@/lib/payout-dedupe";
+import {
+  applyHighestRatePerRecipient,
+  displayPayoutTypeLabel,
+  isExtraBonusPayoutType,
+} from "@/lib/payout-dedupe";
 import { canEditMasterNumericFields } from "@/config/master-permissions";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
 import { PROJECT_TYPES, costFromTotalByProjectType } from "@/config/project-types";
@@ -8775,7 +8779,10 @@ export default function DashboardPage() {
                                   <p><span className="text-stone-500">分潤匯款日期</span> {String(r.分潤匯款日期 ?? "—")}</p>
                                 )}
                                 {payoutVisibleCols.includes("分潤類型") && (
-                                  <p><span className="text-stone-500">分潤類型</span> {String(r.分潤類型 ?? "—")}</p>
+                                  <p>
+                                    <span className="text-stone-500">分潤類型</span>{" "}
+                                    {displayPayoutTypeLabel(r.分潤類型) || "—"}
+                                  </p>
                                 )}
                                 {payoutVisibleCols.includes("領取人") && (
                                   <p><span className="text-stone-500">領取人</span> {String(r.領取人 ?? "—")}</p>
@@ -9126,7 +9133,9 @@ export default function DashboardPage() {
                             <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-stone-900">
                               {row.領取人 ?? "—"}
                             </td>
-                            <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-600">{row.分潤類型 ?? "—"}</td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-600">
+                              {displayPayoutTypeLabel(row.分潤類型) || "—"}
+                            </td>
                             <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold tabular-nums text-stone-900">
                               {formatAmount(row.分潤金額)}
                             </td>
