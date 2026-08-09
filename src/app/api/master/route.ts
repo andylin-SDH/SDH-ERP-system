@@ -55,6 +55,8 @@ export async function POST(request: NextRequest) {
       專案類型: (body?.專案類型 as string) ?? null,
       專案狀態: (body?.專案狀態 as string) ?? null,
       長期案: Boolean(body?.長期案),
+      母專案ID: (body?.母專案ID as string) ?? null,
+      合約連結: (body?.合約連結 as string) ?? null,
       狀態確認日期: (body?.狀態確認日期 as string) ?? null,
       開案日期: (body?.開案日期 as string) ?? null,
       專案總金額未稅: (body?.專案總金額未稅 as string) ?? null,
@@ -124,6 +126,9 @@ export async function PATCH(request: NextRequest) {
       專案類型: (body?.專案類型 as string) ?? null,
       專案狀態: (body?.專案狀態 as string) ?? null,
       長期案: Boolean(body?.長期案),
+      // 僅在有傳入時帶入，讓 updateMaster 的守衞式判斷可略過未變動欄位
+      ...(body?.母專案ID !== undefined ? { 母專案ID: (body.母專案ID as string) ?? null } : {}),
+      ...(body?.合約連結 !== undefined ? { 合約連結: (body.合約連結 as string) ?? null } : {}),
       狀態確認日期: (body?.狀態確認日期 as string) ?? null,
       開案日期: (body?.開案日期 as string) ?? null,
       專案總金額未稅: (body?.專案總金額未稅 as string) ?? null,

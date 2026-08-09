@@ -14,6 +14,10 @@ export interface MasterRow {
   專案類型: string | null;
   專案狀態: string | null;
   長期案: boolean;
+  /** 母專案的專案ID（子專案用；NULL 代表獨立或母專案） */
+  母專案ID: string | null;
+  /** 合約雲端連結（全款以合約為準） */
+  合約連結: string | null;
   狀態確認日期: string | null;
   開案日期: string | null;
   專案總金額未稅: string | null;
@@ -59,6 +63,8 @@ function rowToMaster(r: Record<string, unknown>): MasterRow {
     專案類型: (r.專案類型 as string) ?? null,
     專案狀態: (r.專案狀態 as string) ?? null,
     長期案: Boolean(r.長期案),
+    母專案ID: (r.母專案ID as string) ?? null,
+    合約連結: (r.合約連結 as string) ?? null,
     狀態確認日期: (r.狀態確認日期 as string) ?? null,
     開案日期: (r.開案日期 as string) ?? null,
     專案總金額未稅: money(r.專案總金額未稅),
@@ -134,6 +140,8 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     專案類型: payload.專案類型 ?? null,
     專案狀態: payload.專案狀態 ?? null,
     長期案: Boolean(payload.長期案),
+    母專案ID: payload.母專案ID ? String(payload.母專案ID).trim() : null,
+    合約連結: payload.合約連結 ?? null,
     狀態確認日期: payload.狀態確認日期 ?? null,
     開案日期: payload.開案日期 ?? null,
     專案總金額未稅: normalizeMoneyOrNull(payload.專案總金額未稅),
@@ -214,6 +222,12 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
     專案資料夾: payload.專案資料夾 ?? null,
     updated_at: new Date().toISOString(),
   };
+  // 母專案ID／合約連結：僅在有傳入時才更新，避免行內部分更新誤清空
+  if (payload.母專案ID !== undefined) {
+    updateData.母專案ID = payload.母專案ID ? String(payload.母專案ID).trim() : null;
+  }
+  if (payload.合約連結 !== undefined) updateData.合約連結 = payload.合約連結 ?? null;
+
   // 分潤成數僅由 Config 控制，前端不可修改，PATCH 時不更新
   if (payload.專案BDPM分潤成數 !== undefined) updateData.專案BDPM分潤成數 = payload.專案BDPM分潤成數 ?? null;
   if (payload.專案引薦人分潤成數 !== undefined) updateData.專案引薦人分潤成數 = payload.專案引薦人分潤成數 ?? null;

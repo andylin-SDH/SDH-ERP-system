@@ -433,12 +433,18 @@ function InvoiceProjectSearchSelect({
   disabled,
   onChange,
   onBlur,
+  placeholder = "搜尋專案名稱",
+  clearLabel = "不綁定專案",
+  inputClassName,
 }: {
   value: string;
   options: InvoiceProjectOption[];
   disabled?: boolean;
   onChange: (projectId: string) => void;
   onBlur?: () => void;
+  placeholder?: string;
+  clearLabel?: string;
+  inputClassName?: string;
 }) {
   const normalizedValue = String(value ?? "").trim();
   const selected = options.find((opt) => opt.id === normalizedValue);
@@ -463,7 +469,7 @@ function InvoiceProjectSearchSelect({
         type="text"
         value={query}
         disabled={disabled}
-        placeholder="搜尋專案名稱"
+        placeholder={placeholder}
         onFocus={() => setOpen(true)}
         onChange={(e) => {
           const next = e.target.value;
@@ -479,10 +485,13 @@ function InvoiceProjectSearchSelect({
             onBlur?.();
           }, 120);
         }}
-        className="w-full min-w-[10rem] rounded border border-stone-200 bg-white px-2 py-1.5 text-xs font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none disabled:opacity-60"
+        className={
+          inputClassName ??
+          "w-full min-w-[10rem] rounded border border-stone-200 bg-white px-2 py-1.5 text-xs font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none disabled:opacity-60"
+        }
       />
       {open && !disabled && (
-        <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-72 overflow-auto rounded-lg border border-stone-200 bg-white py-1 text-xs shadow-xl">
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-full min-w-[18rem] overflow-auto rounded-lg border border-stone-200 bg-white py-1 text-xs shadow-xl">
           <button
             type="button"
             onMouseDown={(e) => {
@@ -493,7 +502,7 @@ function InvoiceProjectSearchSelect({
             }}
             className="block w-full px-3 py-2 text-left text-stone-500 hover:bg-amber-50 hover:text-stone-900"
           >
-            不綁定專案
+            {clearLabel}
           </button>
           {filteredOptions.length === 0 ? (
             <div className="px-3 py-2 text-stone-400">沒有符合的專案</div>
@@ -1394,6 +1403,8 @@ export default function DashboardPage() {
     專案類型: "",
     專案狀態: "",
     長期案: false,
+    母專案ID: "",
+    合約連結: "",
     狀態確認日期: "",
     開案日期: "",
     廠商預計付款日: "",
@@ -1451,6 +1462,8 @@ export default function DashboardPage() {
     專案類型: "",
     專案狀態: "",
     長期案: false,
+    母專案ID: "",
+    合約連結: "",
     狀態確認日期: "",
     開案日期: "",
     廠商預計付款日: "",
@@ -3498,6 +3511,8 @@ export default function DashboardPage() {
       專案類型: selectedMaster.專案類型 ?? "",
       專案狀態: selectedMaster.專案狀態 ?? "",
       長期案: Boolean(selectedMaster.長期案),
+      母專案ID: selectedMaster.母專案ID ?? "",
+      合約連結: selectedMaster.合約連結 ?? "",
       狀態確認日期: normalizeDateForInput(selectedMaster.狀態確認日期),
       開案日期: normalizeDateForInput(selectedMaster.開案日期),
       廠商預計付款日: normalizeDateForInput(selectedMaster.廠商預計付款日),
@@ -5523,6 +5538,8 @@ export default function DashboardPage() {
                       專案類型: masterSubTab !== "全部" ? masterSubTab : "",
                       專案狀態: "",
                       長期案: false,
+                      母專案ID: "",
+                      合約連結: "",
                       狀態確認日期: "",
                       開案日期: today,
                       廠商預計付款日: "",
@@ -11101,6 +11118,20 @@ export default function DashboardPage() {
                       onChange={(v) => setCreateForm((f) => ({ ...f, 廠商預計付款日: v }))}
                     />
                     <InputField label="專案資料夾" value={createForm.專案資料夾} onChange={(v) => setCreateForm((f) => ({ ...f, 專案資料夾: v }))} className="col-span-2" />
+                    <div className="col-span-2">
+                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">
+                        母專案（子專案選填）
+                      </label>
+                      <InvoiceProjectSearchSelect
+                        value={createForm.母專案ID}
+                        options={invoiceProjectOptions}
+                        onChange={(projectId) => setCreateForm((f) => ({ ...f, 母專案ID: projectId }))}
+                        placeholder="搜尋母專案名稱…"
+                        clearLabel="無母專案（獨立專案）"
+                        inputClassName="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                      />
+                    </div>
+                    <InputField label="合約連結" value={createForm.合約連結} onChange={(v) => setCreateForm((f) => ({ ...f, 合約連結: v }))} className="col-span-2" />
                   </div>
                 </section>
 
@@ -11705,6 +11736,8 @@ export default function DashboardPage() {
                       專案類型: selectedMaster.專案類型 ?? "",
                       專案狀態: selectedMaster.專案狀態 ?? "",
                       長期案: Boolean(selectedMaster.長期案),
+                      母專案ID: selectedMaster.母專案ID ?? "",
+                      合約連結: selectedMaster.合約連結 ?? "",
                       狀態確認日期: normalizeDateForInput(selectedMaster.狀態確認日期),
                       開案日期: normalizeDateForInput(selectedMaster.開案日期),
                       廠商預計付款日: normalizeDateForInput(selectedMaster.廠商預計付款日),
@@ -11904,6 +11937,42 @@ export default function DashboardPage() {
                   ) : (
                     <div className="col-span-2">
                       <Field label="專案資料夾" value={selectedMaster.專案資料夾} />
+                    </div>
+                  )}
+                  {isEditingMaster ? (
+                    <div className="col-span-2">
+                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">
+                        母專案（子專案選填）
+                      </label>
+                      <InvoiceProjectSearchSelect
+                        value={editMasterForm.母專案ID}
+                        options={invoiceProjectOptions.filter(
+                          (opt) => opt.id !== String(selectedMaster.專案ID ?? "").trim()
+                        )}
+                        onChange={(projectId) => setEditMasterForm((f) => ({ ...f, 母專案ID: projectId }))}
+                        placeholder="搜尋母專案名稱…"
+                        clearLabel="無母專案（獨立專案）"
+                        inputClassName="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                      />
+                    </div>
+                  ) : (
+                    <div className="col-span-2">
+                      <Field
+                        label="母專案"
+                        value={(() => {
+                          const pid = String(selectedMaster.母專案ID ?? "").trim();
+                          if (!pid) return "";
+                          const parent = invoiceProjectOptions.find((o) => o.id === pid);
+                          return parent?.name ? `${parent.name}（${pid}）` : pid;
+                        })()}
+                      />
+                    </div>
+                  )}
+                  {isEditingMaster ? (
+                    <InputField label="合約連結" value={editMasterForm.合約連結} onChange={(v) => setEditMasterForm((f) => ({ ...f, 合約連結: v }))} className="col-span-2" />
+                  ) : (
+                    <div className="col-span-2">
+                      <Field label="合約連結" value={selectedMaster.合約連結} />
                     </div>
                   )}
                 </div>
