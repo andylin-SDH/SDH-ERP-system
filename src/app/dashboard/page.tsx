@@ -1270,6 +1270,23 @@ function isProjectInProgress(專案狀態: string | null | undefined): boolean {
   return true;
 }
 
+/**
+ * 母／子案生命週期歸屬：
+ * - 有母專案且找得到母案 → 跟母案走（母案進行中：已結案子案仍留在進行中；母案已結案：未結案子案一併歸已結案）
+ * - 無母專案或找不到母案 → 依自身狀態
+ */
+function effectiveMasterInProgress(
+  row: MasterRow,
+  byProjectId: Map<string, MasterRow>
+): boolean {
+  const parentId = String(row.母專案ID ?? "").trim();
+  if (parentId) {
+    const parent = byProjectId.get(parentId);
+    if (parent) return isProjectInProgress(parent.專案狀態);
+  }
+  return isProjectInProgress(row.專案狀態);
+}
+
 /** 將 DB／試算表等來源的日期字串轉成 HTML date input 可用的 yyyy-MM-dd */
 function normalizeDateForInput(raw: string | null | undefined): string {
   const s = String(raw ?? "").trim();
@@ -2672,27 +2689,41 @@ export default function DashboardPage() {
     }) as MasterRow[];
   }, [masterListByCreatedAt, filterRowsByVisibility, taskVisibleProjectIdsForMasterAugment]);
 
-  /** 大總表頂部「進行中／已結案」數量（② 可見範圍內） */
+  /** 可見範圍內專案ID → 列（供母／子案生命週期跟母案） */
+  const masterByProjectIdForLifecycle = useMemo(() => {
+    const m = new Map<string, MasterRow>();
+    for (const row of filteredMasterList) {
+      const id = String(row.專案ID ?? "").trim();
+      if (id) m.set(id, row);
+    }
+    return m;
+  }, [filteredMasterList]);
+
+  /** 大總表頂部「進行中／已結案」數量（② 可見範圍內；子案跟母案歸屬） */
   const masterLifecycleCounts = useMemo(() => {
     let active = 0;
     let closed = 0;
     for (const row of filteredMasterList) {
-      if (!isProjectInProgress(row.專案狀態)) {
-        closed += 1;
-      } else {
+      if (effectiveMasterInProgress(row, masterByProjectIdForLifecycle)) {
         active += 1;
+      } else {
+        closed += 1;
       }
     }
     return { active, closed };
-  }, [filteredMasterList]);
+  }, [filteredMasterList, masterByProjectIdForLifecycle]);
 
-  /** 大總表：先依「進行中／已結案」篩選 */
+  /** 大總表：先依「進行中／已結案」篩選（子案生命週期跟母案） */
   const masterLifecycleBaseList = useMemo(() => {
     if (masterLifecycleTab === "in_progress") {
-      return filteredMasterList.filter((row) => isProjectInProgress(row.專案狀態));
+      return filteredMasterList.filter((row) =>
+        effectiveMasterInProgress(row, masterByProjectIdForLifecycle)
+      );
     }
-    return filteredMasterList.filter((row) => !isProjectInProgress(row.專案狀態));
-  }, [filteredMasterList, masterLifecycleTab]);
+    return filteredMasterList.filter(
+      (row) => !effectiveMasterInProgress(row, masterByProjectIdForLifecycle)
+    );
+  }, [filteredMasterList, masterLifecycleTab, masterByProjectIdForLifecycle]);
 
   /** 大總表：生命週期內再依「全部／僅長期案」篩選 */
   const masterLongTermFilteredList = useMemo(() => {
@@ -5855,7 +5886,7 @@ export default function DashboardPage() {
               </div>
               {masterLifecycleTab === "closed" && (
                 <p className="mt-2 max-w-3xl text-xs text-stone-500">
-                  以下為已結案專案，僅供查詢與歷史紀錄；若要處理進行中工作請切換「進行中」。
+                  以下為已結案專案，僅供查詢與歷史紀錄；若要處理進行中工作請切換「進行中」。子案跟母案歸屬：母案未結案時，已結案子案仍留在「進行中」；母案已結案時，未結案子案一併出現在此。
                 </p>
               )}
               {masterLongTermFilter === "long_term_only" && (
