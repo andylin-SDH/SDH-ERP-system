@@ -57,7 +57,7 @@ export const EXTRA_BONUS_PAYOUT_TYPE = "額外獎金";
 /**
  * 相容舊列「額外獎金」，以及為避開 (專案ID, 分潤類型) 唯一索引而寫成「額外獎金｜領取人」的列。
  */
-export function isExtraBonusPayoutType(type: string | null | undefined): boolean {
+export function isExtraBonusPayoutType(type: unknown): boolean {
   const t = String(type ?? "").trim();
   if (!t) return false;
   if (t === EXTRA_BONUS_PAYOUT_TYPE) return true;
@@ -65,8 +65,8 @@ export function isExtraBonusPayoutType(type: string | null | undefined): boolean
 }
 
 /** 畫面上統一顯示「額外獎金」 */
-export function displayPayoutTypeLabel(type: string | null | undefined): string {
-  if (isExtraBonusPayoutType(type)) return EXTRA_BONUS_PAYOUT_TYPE;
+export function displayPayoutTypeLabel(type: unknown): string {
+  if (isExtraBonusPayoutType(type as string | null | undefined)) return EXTRA_BONUS_PAYOUT_TYPE;
   return String(type ?? "").trim();
 }
 
