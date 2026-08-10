@@ -156,7 +156,7 @@ export async function deletePayoutBy專案ID(專案ID: string): Promise<void> {
 
   const { data, error: selErr } = await supabase
     .from("分潤表")
-    .select("id, 分潤類型")
+    .select('id, "分潤類型"')
     .eq("專案ID", pid);
   if (selErr) {
     if (selErr.code === "42P01") return;
@@ -183,7 +183,7 @@ async function refreshExtraBonusProjectFields(master: MasterRow): Promise<void> 
   const supabase = getSupabase();
   const { data, error: selErr } = await supabase
     .from("分潤表")
-    .select("id, 分潤類型")
+    .select('id, "分潤類型"')
     .eq("專案ID", pid);
   if (selErr) {
     if (selErr.code === "42P01") return;
@@ -336,14 +336,14 @@ export async function deleteExtraBonus(id: string): Promise<boolean> {
   const supabase = getSupabase();
   const { data: existing, error: findErr } = await supabase
     .from("分潤表")
-    .select("id, 分潤類型")
+    .select('id, "分潤類型"')
     .eq("id", rowId)
     .maybeSingle();
   if (findErr) {
     if (findErr.code === "42P01") return false;
     throwDbError(findErr, "刪除額外獎金失敗");
   }
-  if (!existing || !isExtraBonusPayoutType((existing as Record<string, unknown>)["分潤類型"] as string)) {
+  if (!existing || !isExtraBonusPayoutType((existing as unknown as Record<string, unknown>)["分潤類型"] as string)) {
     return false;
   }
   const { data, error } = await supabase
