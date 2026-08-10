@@ -19,10 +19,22 @@ import {
 export const dynamic = "force-dynamic";
 
 function errorText(error: unknown, fallback: string): string {
+  if (typeof error === "string" && error.trim()) return error.trim();
   if (error instanceof Error && error.message.trim()) return error.message;
-  if (error && typeof error === "object" && "message" in error) {
-    const msg = String((error as { message?: unknown }).message ?? "").trim();
-    if (msg) return msg;
+  if (error && typeof error === "object") {
+    const e = error as { message?: unknown; code?: unknown; details?: unknown };
+    const msg = String(e.message ?? "").trim();
+    const details = String(e.details ?? "").trim();
+    const code = String(e.code ?? "").trim();
+    if (msg && details) return `${msg}（${details}）`;
+    if (msg) return code ? `${msg} [${code}]` : msg;
+    if (details) return details;
+    try {
+      const raw = JSON.stringify(error);
+      if (raw && raw !== "{}") return raw;
+    } catch {
+      /* ignore */
+    }
   }
   return fallback;
 }

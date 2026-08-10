@@ -70,10 +70,11 @@ export function displayPayoutTypeLabel(type: string | null | undefined): string 
   return String(type ?? "").trim();
 }
 
-/** 新建額外獎金列用的分潤類型（每人一鍵，避開唯一索引） */
+/** 新建額外獎金列用的分潤類型（附領取人＋短碼，避開 (專案ID, 分潤類型) 唯一索引） */
 export function extraBonusPayoutTypeForRecipient(recipient: string): string {
-  const name = String(recipient ?? "").trim();
-  return name ? `${EXTRA_BONUS_PAYOUT_TYPE}｜${name}` : EXTRA_BONUS_PAYOUT_TYPE;
+  const name = String(recipient ?? "").trim() || "未指定";
+  const suffix = Date.now().toString(36).slice(-6);
+  return `${EXTRA_BONUS_PAYOUT_TYPE}｜${name}｜${suffix}`;
 }
 
 /**

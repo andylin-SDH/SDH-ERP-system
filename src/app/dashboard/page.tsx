@@ -2085,7 +2085,8 @@ export default function DashboardPage() {
       });
       const data = (await safeResJson(res)) as { ok?: boolean; error?: string; payout?: PayoutRow };
       if (!res.ok || !data.ok || !data.payout) {
-        setExtraBonusError(data.error ?? "儲存失敗");
+        const detail = String(data.error ?? "").trim();
+        setExtraBonusError(detail || `儲存失敗（HTTP ${res.status}）`);
         return;
       }
       setPayoutList((prev) => {
@@ -2977,7 +2978,7 @@ export default function DashboardPage() {
   );
 
   /** 套用關鍵字搜尋後的各 Table 資料（大總表：先進行中/已結案 → 專案類型 → 搜尋；模式 B 欄由合作夥伴帶出） */
-  const searchedMasterList = useMemo(() => {
+  const searchedMasterHits = useMemo(() => {
     const q = deferredMasterSearch.trim().toLowerCase();
     if (!q) return masterTabFilteredList;
     return masterTabFilteredList.filter((row) =>
@@ -2986,6 +2987,67 @@ export default function DashboardPage() {
       )
     );
   }, [masterTabFilteredList, masterVisibleCols, deferredMasterSearch, partnerByKolName, financeByProjectId, invoiceSummaryByProjectId]);
+
+  /** 目前分頁內：母專案ID → 子專案列（含子案本身也在篩選結果內者） */
+  const masterChildrenByParentId = useMemo(() => {
+    const m = new Map<string, MasterRow[]>();
+    for (const row of masterTabFilteredList) {
+      const parentId = String(row.母專案ID ?? "").trim();
+      if (!parentId) continue;
+      if (!m.has(parentId)) m.set(parentId, []);
+      m.get(parentId)!.push(row);
+    }
+    for (const [, kids] of m) {
+      kids.sort((a, b) =>
+        String(a.專案名稱 ?? "").localeCompare(String(b.專案名稱 ?? ""), "zh-Hant")
+      );
+    }
+    return m;
+  }, [masterTabFilteredList]);
+
+  /**
+   * 大總表主列：只顯示「無母專案」或母專案不在目前清單內的列（孤兒子案）。
+   * 有母專案的子案改掛在母案展開區，避免與母案並列重複。
+   * 搜尋命中子案時，會把其母案一併帶進主列以便展開查看。
+   */
+  const searchedMasterList = useMemo(() => {
+    const q = deferredMasterSearch.trim();
+    const idInTab = new Set(
+      masterTabFilteredList.map((r) => String(r.專案ID ?? "").trim()).filter(Boolean)
+    );
+
+    let pool = masterTabFilteredList;
+    if (q) {
+      const hitIds = new Set(
+        searchedMasterHits.map((r) => String(r.專案ID ?? "").trim()).filter(Boolean)
+      );
+      for (const row of searchedMasterHits) {
+        const parentId = String(row.母專案ID ?? "").trim();
+        if (parentId && idInTab.has(parentId)) hitIds.add(parentId);
+      }
+      pool = masterTabFilteredList.filter((r) => hitIds.has(String(r.專案ID ?? "").trim()));
+    }
+
+    const poolIds = new Set(pool.map((r) => String(r.專案ID ?? "").trim()).filter(Boolean));
+    return pool.filter((row) => {
+      const parentId = String(row.母專案ID ?? "").trim();
+      if (!parentId) return true;
+      return !poolIds.has(parentId);
+    });
+  }, [masterTabFilteredList, searchedMasterHits, deferredMasterSearch]);
+
+  /** 搜尋命中子專案時，自動展開其母案以便看到巢狀結果 */
+  useEffect(() => {
+    const q = deferredMasterSearch.trim();
+    if (!q) return;
+    for (const row of searchedMasterHits) {
+      const parentId = String(row.母專案ID ?? "").trim();
+      if (parentId) {
+        setExpandedProjectId(parentId);
+        return;
+      }
+    }
+  }, [deferredMasterSearch, searchedMasterHits]);
 
   /**
    * 依「目前子分頁篩選後」是否同時含模式 A 與模式 B 專案，決定表頭角色欄。
@@ -3316,10 +3378,31 @@ export default function DashboardPage() {
     () => filterRowsBySearch(finance as unknown as Record<string, unknown>[], financeVisibleCols, deferredFinanceSearch),
     [finance, financeVisibleCols, deferredFinanceSearch, filterRowsBySearch]
   );
-  const searchedInvoices = useMemo(
-    () => filterRowsBySearch(monthFilteredInvoices as unknown as Record<string, unknown>[], invoicesVisibleCols, deferredInvoicesSearch),
-    [monthFilteredInvoices, invoicesVisibleCols, deferredInvoicesSearch, filterRowsBySearch]
-  );
+  const invoiceProjectSearchTextById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const opt of invoiceProjectOptions) {
+      m.set(opt.id, String(opt.searchText ?? "").toLowerCase());
+    }
+    return m;
+  }, [invoiceProjectOptions]);
+
+  /** 發票搜尋：除可見欄位外，也比對對應專案的「專案名稱」（畫面上顯示名稱，列資料僅存專案ID） */
+  const searchedInvoices = useMemo(() => {
+    const q = deferredInvoicesSearch.trim().toLowerCase();
+    if (!q) return monthFilteredInvoices as unknown as Record<string, unknown>[];
+    const keys = invoicesVisibleCols;
+    return (monthFilteredInvoices as unknown as Record<string, unknown>[]).filter((row) => {
+      if (keys.some((k) => String(row[k] ?? "").toLowerCase().includes(q))) return true;
+      const pid = String(row.專案ID ?? "").trim();
+      if (!pid) return false;
+      return (invoiceProjectSearchTextById.get(pid) ?? "").includes(q);
+    });
+  }, [
+    monthFilteredInvoices,
+    invoicesVisibleCols,
+    deferredInvoicesSearch,
+    invoiceProjectSearchTextById,
+  ]);
   const invoicesSortedForDisplay = useMemo(
     () => applyInvoiceListSort(searchedInvoices as unknown as InvoiceRow[], invoiceListDateSortMode),
     [searchedInvoices, invoiceListDateSortMode]
@@ -5894,6 +5977,7 @@ export default function DashboardPage() {
                       const isExpanded = expandedProjectId === pid;
                       // 大總表展開列：該專案任務全顯（不套用任務②可見規則）；側邊「任務」分頁仍為 filteredTasks
                       const projectTasks = tasks.filter((t) => (t.專案ID ?? "").trim().toLowerCase() === pid.trim().toLowerCase());
+                      const projectChildren = masterChildrenByParentId.get(String(pid).trim()) ?? [];
                       const invoiceSummary = invoiceSummaryByProjectId.get(String(pid).trim());
                       const projectInvoices = invoiceSummary?.rows ?? [];
                       const projectFinance = financeByProjectId.get(String(pid).trim());
@@ -5933,7 +6017,7 @@ export default function DashboardPage() {
                                         setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
                                       }}
                                       className="mr-2 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-stone-50 text-stone-500 transition hover:bg-amber-100/90 hover:border-amber-300 hover:text-amber-800"
-                                      title={isExpanded ? "收合任務" : "展開任務"}
+                                      title={isExpanded ? "收合子專案／任務" : "展開子專案／任務"}
                                     >
                                       <svg className={`h-4 w-4 transition-transform ${isExpanded ? "rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -5946,13 +6030,33 @@ export default function DashboardPage() {
                               if (k === "專案名稱") {
                                 const projectName = String(val ?? "").trim() || "—";
                                 const kolName = String(row.KOL名稱 ?? "").trim();
+                                const childCount = projectChildren.length;
+                                const isOrphanChild = Boolean(String(row.母專案ID ?? "").trim());
                                 return (
                                   <td
                                     key={k}
                                     className="sticky left-[5rem] z-20 w-48 min-w-[12rem] max-w-[12rem] bg-white/90 px-4 py-3.5"
                                     title={kolName ? `${projectName} · ${kolName}` : projectName}
                                   >
-                                    <p className="truncate text-sm font-medium text-stone-900">{projectName}</p>
+                                    <div className="flex min-w-0 items-start gap-1.5">
+                                      <p className="min-w-0 flex-1 truncate text-sm font-medium text-stone-900">{projectName}</p>
+                                      {childCount > 0 ? (
+                                        <span
+                                          className="mt-0.5 shrink-0 rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-sky-800"
+                                          title={`${childCount} 個子專案`}
+                                        >
+                                          子 {childCount}
+                                        </span>
+                                      ) : null}
+                                      {isOrphanChild ? (
+                                        <span
+                                          className="mt-0.5 shrink-0 rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-sky-800"
+                                          title="此為子專案；母專案不在目前篩選列表中"
+                                        >
+                                          子案
+                                        </span>
+                                      ) : null}
+                                    </div>
                                     {kolName ? (
                                       <p className="mt-0.5 truncate text-[11px] font-semibold tracking-wide text-amber-900/85">
                                         {kolName}
@@ -6079,7 +6183,85 @@ export default function DashboardPage() {
                                       </div>
                                     </div>
                                   </div>
-                                  <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-amber-800">此專案任務</h3>
+                                  <div className="mb-5 rounded-xl border border-sky-200/90 bg-sky-50/50 p-3">
+                                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                      <h3 className="text-sm font-bold uppercase tracking-wider text-sky-900">
+                                        子專案
+                                        <span className="ml-2 rounded-full border border-sky-300 bg-white px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-sky-800">
+                                          {projectChildren.length} 筆
+                                        </span>
+                                      </h3>
+                                      <p className="text-[11px] text-sky-800/80">與下方「任務」不同：此為獨立專案列，點擊開啟專案詳情</p>
+                                    </div>
+                                    <div className="max-w-full overflow-x-auto rounded-lg border border-sky-200/80 bg-white/95">
+                                      <table className="inline-table max-w-full align-top border-collapse divide-y divide-sky-100">
+                                        <thead className="bg-sky-100/80">
+                                          <tr>
+                                            <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-sky-900/70">專案名稱</th>
+                                            <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase text-sky-900/70">專案狀態</th>
+                                            <th className="whitespace-nowrap px-3 py-2 text-right text-xs font-semibold uppercase text-sky-900/70">專案總金額未稅</th>
+                                            <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase text-sky-900/70">款項進度</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-sky-100">
+                                          {projectChildren.length === 0 ? (
+                                            <tr>
+                                              <td colSpan={4} className="px-3 py-4 text-center text-sm text-stone-500">
+                                                尚無子專案（於子案詳情設定「母專案」即可掛在此）
+                                              </td>
+                                            </tr>
+                                          ) : (
+                                            projectChildren.map((child) => {
+                                              const childPid = String(child.專案ID ?? "").trim();
+                                              const childFin = financeByProjectId.get(childPid);
+                                              const childProgress = financeProgressShortLabel(childFin);
+                                              return (
+                                                <tr
+                                                  key={child.id ?? childPid}
+                                                  className="cursor-pointer hover:bg-sky-50/90"
+                                                  onClick={() => {
+                                                    setSelectedMaster(child);
+                                                    setIsEditingMaster(false);
+                                                    setSaveMasterError(null);
+                                                  }}
+                                                >
+                                                  <td className="max-w-[16rem] px-3 py-2.5">
+                                                    <p className="truncate text-sm font-semibold text-stone-900">
+                                                      {String(child.專案名稱 ?? "").trim() || "—"}
+                                                    </p>
+                                                    <p className="mt-0.5 truncate text-[10px] text-stone-400" title={childPid}>
+                                                      {childPid || "—"}
+                                                    </p>
+                                                  </td>
+                                                  <td className="whitespace-nowrap px-3 py-2.5 text-sm text-stone-600">
+                                                    {String(child.專案狀態 ?? "").trim() || "—"}
+                                                  </td>
+                                                  <td className="whitespace-nowrap px-3 py-2.5 text-right text-sm tabular-nums text-stone-800">
+                                                    {canViewMasterAmountsForRow(child)
+                                                      ? formatAmount(String(child.專案總金額未稅 ?? ""))
+                                                      : "—"}
+                                                  </td>
+                                                  <td className="whitespace-nowrap px-3 py-2.5">
+                                                    <span
+                                                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${financeProgressBadgeClass(childProgress)}`}
+                                                    >
+                                                      {childProgress}
+                                                    </span>
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })
+                                          )}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                  <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-amber-800">
+                                    此專案任務
+                                    <span className="ml-2 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-amber-900">
+                                      {projectTasks.length} 筆
+                                    </span>
+                                  </h3>
                                   <div className="mb-4 max-w-full overflow-x-auto rounded-lg border border-stone-200/90">
                                     {/*
                                       inline-table：避免在整欄寬的 td 內被撐成 100% 寬（與上方專案列無對齊需求）

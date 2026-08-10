@@ -267,8 +267,18 @@ export async function createExtraBonus(input: {
   };
 
   const { data, error } = await supabase.from("分潤表").insert(insertRow).select("*").maybeSingle();
-  if (error) throwDbError(error, "新增額外獎金失敗");
-  if (!data) throw new Error("新增額外獎金失敗");
+  if (error) {
+    log("payout.extraBonus", "新增失敗", {
+      code: (error as { code?: string }).code,
+      message: (error as { message?: string }).message,
+      details: (error as { details?: string }).details,
+      專案ID: pid,
+      領取人: recipient,
+      分潤類型: insertRow.分潤類型,
+    });
+    throwDbError(error, "新增額外獎金失敗");
+  }
+  if (!data) throw new Error("新增額外獎金失敗（未回傳資料）");
   return rowToPayout(data as Record<string, unknown>);
 }
 
