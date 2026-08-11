@@ -7,6 +7,7 @@ import type { FinanceRow } from "@/modules/finance";
 import type { InvoiceRow } from "@/modules/finance";
 import { getMasterList } from "@/lib/db/master";
 import { getKolInvoicesByProjectIds } from "@/lib/db/kol-invoices";
+import { getKolClaimBatchSummary } from "@/lib/db/kol-claim-batch";
 import { getPartnersApprovedWithError } from "@/lib/db/partners";
 import { getFinance, getInvoices } from "@/modules/finance";
 import {
@@ -171,12 +172,35 @@ async function buildKolPortalDataForPartner(
       勞報簽署時間: String(kolInv?.勞報簽署時間 ?? "").trim() || "",
       勞報簽名: String(kolInv?.勞報簽名 ?? "").trim() || "",
       請款憑證摘要: kolRequestCredentialLabel(kolInv),
+      請款批次ID: String(kolInv?.請款批次ID ?? "").trim() || "",
+      勞報單據張數: 0,
       KOL發票填寫來源: String(kolInv?.填寫來源 ?? "").trim() || "",
       KOL發票填寫人: String(kolInv?.填寫人 ?? "").trim() || "",
       KOL匯款日期: String(kolInv?.KOL匯款日期 ?? "").trim().slice(0, 10) || "",
       KOL匯款金額: formatKolAmountInt(parseKolAmount(kolInv?.KOL匯款金額)),
       canEditKolInvoice: canEdit,
     });
+  }
+
+  const batchIds = [...new Set(projects.map((p) => p.請款批次ID).filter(Boolean))];
+  if (batchIds.length > 0) {
+    try {
+      const summaries = await Promise.all(batchIds.map((id) => getKolClaimBatchSummary(id)));
+      const byId = new Map(summaries.filter(Boolean).map((s) => [s!.id, s!] as const));
+      for (const p of projects) {
+        if (!p.請款批次ID) continue;
+        const s = byId.get(p.請款批次ID);
+        if (!s) continue;
+        p.勞報單據張數 = s.單據張數;
+        if (s.請款方式 === "勞務報酬" && s.單據張數 > 0) {
+          p.請款憑證摘要 = `勞報批次 ${s.單據張數} 張`;
+        } else if (s.請款方式 === "發票" && s.KOL發票號碼) {
+          p.請款憑證摘要 = s.KOL發票號碼;
+        }
+      }
+    } catch {
+      // 批次表尚未 migration 或查詢失敗時，不阻擋 KOL 總覽
+    }
   }
 
   projects.sort((a, b) => a.專案ID.localeCompare(b.專案ID, "zh-Hant"));

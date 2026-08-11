@@ -4,13 +4,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireKol } from "@/lib/auth/api";
-import { getKolInvoicesByProjectIds, upsertKolInvoice } from "@/lib/db/kol-invoices";
+import { getKolInvoicesByClaimBatchId, getKolInvoicesByProjectIds, revokeKolClaimCredential, upsertKolInvoice } from "@/lib/db/kol-invoices";
 import { getMasterList } from "@/lib/db/master";
 import { getKolAccessibleProjectIds, resolveKolPartnerForUser } from "@/lib/kol/partner-bind";
 import { savePartnerLaborProfile } from "@/lib/kol/partner-labor-profile";
 import { isKolProjectOnHold } from "@/lib/kol/project-lifecycle";
 import { getFinance } from "@/modules/finance";
-import { kolClientHasCredited, kolFinanceProgressShort } from "@/lib/kol/finance-status";
+import { kolClientHasCredited, kolFinanceProgressShort, kolHasRequestCredential } from "@/lib/kol/finance-status";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +27,7 @@ export async function PATCH(request: NextRequest) {
       請款方式?: "發票" | "勞務報酬";
       KOL發票號碼?: string | null;
       KOL發票日期?: string | null;
+      KOL發票金額?: string | null;
       KOL發票備註?: string | null;
       勞務期間起?: string | null;
       勞務期間迄?: string | null;
@@ -108,6 +109,7 @@ export async function PATCH(request: NextRequest) {
           請款方式: body?.請款方式,
           KOL發票號碼: body?.KOL發票號碼,
           KOL發票日期: body?.KOL發票日期,
+          KOL發票金額: body?.KOL發票金額,
           KOL發票備註: body?.KOL發票備註,
           勞務期間起: body?.勞務期間起,
           勞務期間迄: body?.勞務期間迄,
@@ -141,6 +143,80 @@ export async function PATCH(request: NextRequest) {
     console.error("PATCH /api/kol/invoices", e);
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "儲存失敗" },
+      { status: 400 }
+    );
+  }
+}
+
+/** DELETE：撤回待匯款請款憑證（回到可請款；同批未匯款一併撤回） */
+export async function DELETE(request: NextRequest) {
+  const auth = await requireKol(request);
+  if (auth instanceof NextResponse) return auth;
+  try {
+    const body = (await request.json()) as { 專案ID?: string } | null;
+    const 專案ID = String(body?.專案ID ?? "").trim();
+    if (!專案ID) {
+      return NextResponse.json({ ok: false, error: "專案ID 為必填" }, { status: 400 });
+    }
+
+    const access = await getKolAccessibleProjectIds(auth.user);
+    if (!access.ok) {
+      return NextResponse.json({ ok: false, error: access.error }, { status: 403 });
+    }
+    if (!access.projectIds.has(專案ID)) {
+      return NextResponse.json({ ok: false, error: "無權限編輯此專案" }, { status: 403 });
+    }
+
+    const [financeList, kolInvByPid, masters] = await Promise.all([
+      getFinance(),
+      getKolInvoicesByProjectIds([專案ID]),
+      getMasterList(),
+    ]);
+    const master = masters.find((m) => String(m.專案ID ?? "").trim() === 專案ID);
+    if (isKolProjectOnHold(master?.專案狀態)) {
+      return NextResponse.json({ ok: false, error: "專案目前為暫緩狀態，無法撤回請款" }, { status: 400 });
+    }
+    const f = financeList.find((x) => String(x.專案ID ?? "").trim() === 專案ID);
+    const kolInv = kolInvByPid.get(專案ID);
+    const status = kolFinanceProgressShort(f?.廠商付款日期, kolInv, kolInv?.KOL匯款日期);
+    if (status === "已匯款") {
+      return NextResponse.json({ ok: false, error: "已匯款不可撤回請款憑證" }, { status: 400 });
+    }
+    if (status !== "待匯款") {
+      return NextResponse.json({ ok: false, error: "僅待匯款狀態可撤回請款憑證" }, { status: 400 });
+    }
+
+    const batchId = String(kolInv?.請款批次ID ?? "").trim();
+    if (batchId) {
+      const siblings = await getKolInvoicesByClaimBatchId(batchId);
+      for (const s of siblings) {
+        if (String(s.KOL匯款日期 ?? "").trim()) continue;
+        if (!kolHasRequestCredential(s)) continue;
+        if (!access.projectIds.has(s.專案ID)) {
+          return NextResponse.json(
+            { ok: false, error: `同批專案 ${s.專案ID} 無權限，無法一併撤回` },
+            { status: 403 }
+          );
+        }
+      }
+    }
+
+    const result = await revokeKolClaimCredential({
+      專案ID,
+      填寫人: fillerLabel(auth.user),
+      填寫來源: "KOL",
+    });
+
+    return NextResponse.json({
+      ok: true,
+      cleared: result.clearedProjectIds.length,
+      clearedProjectIds: result.clearedProjectIds,
+      batchId: result.batchId,
+    });
+  } catch (e) {
+    console.error("DELETE /api/kol/invoices", e);
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "撤回失敗" },
       { status: 400 }
     );
   }

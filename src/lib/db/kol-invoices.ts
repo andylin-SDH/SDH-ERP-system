@@ -11,9 +11,11 @@ export interface KolInvoiceRow extends KolRequestCredential {
   id?: string;
   專案ID: string;
   KOL發票日期?: string | null;
+  KOL發票金額?: string | null;
   KOL發票備註?: string | null;
   KOL匯款日期?: string | null;
   KOL匯款金額?: string | null;
+  請款批次ID?: string | null;
   填寫來源?: string | null;
   填寫人?: string | null;
   填寫時間?: string | null;
@@ -38,6 +40,7 @@ function rowToKolInvoice(r: Record<string, unknown>): KolInvoiceRow {
     請款方式: (r.請款方式 ?? null) as string | null,
     KOL發票號碼: (r.KOL發票號碼 ?? r.kol_invoice_number ?? null) as string | null,
     KOL發票日期: sliceDate(r.KOL發票日期 ?? r.kol_invoice_date),
+    KOL發票金額: (r.KOL發票金額 ?? r.kol_invoice_amount ?? null) as string | null,
     KOL發票備註: (r.KOL發票備註 ?? r.kol_invoice_note ?? null) as string | null,
     勞務期間起: sliceDate(r.勞務期間起),
     勞務期間迄: sliceDate(r.勞務期間迄),
@@ -54,6 +57,7 @@ function rowToKolInvoice(r: Record<string, unknown>): KolInvoiceRow {
     勞報簽名: (r.勞報簽名 ?? null) as string | null,
     KOL匯款日期: sliceDate(r.KOL匯款日期 ?? r.kol_remittance_date),
     KOL匯款金額: (r.KOL匯款金額 ?? r.kol_remittance_amount ?? null) as string | null,
+    請款批次ID: (r.請款批次ID ?? null) as string | null,
     填寫來源: (r.填寫來源 ?? r.filled_by_source ?? null) as string | null,
     填寫人: (r.填寫人 ?? r.filled_by ?? null) as string | null,
     填寫時間: (r.填寫時間 ?? r.filled_at ?? null) as string | null,
@@ -180,6 +184,7 @@ export type UpsertKolInvoiceInput = {
   請款方式?: "發票" | "勞務報酬" | null;
   KOL發票號碼?: string | null;
   KOL發票日期?: string | null;
+  KOL發票金額?: string | null;
   KOL發票備註?: string | null;
   勞務期間起?: string | null;
   勞務期間迄?: string | null;
@@ -192,6 +197,10 @@ export type UpsertKolInvoiceInput = {
   /** 勞務報酬：KOL 勾選確認並送出 */
   勞報簽署?: boolean;
   勞報簽名?: string | null;
+  /** 批次請款產生時寫入 */
+  請款批次ID?: string | null;
+  /** 批次勞報：不做扣繳（單據已拆成 < 2 萬；專案列亦強制 0 稅） */
+  skipLaborWithholding?: boolean;
   填寫來源: "KOL" | "內部";
   填寫人: string;
 };
@@ -224,9 +233,12 @@ export async function upsertKolInvoice(input: UpsertKolInvoiceInput): Promise<Ko
   if (mode === "發票") {
     const numRaw = input.KOL發票號碼 !== undefined ? String(input.KOL發票號碼 ?? "").trim() : undefined;
     const noteRaw = input.KOL發票備註 !== undefined ? String(input.KOL發票備註 ?? "").trim() : undefined;
+    const amountRaw =
+      input.KOL發票金額 !== undefined ? String(input.KOL發票金額 ?? "").trim().replace(/,/g, "") : undefined;
     const dateRaw = input.KOL發票日期 !== undefined ? String(input.KOL發票日期 ?? "").trim().slice(0, 10) : undefined;
     if (numRaw !== undefined) payload.KOL發票號碼 = numRaw || null;
     if (noteRaw !== undefined) payload.KOL發票備註 = noteRaw || null;
+    if (amountRaw !== undefined) payload.KOL發票金額 = amountRaw || null;
     if (dateRaw !== undefined) {
       payload.KOL發票日期 = dateRaw && /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : null;
     }
@@ -264,7 +276,16 @@ export async function upsertKolInvoice(input: UpsertKolInvoiceInput): Promise<Ko
     const signature = String(input.勞報簽名 ?? "").trim();
     if (!signature.startsWith("data:image/png")) throw new Error("請在簽名板完成電子簽名");
 
-    const w = calcLaborWithholding(amount);
+    const w = input.skipLaborWithholding
+      ? {
+          應領金額: Math.round(Number(amount.replace(/,/g, "")) || 0),
+          扣繳稅額: 0,
+          二代健保費: 0,
+          實領金額: Math.round(Number(amount.replace(/,/g, "")) || 0),
+        }
+      : calcLaborWithholding(amount);
+
+    if (w.應領金額 <= 0) throw new Error("給付總額必須大於 0");
 
     payload.勞務期間起 = start;
     payload.勞務期間迄 = end;
@@ -281,7 +302,13 @@ export async function upsertKolInvoice(input: UpsertKolInvoiceInput): Promise<Ko
     payload.勞報簽名 = signature;
     payload.KOL發票號碼 = null;
     payload.KOL發票日期 = null;
+    payload.KOL發票金額 = null;
     payload.KOL發票備註 = String(input.KOL發票備註 ?? "").trim() || null;
+  }
+
+  if (input.請款批次ID !== undefined) {
+    const bid = String(input.請款批次ID ?? "").trim();
+    payload.請款批次ID = bid || null;
   }
 
   const { data, error } = await getSupabase()
@@ -298,4 +325,121 @@ export async function upsertKolInvoice(input: UpsertKolInvoiceInput): Promise<Ko
   }
   if (!data) throw new Error("儲存請款憑證失敗");
   return rowToKolInvoice(data as Record<string, unknown>);
+}
+
+export async function getKolInvoicesByClaimBatchId(batchId: string): Promise<KolInvoiceRow[]> {
+  const id = String(batchId ?? "").trim();
+  if (!id) return [];
+  const { data, error } = await getSupabase().from("KOL發票").select("*").eq("請款批次ID", id);
+  if (error) {
+    if (isKolInvoiceTableMissing(error)) return [];
+    throw error;
+  }
+  return (data ?? []).map((row) => rowToKolInvoice(row as Record<string, unknown>)).filter((r) => r.專案ID);
+}
+
+/** 清除請款憑證欄位（保留匯款紀錄）；清除後狀態回到可請款 */
+export async function clearKolRequestCredential(
+  專案ID: string,
+  meta: { 填寫人: string; 填寫來源: "KOL" | "內部" }
+): Promise<KolInvoiceRow> {
+  const pid = String(專案ID ?? "").trim();
+  if (!pid) throw new Error("專案ID 為必填");
+  const 填寫人 = String(meta.填寫人 ?? "").trim();
+  if (!填寫人) throw new Error("缺少填寫人");
+
+  const now = new Date().toISOString();
+  const payload: Record<string, unknown> = {
+    專案ID: pid,
+    請款方式: "發票",
+    KOL發票號碼: null,
+    KOL發票日期: null,
+    KOL發票金額: null,
+    KOL發票備註: null,
+    勞務期間起: null,
+    勞務期間迄: null,
+    勞務內容: null,
+    給付總額: null,
+    身分證字號: null,
+    領款方式: null,
+    聯絡電話: null,
+    戶籍地址: null,
+    扣繳稅額: null,
+    二代健保費: null,
+    實領金額: null,
+    勞報簽署時間: null,
+    勞報簽名: null,
+    請款批次ID: null,
+    填寫來源: meta.填寫來源,
+    填寫人,
+    填寫時間: now,
+    updated_at: now,
+  };
+
+  const { data, error } = await getSupabase()
+    .from("KOL發票")
+    .upsert(payload, { onConflict: "專案ID" })
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    if (error.code === "42P01" || error.code === "PGRST205") {
+      throw new Error("KOL發票表尚未建立，請先執行 migration 053_kol_invoices.sql");
+    }
+    throw error;
+  }
+  if (!data) throw new Error("清除請款憑證失敗");
+  return rowToKolInvoice(data as Record<string, unknown>);
+}
+
+/**
+ * 撤回待匯款請款：清除憑證回到可請款。
+ * 若該筆來自批次提領，同批尚未匯款的專案一併撤回，並刪除已無人引用的批次。
+ */
+export async function revokeKolClaimCredential(input: {
+  專案ID: string;
+  填寫人: string;
+  填寫來源: "KOL" | "內部";
+}): Promise<{ clearedProjectIds: string[]; batchId: string | null }> {
+  const pid = String(input.專案ID ?? "").trim();
+  if (!pid) throw new Error("專案ID 為必填");
+
+  const current = await getKolInvoiceByProjectId(pid);
+  if (!current || !kolHasRequestCredential(current)) {
+    throw new Error("此專案尚無可撤回的請款憑證");
+  }
+  if (String(current.KOL匯款日期 ?? "").trim()) {
+    throw new Error("已匯款不可撤回請款憑證");
+  }
+
+  const batchId = String(current.請款批次ID ?? "").trim() || null;
+  const targets = new Set<string>([pid]);
+  if (batchId) {
+    const siblings = await getKolInvoicesByClaimBatchId(batchId);
+    for (const s of siblings) {
+      if (String(s.KOL匯款日期 ?? "").trim()) continue;
+      if (kolHasRequestCredential(s)) targets.add(s.專案ID);
+    }
+  }
+
+  const clearedProjectIds: string[] = [];
+  for (const id of targets) {
+    await clearKolRequestCredential(id, {
+      填寫人: input.填寫人,
+      填寫來源: input.填寫來源,
+    });
+    clearedProjectIds.push(id);
+  }
+
+  if (batchId) {
+    const remaining = await getKolInvoicesByClaimBatchId(batchId);
+    if (remaining.length === 0) {
+      const { error } = await getSupabase().from("KOL請款批次").delete().eq("id", batchId);
+      if (error && !isKolInvoiceTableMissing(error) && error.code !== "42P01" && error.code !== "PGRST205") {
+        log("kol-invoices.db", "刪除空請款批次失敗", { batchId, error: error.message });
+      }
+    }
+  }
+
+  return { clearedProjectIds, batchId };
 }

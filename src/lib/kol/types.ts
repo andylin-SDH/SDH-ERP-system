@@ -38,6 +38,8 @@ export interface KolPortalProject {
   勞報簽署時間: string;
   勞報簽名: string;
   請款憑證摘要: string;
+  請款批次ID: string;
+  勞報單據張數: number;
   KOL發票填寫來源: string;
   KOL發票填寫人: string;
   KOL匯款日期: string;

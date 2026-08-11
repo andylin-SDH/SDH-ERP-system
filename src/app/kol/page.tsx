@@ -4,13 +4,13 @@ import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseKolAmount } from "@/lib/kol/format";
+import { buildLaborClaimSplit, KOL_LABOR_SLIP_PREFERRED } from "@/lib/kol/claim-split";
 import { isKolProjectOnHold } from "@/lib/kol/project-lifecycle";
 import { SessionExpiryMonitor } from "@/components/SessionExpiryMonitor";
 import { SignaturePad } from "@/components/SignaturePad";
 import { useKolTheme } from "@/components/KolThemeShell";
 import type { KolPortalProject } from "@/lib/kol/types";
 import { kolHasRequestCredential, type KolRequestMode } from "@/lib/kol/finance-status";
-import { calcLaborWithholding, type LaborPaymentMethod } from "@/lib/kol/labor-receipt";
 import type { KolLaborProfile } from "@/lib/kol/partner-labor-profile";
 
 async function safeResJson(r: Response): Promise<Record<string, unknown>> {
@@ -49,91 +49,6 @@ const SETTLEMENT_TABS: { key: SettlementTab; label: string; activeClass: string 
   { key: "暫緩", label: "暫緩", activeClass: "bg-violet-600 text-white shadow-sm" },
 ];
 
-type EditDraft = {
-  請款方式: KolRequestMode;
-  KOL發票號碼: string;
-  KOL發票日期: string;
-  KOL發票備註: string;
-  勞務期間起: string;
-  勞務期間迄: string;
-  勞務內容: string;
-  給付總額: string;
-  身分證字號: string;
-  勞報領款方式: LaborPaymentMethod;
-  聯絡電話: string;
-  戶籍地址: string;
-  勞報簽名: string;
-  勞報簽署: boolean;
-};
-
-function emptyDraft(p?: KolPortalProject, laborProfile?: KolLaborProfile): EditDraft {
-  return {
-    請款方式: p?.請款方式 ?? "發票",
-    KOL發票號碼: p?.KOL發票號碼 ?? "",
-    KOL發票日期: p?.KOL發票日期 ?? "",
-    KOL發票備註: p?.KOL發票備註 ?? "",
-    勞務期間起: p?.勞務期間起 ?? "",
-    勞務期間迄: p?.勞務期間迄 ?? "",
-    勞務內容: p?.勞務內容 || (p ? `${p.專案名稱} 業配執行` : ""),
-    給付總額: p?.給付總額 || p?.KOL費用未稅 || "",
-    身分證字號: p?.身分證字號 || laborProfile?.身分證字號 || "",
-    勞報領款方式: p?.勞報領款方式 === "匯款" ? "匯款" : "現金",
-    聯絡電話: p?.聯絡電話 || laborProfile?.聯絡電話 || "",
-    戶籍地址: p?.戶籍地址 || laborProfile?.戶籍地址 || "",
-    勞報簽名: "",
-    勞報簽署: false,
-  };
-}
-
-function LaborPayoutSummary({
-  partnerName,
-  projectName,
-  grossAmount,
-  laborContent,
-  periodStart,
-  periodEnd,
-}: {
-  partnerName: string;
-  projectName: string;
-  grossAmount: string;
-  laborContent: string;
-  periodStart: string;
-  periodEnd: string;
-}) {
-  const w = calcLaborWithholding(grossAmount);
-  return (
-    <div className="rounded-lg border border-stone-200 bg-white px-3 py-3 text-sm text-stone-800">
-      <p className="text-xs font-bold uppercase tracking-wide text-stone-500">本筆請款摘要</p>
-      <dl className="mt-2 grid gap-1.5 text-xs sm:grid-cols-2">
-        <div>
-          <dt className="text-stone-500">專案</dt>
-          <dd className="font-semibold">{projectName}</dd>
-        </div>
-        <div>
-          <dt className="text-stone-500">領款人</dt>
-          <dd className="font-semibold">{partnerName}</dd>
-        </div>
-        <div>
-          <dt className="text-stone-500">勞務期間</dt>
-          <dd className="tabular-nums">{periodStart && periodEnd ? `${periodStart} ~ ${periodEnd}` : "—"}</dd>
-        </div>
-        <div className="sm:col-span-2">
-          <dt className="text-stone-500">勞務內容</dt>
-          <dd>{laborContent || "—"}</dd>
-        </div>
-        <div>
-          <dt className="text-stone-500">應領金額</dt>
-          <dd className="font-bold tabular-nums">NT$ {w.應領金額.toLocaleString("zh-TW")}</dd>
-        </div>
-        <div>
-          <dt className="text-stone-500">實領金額</dt>
-          <dd className="font-bold tabular-nums text-emerald-800">NT$ {w.實領金額.toLocaleString("zh-TW")}</dd>
-        </div>
-      </dl>
-    </div>
-  );
-}
-
 function projectHasCredential(p: KolPortalProject): boolean {
   return kolHasRequestCredential({
     請款方式: p.請款方式,
@@ -150,332 +65,15 @@ function projectHasCredential(p: KolPortalProject): boolean {
   });
 }
 
-function SdhOutboundInfoPanel({ p }: { p: KolPortalProject }) {
-  return (
-    <div className="rounded-lg border border-stone-200 bg-stone-50/80 p-3">
-      <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-stone-500">SDH對外請款（唯讀）</h3>
-      {p.客戶端發票.length === 0 ? (
-        <p className="text-sm text-stone-500">尚無對應發票</p>
-      ) : (
-        <ul className="space-y-2 text-sm">
-          {p.客戶端發票.map((inv, i) => (
-            <li
-              key={`${p.專案ID}-cinv-${i}`}
-              className="rounded-md border border-stone-200 bg-white px-3 py-2"
-            >
-              <dl className="space-y-2">
-                <div>
-                  <dt className="text-xs text-stone-500">發票號碼</dt>
-                  <dd className="mt-0.5 font-mono text-sm font-semibold text-stone-800">{inv.發票號碼}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-stone-500">發票日期</dt>
-                  <dd className="mt-0.5 tabular-nums text-stone-800">{inv.發票日期}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-stone-500">含稅金額</dt>
-                  <dd className="mt-0.5 font-semibold tabular-nums text-stone-900">{inv.發票金額含稅}</dd>
-                </div>
-              </dl>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function KolRequestCredentialPanel({
-  p,
-  draft,
-  saving,
-  partnerName,
-  onDraftChange,
-  onSave,
-}: {
-  p: KolPortalProject;
-  draft: EditDraft;
-  saving: boolean;
-  partnerName: string;
-  onDraftChange: (next: EditDraft) => void;
-  onSave: () => void;
-}) {
-  const showLaborReadonly = p.請款方式 === "勞務報酬" && Boolean(p.勞報簽署時間);
-  const editingLabor = draft.請款方式 === "勞務報酬" && !showLaborReadonly;
-  const lockedOnHold = isKolProjectOnHold(p.專案狀態);
-  const lockedBeforeCredit = p.結帳狀態 === "未入帳";
-
-  return (
-    <div className="rounded-lg border border-amber-200/80 bg-amber-50/40 p-3">
-      <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-amber-900">KOL 請款憑證</h3>
-      {lockedOnHold ? (
-        <div className="rounded-lg border border-violet-200 bg-violet-50/90 px-3 py-3 text-sm text-violet-950">
-          <p className="font-medium">專案暫緩中</p>
-          <p className="mt-1 text-xs leading-relaxed text-violet-900/80">
-            此專案目前為「暫緩」狀態，暫不開放填寫或修改請款憑證。恢復進行後再處理即可。
-          </p>
-        </div>
-      ) : lockedBeforeCredit ? (
-        <div className="rounded-lg border border-stone-200 bg-stone-50/90 px-3 py-3 text-sm text-stone-600">
-          <p className="font-medium text-stone-800">尚未開放請款</p>
-          <p className="mt-1 text-xs leading-relaxed">
-            待財務確認客戶入帳並填寫<strong className="text-stone-700">客戶入帳日</strong>後，您即可填寫請款憑證（發票或勞務報酬單）。
-          </p>
-        </div>
-      ) : !p.canEditKolInvoice ? (
-        <p className="mb-2 text-xs text-stone-500">此專案已匯款，請款資料不可再修改。</p>
-      ) : null}
-
-      {!lockedOnHold && !lockedBeforeCredit && (
-        <>
-      {p.canEditKolInvoice && !showLaborReadonly && (
-        <div className="mb-3 inline-flex rounded-lg border border-stone-200 bg-white p-0.5 text-xs" onClick={(e) => e.stopPropagation()}>
-          {(["發票", "勞務報酬"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => onDraftChange({ ...draft, 請款方式: mode, 勞報簽署: false, 勞報簽名: "" })}
-              className={`rounded-md px-3 py-1.5 font-semibold transition ${
-                draft.請款方式 === mode ? "bg-amber-500 text-slate-900" : "text-stone-600 hover:text-stone-900"
-              }`}
-            >
-              {mode === "發票" ? "公司發票" : "勞務報酬單"}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {showLaborReadonly ? (
-        <div className="space-y-3">
-          <LaborPayoutSummary
-            partnerName={partnerName}
-            projectName={p.專案名稱}
-            grossAmount={p.給付總額}
-            laborContent={p.勞務內容}
-            periodStart={p.勞務期間起}
-            periodEnd={p.勞務期間迄}
-          />
-          {p.勞報簽名 ? (
-            <div className="rounded-lg border border-stone-200 bg-white px-3 py-2">
-              <p className="text-xs text-stone-500">電子簽名</p>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.勞報簽名} alt="勞報電子簽名" className="mt-1 max-h-24 object-contain" />
-            </div>
-          ) : null}
-          <p className="text-[11px] text-emerald-800">
-            勞務報酬單已簽署送出（{p.勞報簽署時間.slice(0, 10) || "—"}）
-          </p>
-        </div>
-      ) : editingLabor ? (
-        <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
-          <LaborPayoutSummary
-            partnerName={partnerName}
-            projectName={p.專案名稱}
-            grossAmount={draft.給付總額}
-            laborContent={draft.勞務內容}
-            periodStart={draft.勞務期間起}
-            periodEnd={draft.勞務期間迄}
-          />
-          <div className="grid gap-2 sm:grid-cols-2">
-            <label className="block text-xs font-medium text-stone-600">
-              勞務期間（起）
-              <input
-                type="date"
-                disabled={!p.canEditKolInvoice || saving}
-                value={draft.勞務期間起}
-                onChange={(e) => onDraftChange({ ...draft, 勞務期間起: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
-              />
-            </label>
-            <label className="block text-xs font-medium text-stone-600">
-              勞務期間（迄）
-              <input
-                type="date"
-                disabled={!p.canEditKolInvoice || saving}
-                value={draft.勞務期間迄}
-                onChange={(e) => onDraftChange({ ...draft, 勞務期間迄: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
-              />
-            </label>
-          </div>
-          <label className="block text-xs font-medium text-stone-600">
-            勞務內容（領款說明）
-            <input
-              type="text"
-              disabled={!p.canEditKolInvoice || saving}
-              value={draft.勞務內容}
-              onChange={(e) => onDraftChange({ ...draft, 勞務內容: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
-            />
-          </label>
-          <label className="block text-xs font-medium text-stone-600">
-            應領金額 NT$（未稅）
-            <input
-              type="text"
-              disabled={!p.canEditKolInvoice || saving}
-              value={draft.給付總額}
-              onChange={(e) => onDraftChange({ ...draft, 給付總額: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm tabular-nums disabled:opacity-60"
-            />
-          </label>
-
-          <div className="rounded-lg border border-amber-100 bg-amber-50/50 px-3 py-3">
-            <p className="mb-2 text-xs font-bold text-amber-950">我的資料（填寫一次後自動帶入）</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <label className="block text-xs font-medium text-stone-600 sm:col-span-2">
-                身分證字號
-                <input
-                  type="text"
-                  disabled={!p.canEditKolInvoice || saving}
-                  value={draft.身分證字號}
-                  onChange={(e) => onDraftChange({ ...draft, 身分證字號: e.target.value.toUpperCase() })}
-                  className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-mono text-sm uppercase disabled:opacity-60"
-                  placeholder="A123456789"
-                />
-              </label>
-              <label className="block text-xs font-medium text-stone-600">
-                聯絡電話
-                <input
-                  type="tel"
-                  disabled={!p.canEditKolInvoice || saving}
-                  value={draft.聯絡電話}
-                  onChange={(e) => onDraftChange({ ...draft, 聯絡電話: e.target.value })}
-                  className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
-                />
-              </label>
-              <label className="block text-xs font-medium text-stone-600">
-                戶籍地址
-                <input
-                  type="text"
-                  disabled={!p.canEditKolInvoice || saving}
-                  value={draft.戶籍地址}
-                  onChange={(e) => onDraftChange({ ...draft, 戶籍地址: e.target.value })}
-                  className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
-                />
-              </label>
-            </div>
-          </div>
-
-          <label className="block text-xs font-medium text-stone-600">
-            備註
-            <input
-              type="text"
-              disabled={!p.canEditKolInvoice || saving}
-              value={draft.KOL發票備註}
-              onChange={(e) => onDraftChange({ ...draft, KOL發票備註: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
-            />
-          </label>
-
-          {p.canEditKolInvoice ? (
-            <SignaturePad
-              value={draft.勞報簽名}
-              disabled={saving}
-              onChange={(sig) => onDraftChange({ ...draft, 勞報簽名: sig })}
-            />
-          ) : null}
-
-          {p.canEditKolInvoice && (
-            <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-stone-700">
-              <input
-                type="checkbox"
-                checked={draft.勞報簽署}
-                disabled={saving}
-                onChange={(e) => onDraftChange({ ...draft, 勞報簽署: e.target.checked })}
-                className="mt-0.5"
-              />
-              <span>本人確認以上內容正確，並同意以此向盛德好請款。</span>
-            </label>
-          )}
-          {p.canEditKolInvoice && (
-            <button
-              type="button"
-              disabled={saving || !draft.勞報簽署 || !draft.勞報簽名}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSave();
-              }}
-              className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 hover:bg-amber-400 disabled:opacity-60"
-            >
-              {saving ? "送出中…" : "簽署並送出勞務報酬單"}
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          <label className="block text-xs font-medium text-stone-600">
-            發票號碼
-            <input
-              type="text"
-              disabled={!p.canEditKolInvoice || saving}
-              value={draft.KOL發票號碼}
-              onChange={(e) => onDraftChange({ ...draft, KOL發票號碼: e.target.value })}
-              onClick={(e) => e.stopPropagation()}
-              className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-mono text-sm disabled:opacity-60"
-              placeholder="例：AB-12345678"
-            />
-          </label>
-          <label className="block text-xs font-medium text-stone-600">
-            發票日期
-            <input
-              type="date"
-              disabled={!p.canEditKolInvoice || saving}
-              value={draft.KOL發票日期}
-              onChange={(e) => onDraftChange({ ...draft, KOL發票日期: e.target.value })}
-              onClick={(e) => e.stopPropagation()}
-              className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
-            />
-          </label>
-          <label className="block text-xs font-medium text-stone-600">
-            備註
-            <input
-              type="text"
-              disabled={!p.canEditKolInvoice || saving}
-              value={draft.KOL發票備註}
-              onChange={(e) => onDraftChange({ ...draft, KOL發票備註: e.target.value })}
-              onClick={(e) => e.stopPropagation()}
-              className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
-            />
-          </label>
-          {p.canEditKolInvoice && (
-            <button
-              type="button"
-              disabled={saving}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSave();
-              }}
-              className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 hover:bg-amber-400 disabled:opacity-60"
-            >
-              {saving ? "儲存中…" : "儲存 KOL 發票"}
-            </button>
-          )}
-        </div>
-      )}
-
-      {p.KOL發票填寫人 ? (
-        <p className="mt-2 text-[11px] text-stone-500">
-          最後更新：{p.KOL發票填寫來源} · {p.KOL發票填寫人}
-        </p>
-      ) : null}
-        </>
-      )}
-
-      {p.結帳狀態 === "已匯款" && (
-        <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-950">
-          <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">匯款資訊</p>
-          <p className="mt-1">
-            結帳日期：<span className="font-semibold tabular-nums">{p.KOL匯款日期}</span>
-          </p>
-          {p.KOL匯款金額 ? (
-            <p>
-              匯款金額：<span className="font-semibold tabular-nums">{p.KOL匯款金額}</span>
-            </p>
-          ) : null}
-        </div>
-      )}
-    </div>
-  );
+/** 列表橫向顯示：SDH 對外請款發票摘要 */
+function formatSdhOutboundCell(p: KolPortalProject): { primary: string; secondary: string } {
+  if (!p.客戶端發票.length) return { primary: "—", secondary: "" };
+  const first = p.客戶端發票[0]!;
+  const more = p.客戶端發票.length > 1 ? ` 等 ${p.客戶端發票.length} 張` : "";
+  return {
+    primary: `${first.發票號碼}${more}`,
+    secondary: [first.發票日期, first.發票金額含稅 ? `含稅 ${first.發票金額含稅}` : ""].filter(Boolean).join(" · "),
+  };
 }
 
 function formatSummaryAmount(n: number): string {
@@ -598,13 +196,13 @@ const PAYOUT_FLOW_STEPS = [
   },
   {
     status: "可請款",
-    action: "展開專案填請款資料：公司戶填發票，個人戶簽署勞務報酬單。",
+    action: "在「可請款」分頁勾選專案（可多選），點「提領」一次填發票或勞報即可。",
     bar: "border-l-sky-400",
     num: "bg-sky-100 text-sky-800",
   },
   {
     status: "待匯款",
-    action: "已送出，SDH 將於收到發票後隔月 5 號前匯款；資料有誤請聯絡財務。",
+    action: "已送出，SDH 將於收到發票後隔月 5 號前匯款；若發票號碼填錯，可按「撤回請款」回到可請款重填。",
     bar: "border-l-amber-400",
     num: "bg-amber-100 text-amber-900",
   },
@@ -692,7 +290,7 @@ function KolPayoutFlowGuide({ isDark }: { isDark: boolean }) {
     >
       <h2 className={`text-sm font-bold ${isDark ? "text-stone-100" : "text-stone-900"}`}>請款怎麼走？</h2>
       <p className={`mt-0.5 text-xs leading-relaxed ${isDark ? "text-stone-400" : "text-stone-600"}`}>
-        看列表「結帳狀態」對照下方四步；需要操作時，點專案列展開即可。
+        看列表「結帳狀態」對照下方四步。可請款時：勾選多筆 → 點「提領」→ 一次填憑證。
       </p>
       <div className="mt-1.5 flex flex-wrap items-center gap-1">
         {PAYOUT_FLOW_STEPS.map((step, idx) => (
@@ -778,18 +376,39 @@ function KolHomeInner() {
   const [projects, setProjects] = useState<KolPortalProject[]>([]);
   const [settlementTab, setSettlementTab] = useState<SettlementTab>("執行中");
   const [sessionActive, setSessionActive] = useState(false);
-  const [expandedPid, setExpandedPid] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, EditDraft>>({});
-  const [savingPid, setSavingPid] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const [selectedClaimPids, setSelectedClaimPids] = useState<string[]>([]);
+  const [claimCheckoutOpen, setClaimCheckoutOpen] = useState(false);
+  const [claimForm, setClaimForm] = useState({
+    請款方式: "發票" as KolRequestMode,
+    KOL發票號碼: "",
+    KOL發票日期: "",
+    KOL發票金額: "",
+    KOL發票備註: "",
+    勞務期間起: "",
+    勞務期間迄: "",
+    勞務內容: "",
+    身分證字號: "",
+    聯絡電話: "",
+    戶籍地址: "",
+    勞報簽名: "",
+    勞報簽署: false,
+  });
+  const [claimSaving, setClaimSaving] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
+  const [revokingPid, setRevokingPid] = useState<string | null>(null);
   const loadSeqRef = useRef(0);
+  const settlementTabInitialized = useRef(false);
+  const loadAbortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
     const seq = ++loadSeqRef.current;
+    loadAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
     setLoading(true);
     setError(null);
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 45000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 20000);
     try {
       const url = isPreview
         ? `/api/kol/preview?partnerId=${encodeURIComponent(previewPartnerId)}`
@@ -809,6 +428,7 @@ function KolHomeInner() {
       };
       if (seq !== loadSeqRef.current) return;
       if (res.status === 401) {
+        setLoading(false);
         window.location.href = "/";
         return;
       }
@@ -833,16 +453,11 @@ function KolHomeInner() {
         isPreview ? { ...p, canEditKolInvoice: false } : p
       );
       setProjects(list);
-      const nextDrafts: Record<string, EditDraft> = {};
-      for (const p of list) {
-        nextDrafts[p.專案ID] = emptyDraft(p, profile);
-      }
-      setDrafts(nextDrafts);
       setSessionActive(!isPreview);
     } catch (e) {
       if (seq !== loadSeqRef.current) return;
       if (e instanceof DOMException && e.name === "AbortError") {
-        setError("載入逾時（超過 45 秒），請檢查網路後按「重新整理」。");
+        setError("載入逾時或已取消，請按「重新整理」再試。");
       } else {
         setError(e instanceof Error ? e.message : "無法載入資料，請稍後再試。");
       }
@@ -859,6 +474,9 @@ function KolHomeInner() {
 
   useEffect(() => {
     void load();
+    return () => {
+      loadAbortRef.current?.abort();
+    };
   }, [load]);
 
   const projectsBySettlement = useMemo(() => {
@@ -908,7 +526,35 @@ function KolHomeInner() {
   }, [projectsBySettlement]);
 
   const visibleProjects = projectsBySettlement[settlementTab];
-  const settlementTabInitialized = useRef(false);
+
+  const claimableSelected = useMemo(() => {
+    const set = new Set(selectedClaimPids);
+    return projectsBySettlement["可請款"].filter((p) => set.has(p.專案ID) && p.canEditKolInvoice);
+  }, [projectsBySettlement, selectedClaimPids]);
+
+  const claimableSelectedTotal = useMemo(
+    () => claimableSelected.reduce((a, p) => a + parseKolAmount(p.KOL費用未稅), 0),
+    [claimableSelected]
+  );
+
+  const claimLaborSplit = useMemo(() => {
+    if (claimForm.請款方式 !== "勞務報酬" || claimableSelected.length === 0) return null;
+    try {
+      return buildLaborClaimSplit(
+        claimableSelected.map((p) => ({
+          專案ID: p.專案ID,
+          金額: parseKolAmount(p.KOL費用未稅),
+          專案名稱: p.專案名稱,
+        }))
+      );
+    } catch {
+      return null;
+    }
+  }, [claimForm.請款方式, claimableSelected]);
+
+  useEffect(() => {
+    if (settlementTab !== "可請款") setSelectedClaimPids([]);
+  }, [settlementTab]);
 
   useEffect(() => {
     if (projects.length === 0 || settlementTabInitialized.current) return;
@@ -918,57 +564,159 @@ function KolHomeInner() {
     settlementTabInitialized.current = true;
   }, [projects.length, projectsBySettlement]);
 
-  async function saveKolInvoice(p: KolPortalProject) {
+  function toggleClaimSelect(pid: string) {
+    setSelectedClaimPids((prev) => (prev.includes(pid) ? prev.filter((x) => x !== pid) : [...prev, pid]));
+  }
+
+  function toggleClaimSelectAll() {
+    const ids = projectsBySettlement["可請款"].filter((p) => p.canEditKolInvoice).map((p) => p.專案ID);
+    setSelectedClaimPids((prev) => (prev.length === ids.length ? [] : ids));
+  }
+
+  function openClaimCheckout(seedPids?: string[]) {
     if (isPreview) {
-      setSaveNotice("預覽模式為唯讀，無法代老師存檔。");
+      setSaveNotice("預覽模式為唯讀，無法提領。");
       return;
     }
-    const draft = drafts[p.專案ID] ?? emptyDraft(p);
-    setSavingPid(p.專案ID);
-    setSaveNotice(null);
+    const seed = (seedPids ?? []).map((x) => String(x).trim()).filter(Boolean);
+    if (seed.length > 0) {
+      setSelectedClaimPids((prev) => [...new Set([...prev, ...seed])]);
+    }
+    const selected =
+      seed.length > 0
+        ? projectsBySettlement["可請款"].filter((p) => seed.includes(p.專案ID) && p.canEditKolInvoice)
+        : claimableSelected;
+    if (selected.length === 0) {
+      setSaveNotice("請先勾選要提領的專案");
+      return;
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    setClaimForm({
+      請款方式: "發票",
+      KOL發票號碼: "",
+      KOL發票日期: today,
+      KOL發票金額: String(selected.reduce((a, p) => a + parseKolAmount(p.KOL費用未稅), 0) || ""),
+      KOL發票備註: "",
+      勞務期間起: today,
+      勞務期間迄: today,
+      勞務內容: `批次請款（${selected.length} 筆專案）`,
+      身分證字號: laborProfile.身分證字號 || "",
+      聯絡電話: laborProfile.聯絡電話 || "",
+      戶籍地址: laborProfile.戶籍地址 || "",
+      勞報簽名: "",
+      勞報簽署: false,
+    });
+    setClaimError(null);
+    setClaimCheckoutOpen(true);
+  }
+
+  async function submitClaimBatch() {
+    if (isPreview || claimableSelected.length === 0) return;
+    setClaimSaving(true);
+    setClaimError(null);
     try {
-      const isLabor = draft.請款方式 === "勞務報酬";
-      const res = await fetch("/api/kol/invoices", {
-        method: "PATCH",
+      const isLabor = claimForm.請款方式 === "勞務報酬";
+      const res = await fetch("/api/kol/claim-batch", {
+        method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           isLabor
             ? {
-                專案ID: p.專案ID,
+                專案IDs: claimableSelected.map((p) => p.專案ID),
                 請款方式: "勞務報酬",
-                勞務期間起: draft.勞務期間起.trim() || null,
-                勞務期間迄: draft.勞務期間迄.trim() || null,
-                勞務內容: draft.勞務內容.trim() || null,
-                給付總額: draft.給付總額.trim() || null,
-                身分證字號: draft.身分證字號.trim() || null,
+                勞務期間起: claimForm.勞務期間起.trim() || null,
+                勞務期間迄: claimForm.勞務期間迄.trim() || null,
+                勞務內容: claimForm.勞務內容.trim() || null,
+                身分證字號: claimForm.身分證字號.trim() || null,
                 領款方式: "現金",
-                聯絡電話: draft.聯絡電話.trim() || null,
-                戶籍地址: draft.戶籍地址.trim() || null,
-                KOL發票備註: draft.KOL發票備註.trim() || null,
-                勞報簽署: draft.勞報簽署,
-                勞報簽名: draft.勞報簽名.trim() || null,
+                聯絡電話: claimForm.聯絡電話.trim() || null,
+                戶籍地址: claimForm.戶籍地址.trim() || null,
+                KOL發票備註: claimForm.KOL發票備註.trim() || null,
+                勞報簽署: claimForm.勞報簽署,
+                勞報簽名: claimForm.勞報簽名.trim() || null,
               }
             : {
-                專案ID: p.專案ID,
+                專案IDs: claimableSelected.map((p) => p.專案ID),
                 請款方式: "發票",
-                KOL發票號碼: draft.KOL發票號碼.trim() || null,
-                KOL發票日期: draft.KOL發票日期.trim() || null,
-                KOL發票備註: draft.KOL發票備註.trim() || null,
+                KOL發票號碼: claimForm.KOL發票號碼.trim() || null,
+                KOL發票日期: claimForm.KOL發票日期.trim() || null,
+                KOL發票金額: claimForm.KOL發票金額.trim().replace(/,/g, "") || null,
+                KOL發票備註: claimForm.KOL發票備註.trim() || null,
               }
         ),
       });
-      const data = (await safeResJson(res)) as { ok?: boolean; error?: string; updated?: number };
+      const data = (await safeResJson(res)) as {
+        ok?: boolean;
+        error?: string;
+        updated?: number;
+        split?: { total?: number; slips?: Array<{ 序號: number; 給付總額: number }> } | null;
+      };
       if (!res.ok || !data.ok) {
-        setSaveNotice(data.error ?? "儲存失敗");
+        setClaimError(data.error ?? "批次請款失敗");
         return;
       }
-      setSaveNotice(isLabor ? "勞務報酬單已簽署並送出" : "KOL 發票已儲存");
+      const slipHint =
+        data.split?.slips?.length
+          ? `，拆成 ${data.split.slips.length} 張勞報（合計 NT$ ${(data.split.total ?? 0).toLocaleString("zh-TW")}）`
+          : "";
+      setClaimCheckoutOpen(false);
+      setSelectedClaimPids([]);
+      setSaveNotice(
+        isLabor
+          ? `已提領 ${data.updated ?? claimableSelected.length} 筆${slipHint}`
+          : `已將發票號碼套用至 ${data.updated ?? claimableSelected.length} 筆專案`
+      );
+      setSettlementTab("待匯款");
       await load();
     } catch (e) {
-      setSaveNotice(e instanceof Error ? e.message : "儲存失敗");
+      setClaimError(e instanceof Error ? e.message : "批次請款失敗");
     } finally {
-      setSavingPid(null);
+      setClaimSaving(false);
+    }
+  }
+
+  async function revokeClaimCredential(p: KolPortalProject) {
+    if (isPreview || !p.canEditKolInvoice || p.結帳狀態 !== "待匯款") return;
+    const batchHint = p.請款批次ID
+      ? "\n（此筆為批次提領，同批尚未匯款的專案會一併撤回。）"
+      : "";
+    if (
+      !window.confirm(
+        `確定撤回「${p.專案名稱}」的請款憑證？\n清除後會回到可請款，可重新提領。${batchHint}`
+      )
+    ) {
+      return;
+    }
+    setRevokingPid(p.專案ID);
+    setSaveNotice(null);
+    try {
+      const res = await fetch("/api/kol/invoices", {
+        method: "DELETE",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 專案ID: p.專案ID }),
+      });
+      const data = (await safeResJson(res)) as {
+        ok?: boolean;
+        error?: string;
+        cleared?: number;
+      };
+      if (!res.ok || !data.ok) {
+        setSaveNotice(data.error ?? "撤回失敗");
+        return;
+      }
+      setSaveNotice(
+        data.cleared && data.cleared > 1
+          ? `已撤回 ${data.cleared} 筆請款，已回到可請款`
+          : "已撤回請款，已回到可請款"
+      );
+      setSettlementTab("可請款");
+      await load();
+    } catch (e) {
+      setSaveNotice(e instanceof Error ? e.message : "撤回失敗");
+    } finally {
+      setRevokingPid(null);
     }
   }
 
@@ -1022,14 +770,13 @@ function KolHomeInner() {
           <button
             type="button"
             onClick={() => void load()}
-            disabled={loading}
             className={
               isDark
-                ? "rounded-xl border border-amber-400/40 bg-amber-500/15 px-4 py-2 text-sm font-semibold text-amber-200 transition hover:bg-amber-500/25 disabled:opacity-50"
-                : "rounded-xl border border-amber-300/80 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-950 shadow-sm hover:bg-amber-100 disabled:opacity-50"
+                ? "rounded-xl border border-amber-400/40 bg-amber-500/15 px-4 py-2 text-sm font-semibold text-amber-200 transition hover:bg-amber-500/25"
+                : "rounded-xl border border-amber-300/80 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-950 shadow-sm hover:bg-amber-100"
             }
           >
-            重新整理
+            {loading ? "載入中…" : "重新整理"}
           </button>
           {isPreview ? (
             <a
@@ -1152,23 +899,9 @@ function KolHomeInner() {
                   isDark ? "bg-amber-500/15 text-amber-200" : "bg-amber-100/80 text-amber-900"
                 }`}
               >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 16 16"
-                  aria-hidden
-                  className={isDark ? "text-amber-300" : "text-amber-700"}
-                >
-                  <path
-                    d="M6 4l4 4-4 4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.75"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                點選專案列可展開詳情
+                {settlementTab === "可請款" && !isPreview
+                  ? "勾選專案後點下方「提領」，一次填發票或勞報"
+                  : "列表直接顯示專案與 SDH 對外請款資訊"}
               </span>
             </p>
           </div>
@@ -1210,12 +943,27 @@ function KolHomeInner() {
                   }
                 >
                   <tr>
-                    <th className="w-9 px-2 py-3" aria-hidden />
+                    {settlementTab === "可請款" && !isPreview ? (
+                      <th className="w-10 px-2 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={
+                            projectsBySettlement["可請款"].filter((p) => p.canEditKolInvoice).length > 0 &&
+                            selectedClaimPids.length ===
+                              projectsBySettlement["可請款"].filter((p) => p.canEditKolInvoice).length
+                          }
+                          onChange={toggleClaimSelectAll}
+                          className="h-4 w-4 rounded border-stone-300 text-amber-600 focus:ring-amber-500"
+                          aria-label="全選可請款專案"
+                        />
+                      </th>
+                    ) : null}
                     <th className="whitespace-nowrap px-3 py-3 text-xs font-bold tracking-wide">專案ID</th>
                     <th className="min-w-[140px] px-3 py-3 text-xs font-bold tracking-wide">專案名稱</th>
                     <th className="whitespace-nowrap px-3 py-3 text-xs font-bold tracking-wide">結帳狀態</th>
-                    <th className="whitespace-nowrap px-3 py-3 text-xs font-bold tracking-wide">KOL分潤金額未稅</th>
+                    <th className="whitespace-nowrap px-3 py-3 text-xs font-bold tracking-wide">KOL應領金額未稅</th>
                     <th className="whitespace-nowrap px-3 py-3 text-xs font-bold tracking-wide">專案總金額未稅</th>
+                    <th className="min-w-[160px] px-3 py-3 text-xs font-bold tracking-wide">SDH對外請款</th>
                     <th className="whitespace-nowrap px-3 py-3 text-xs font-bold tracking-wide">請款憑證</th>
                     <th className="whitespace-nowrap px-3 py-3 text-xs font-bold tracking-wide">客戶入帳日</th>
                     <th className="whitespace-nowrap px-3 py-3 text-xs font-bold tracking-wide">結帳日期</th>
@@ -1223,196 +971,445 @@ function KolHomeInner() {
                 </thead>
                 <tbody>
                   {visibleProjects.map((p) => {
-                    const expanded = expandedPid === p.專案ID;
-                    const draft = drafts[p.專案ID] ?? emptyDraft(p, laborProfile);
                     const listStatus = kolListStatusLabel(p);
                     const needsAction =
                       !isKolProjectOnHold(p.專案狀態) &&
                       p.結帳狀態 === "可請款" &&
                       !projectHasCredential(p);
+                    const sdhOut = formatSdhOutboundCell(p);
                     return (
-                      <Fragment key={p.專案ID}>
-                        <tr
-                          role="button"
-                          tabIndex={0}
-                          aria-expanded={expanded}
-                          aria-label={`${p.專案名稱}，${expanded ? "收合" : "展開"}專案詳情`}
-                          className={`group cursor-pointer border-b transition-all last:border-b-0 ${
-                            isDark
-                              ? expanded
-                                ? "border-white/10 bg-amber-500/10 shadow-[inset_3px_0_0_0] shadow-amber-400"
-                                : needsAction
-                                  ? "border-white/5 bg-[#141414] hover:bg-sky-500/10 hover:shadow-[inset_3px_0_0_0] hover:shadow-sky-400"
-                                  : "border-white/5 bg-[#121212] even:bg-[#161616] hover:bg-amber-500/10 hover:shadow-[inset_3px_0_0_0] hover:shadow-amber-400"
-                              : expanded
-                                ? "border-stone-100 bg-amber-50/90 shadow-[inset_3px_0_0_0] shadow-amber-500"
-                                : needsAction
-                                  ? "border-stone-100 bg-white hover:bg-sky-50/50 hover:shadow-[inset_3px_0_0_0] hover:shadow-sky-400"
-                                  : "border-stone-100 bg-white even:bg-stone-50/40 hover:bg-amber-50/70 hover:shadow-[inset_3px_0_0_0] hover:shadow-amber-400"
-                          }`}
-                          onClick={() => setExpandedPid(expanded ? null : p.專案ID)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              setExpandedPid(expanded ? null : p.專案ID);
-                            }
-                          }}
-                        >
+                      <tr
+                        key={p.專案ID}
+                        className={`border-b transition-colors last:border-b-0 ${
+                          isDark
+                            ? needsAction
+                              ? "border-white/5 bg-[#141414] hover:bg-sky-500/10"
+                              : "border-white/5 bg-[#121212] even:bg-[#161616] hover:bg-amber-500/5"
+                            : needsAction
+                              ? "border-stone-100 bg-white hover:bg-sky-50/50"
+                              : "border-stone-100 bg-white even:bg-stone-50/40 hover:bg-amber-50/50"
+                        }`}
+                      >
+                        {settlementTab === "可請款" && !isPreview ? (
                           <td className="px-2 py-3 text-center">
-                            <span
-                              className={`inline-flex h-6 w-6 items-center justify-center rounded-full transition ${
-                                expanded
-                                  ? "rotate-90 bg-amber-500 text-slate-900"
-                                  : isDark
-                                    ? "bg-white/10 text-stone-400 group-hover:bg-amber-500/30 group-hover:text-amber-100"
-                                    : "bg-stone-100 text-stone-500 group-hover:bg-amber-200 group-hover:text-amber-950"
-                              }`}
-                              aria-hidden
-                            >
-                              <svg width="12" height="12" viewBox="0 0 16 16">
-                                <path
-                                  d="M6 4l4 4-4 4"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            </span>
+                            {p.canEditKolInvoice ? (
+                              <input
+                                type="checkbox"
+                                checked={selectedClaimPids.includes(p.專案ID)}
+                                onChange={() => toggleClaimSelect(p.專案ID)}
+                                className="h-4 w-4 rounded border-stone-300 text-amber-600 focus:ring-amber-500"
+                                aria-label={`選取 ${p.專案名稱}`}
+                              />
+                            ) : (
+                              <span className="inline-block w-4" />
+                            )}
                           </td>
-                          <td
-                            className={`whitespace-nowrap px-3 py-3.5 font-mono text-[11px] ${
-                              isDark ? "text-stone-500 group-hover:text-stone-300" : "text-stone-600 group-hover:text-stone-800"
+                        ) : null}
+                        <td
+                          className={`whitespace-nowrap px-3 py-3.5 font-mono text-[11px] ${
+                            isDark ? "text-stone-500" : "text-stone-600"
+                          }`}
+                        >
+                          {p.專案ID}
+                        </td>
+                        <td className="max-w-[220px] px-3 py-3.5">
+                          <p className={`font-semibold ${isDark ? "text-stone-100" : "text-stone-900"}`}>
+                            {p.專案名稱}
+                          </p>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3.5">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${settlementBadgeClass(listStatus)}`}
+                          >
+                            {listStatus}
+                          </span>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3.5">
+                          <span
+                            className={`inline-flex min-w-[4.5rem] items-center justify-center rounded-lg px-2.5 py-1 text-base font-bold tabular-nums ring-1 ${
+                              isDark
+                                ? "bg-amber-500/15 text-amber-200 ring-amber-400/30"
+                                : "bg-amber-100 text-amber-950 ring-amber-300/70"
                             }`}
                           >
-                            {p.專案ID}
-                          </td>
-                          <td className="max-w-[220px] px-3 py-3.5">
-                            <p
-                              className={`font-semibold ${
-                                isDark
-                                  ? "text-stone-100 group-hover:text-amber-100"
-                                  : "text-stone-900 group-hover:text-amber-950"
-                              }`}
-                            >
-                              {p.專案名稱}
-                            </p>
-                            <p
-                              className={`mt-0.5 text-[10px] opacity-0 transition group-hover:opacity-100 ${
-                                isDark ? "text-stone-500" : "text-stone-400"
-                              }`}
-                            >
-                              {expanded ? "點一下收合" : "點一下展開"}
-                            </p>
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-3.5">
-                            <span
-                              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${settlementBadgeClass(listStatus)}`}
-                            >
-                              {listStatus}
-                            </span>
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-3.5">
-                            <span
-                              className={`inline-flex min-w-[4.5rem] items-center justify-center rounded-lg px-2.5 py-1 text-base font-bold tabular-nums ring-1 ${
-                                isDark
-                                  ? "bg-amber-500/15 text-amber-200 ring-amber-400/30"
-                                  : "bg-amber-100 text-amber-950 ring-amber-300/70"
-                              }`}
-                            >
-                              {p.KOL費用未稅}
-                            </span>
-                          </td>
-                          <td
-                            className={`whitespace-nowrap px-3 py-3.5 tabular-nums ${
-                              isDark ? "text-stone-400" : "text-stone-600"
+                            {p.KOL費用未稅}
+                          </span>
+                        </td>
+                        <td
+                          className={`whitespace-nowrap px-3 py-3.5 tabular-nums ${
+                            isDark ? "text-stone-400" : "text-stone-600"
+                          }`}
+                        >
+                          {p.專案總金額未稅}
+                        </td>
+                        <td className="min-w-[160px] max-w-[220px] px-3 py-3.5">
+                          <p
+                            className={`truncate font-mono text-xs font-semibold ${
+                              isDark ? "text-stone-200" : "text-stone-800"
                             }`}
+                            title={sdhOut.primary}
                           >
-                            {p.專案總金額未稅}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-3.5 text-xs">
-                            {p.請款憑證摘要 ? (
+                            {sdhOut.primary}
+                          </p>
+                          {sdhOut.secondary ? (
+                            <p className={`mt-0.5 truncate text-[10px] ${isDark ? "text-stone-500" : "text-stone-500"}`}>
+                              {sdhOut.secondary}
+                            </p>
+                          ) : null}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3.5 text-xs">
+                          {p.請款憑證摘要 ? (
+                            <div className="flex flex-wrap items-center gap-2">
                               <span className={isDark ? "text-stone-200" : "text-stone-800"}>
                                 <span className={isDark ? "text-stone-500" : "text-stone-500"}>
                                   {p.請款方式 === "勞務報酬" ? "勞報" : "發票"}
                                 </span>
                                 <span className="ml-1 font-mono font-semibold">{p.請款憑證摘要}</span>
                               </span>
-                            ) : needsAction ? (
-                              <span
-                                className={`inline-flex rounded-md px-2 py-0.5 font-semibold ring-1 ${
-                                  isDark
-                                    ? "bg-rose-500/15 text-rose-300 ring-rose-400/30"
-                                    : "bg-red-50 text-red-700 ring-red-200/80"
-                                }`}
-                              >
-                                待填
-                              </span>
-                            ) : (
-                              <span className={isDark ? "text-stone-600" : "text-stone-400"}>—</span>
-                            )}
-                          </td>
-                          <td
-                            className={`whitespace-nowrap px-3 py-3.5 tabular-nums ${
-                              isDark ? "text-stone-300" : "text-stone-700"
-                            }`}
-                          >
-                            {p.廠商付款日期}
-                          </td>
-                          <td
-                            className={`whitespace-nowrap px-3 py-3.5 tabular-nums ${
-                              isDark ? "text-stone-300" : "text-stone-700"
-                            }`}
-                          >
-                            {p.KOL匯款日期 || (p.結帳狀態 === "待匯款" ? (
+                              {settlementTab === "待匯款" && !isPreview && p.canEditKolInvoice ? (
+                                <button
+                                  type="button"
+                                  disabled={revokingPid === p.專案ID}
+                                  onClick={() => void revokeClaimCredential(p)}
+                                  className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 transition disabled:opacity-60 ${
+                                    isDark
+                                      ? "bg-stone-800 text-rose-300 ring-rose-400/40 hover:bg-rose-500/15"
+                                      : "bg-white text-rose-700 ring-rose-200 hover:bg-rose-50"
+                                  }`}
+                                >
+                                  {revokingPid === p.專案ID ? "撤回中…" : "撤回請款"}
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : needsAction ? (
+                            <span
+                              className={`inline-flex rounded-md px-2 py-0.5 font-semibold ring-1 ${
+                                isDark
+                                  ? "bg-rose-500/15 text-rose-300 ring-rose-400/30"
+                                  : "bg-red-50 text-red-700 ring-red-200/80"
+                              }`}
+                            >
+                              待提領
+                            </span>
+                          ) : (
+                            <span className={isDark ? "text-stone-600" : "text-stone-400"}>—</span>
+                          )}
+                        </td>
+                        <td
+                          className={`whitespace-nowrap px-3 py-3.5 tabular-nums ${
+                            isDark ? "text-stone-300" : "text-stone-700"
+                          }`}
+                        >
+                          {p.廠商付款日期}
+                        </td>
+                        <td
+                          className={`whitespace-nowrap px-3 py-3.5 tabular-nums ${
+                            isDark ? "text-stone-300" : "text-stone-700"
+                          }`}
+                        >
+                          {p.KOL匯款日期 ||
+                            (p.結帳狀態 === "待匯款" ? (
                               <span className={isDark ? "text-amber-300" : "text-amber-700"}>待匯款</span>
                             ) : (
                               "—"
                             ))}
-                          </td>
-                        </tr>
-                        {expanded && (
-                          <tr
-                            className={
-                              isDark
-                                ? "border-b border-white/10 bg-[#0f0f0f]"
-                                : "border-b border-amber-100 bg-gradient-to-b from-amber-50/40 to-white"
-                            }
-                          >
-                            <td colSpan={9} className="px-4 py-4">
-                              <p
-                                className={`mb-3 text-xs font-bold uppercase tracking-wide ${
-                                  isDark ? "text-amber-200/80" : "text-amber-800/80"
-                                }`}
-                              >
-                                專案詳情 · {p.專案ID}
-                              </p>
-                              <div className="grid grid-cols-2 gap-4">
-                                <SdhOutboundInfoPanel p={p} />
-                                <KolRequestCredentialPanel
-                                  p={p}
-                                  draft={draft}
-                                  saving={savingPid === p.專案ID}
-                                  partnerName={partnerName}
-                                  onDraftChange={(next) =>
-                                    setDrafts((prev) => ({ ...prev, [p.專案ID]: next }))
-                                  }
-                                  onSave={() => void saveKolInvoice(p)}
-                                />
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
+                        </td>
+                      </tr>
                     );
                   })}
                 </tbody>
               </table>
+
             </div>
           )}
         </>
       )}
+
+      {settlementTab === "可請款" && !isPreview && claimableSelected.length > 0 ? (
+        <div className="sticky bottom-4 z-40 mt-4">
+          <div
+            className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 shadow-xl ${
+              isDark
+                ? "border border-amber-400/40 bg-[#1a1a1a]/95 backdrop-blur"
+                : "border border-amber-200 bg-white/95 ring-1 ring-amber-100 backdrop-blur"
+            }`}
+          >
+            <div className="text-sm">
+              <span className="font-bold text-amber-700">已選 {claimableSelected.length} 筆</span>
+              <span className={`ml-2 tabular-nums ${isDark ? "text-stone-300" : "text-stone-600"}`}>
+                未稅合計 NT$ {claimableSelectedTotal.toLocaleString("zh-TW")}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => openClaimCheckout()}
+              className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-900 shadow transition hover:bg-amber-400"
+            >
+              提領
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {claimCheckoutOpen ? (
+        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-stone-900/50 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+          <div
+            className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-stone-200 bg-white shadow-2xl sm:rounded-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="kol-claim-checkout-title"
+          >
+            <header className="flex items-center justify-between border-b border-stone-200 px-5 py-4">
+              <div>
+                <h3 id="kol-claim-checkout-title" className="text-lg font-bold text-stone-900">
+                  批次提領／請款
+                </h3>
+                <p className="mt-0.5 text-xs text-stone-500">
+                  {claimableSelected.length} 筆 · 未稅合計 NT$ {claimableSelectedTotal.toLocaleString("zh-TW")}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={claimSaving}
+                onClick={() => setClaimCheckoutOpen(false)}
+                className="rounded-xl border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-600 hover:bg-stone-50 disabled:opacity-50"
+              >
+                關閉
+              </button>
+            </header>
+
+            <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+              <div className="inline-flex rounded-lg border border-stone-200 bg-stone-50 p-0.5 text-xs">
+                {(["發票", "勞務報酬"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() =>
+                      setClaimForm((f) => ({
+                        ...f,
+                        請款方式: mode,
+                        勞報簽署: false,
+                        勞報簽名: "",
+                      }))
+                    }
+                    className={`rounded-md px-3 py-1.5 font-semibold transition ${
+                      claimForm.請款方式 === mode ? "bg-amber-500 text-slate-900" : "text-stone-600 hover:text-stone-900"
+                    }`}
+                  >
+                    {mode === "發票" ? "公司發票" : "勞務報酬單"}
+                  </button>
+                ))}
+              </div>
+
+              <div className="rounded-xl border border-stone-200 bg-stone-50/80 p-3">
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-stone-500">勾選專案</p>
+                <ul className="max-h-36 space-y-1 overflow-y-auto text-sm">
+                  {claimableSelected.map((p) => (
+                    <li key={p.專案ID} className="flex justify-between gap-2">
+                      <span className="truncate text-stone-800">
+                        <span className="font-mono text-xs text-stone-500">{p.專案ID}</span> {p.專案名稱}
+                      </span>
+                      <span className="shrink-0 tabular-nums font-semibold text-stone-900">
+                        {parseKolAmount(p.KOL費用未稅).toLocaleString("zh-TW")}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {claimForm.請款方式 === "發票" ? (
+                <div className="space-y-3">
+                  <p className="text-xs text-stone-500">同一張發票號碼與金額會自動套用到上方所有勾選專案。</p>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">發票號碼</label>
+                    <input
+                      type="text"
+                      value={claimForm.KOL發票號碼}
+                      onChange={(e) => setClaimForm((f) => ({ ...f, KOL發票號碼: e.target.value }))}
+                      className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm focus:border-amber-400 focus:outline-none"
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-stone-500">發票日期</label>
+                      <input
+                        type="date"
+                        value={claimForm.KOL發票日期}
+                        onChange={(e) => setClaimForm((f) => ({ ...f, KOL發票日期: e.target.value }))}
+                        className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm focus:border-amber-400 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-stone-500">發票金額</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={claimForm.KOL發票金額}
+                        onChange={(e) => setClaimForm((f) => ({ ...f, KOL發票金額: e.target.value }))}
+                        className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm tabular-nums focus:border-amber-400 focus:outline-none"
+                        placeholder="紙本／電子發票金額"
+                      />
+                    </div>
+                  </div>
+                  {(() => {
+                    const entered = Math.round(Number(String(claimForm.KOL發票金額).replace(/,/g, "")) || 0);
+                    if (!(entered > 0) || claimableSelectedTotal <= 0) return null;
+                    const untaxed = claimableSelectedTotal;
+                    const taxIncluded = Math.round(untaxed * 1.05);
+                    const matches = entered === untaxed || entered === taxIncluded;
+                    if (matches) {
+                      return (
+                        <p className="text-xs text-emerald-700">
+                          已與系統合計對上
+                          {entered === taxIncluded && entered !== untaxed ? "（含稅＝未稅×1.05）" : "（未稅）"}。
+                        </p>
+                      );
+                    }
+                    return (
+                      <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-950 ring-1 ring-amber-200/80">
+                        發票金額 NT$ {entered.toLocaleString("zh-TW")} 與系統未稅合計 NT${" "}
+                        {untaxed.toLocaleString("zh-TW")}
+                        （含稅預期 NT$ {taxIncluded.toLocaleString("zh-TW")}）不一致，仍可送出，請確認後再提領。
+                      </p>
+                    );
+                  })()}
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">備註</label>
+                    <input
+                      type="text"
+                      value={claimForm.KOL發票備註}
+                      onChange={(e) => setClaimForm((f) => ({ ...f, KOL發票備註: e.target.value }))}
+                      className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm focus:border-amber-400 focus:outline-none"
+                      placeholder="選填"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs leading-relaxed text-stone-500">
+                    系統會把合計拆成每張未滿 2 萬的勞報（預設每塊 NT$ {KOL_LABOR_SLIP_PREFERRED.toLocaleString("zh-TW")}
+                    ），不做扣繳；一次簽名套用整批。
+                  </p>
+                  {claimLaborSplit ? (
+                    <div className="rounded-xl border border-sky-200 bg-sky-50/80 p-3">
+                      <p className="mb-2 text-xs font-bold text-sky-950">
+                        拆單預覽 · {claimLaborSplit.slips.length} 張 · 合計 NT${" "}
+                        {claimLaborSplit.total.toLocaleString("zh-TW")}
+                      </p>
+                      <ul className="max-h-40 space-y-1 overflow-y-auto text-xs tabular-nums text-sky-950">
+                        {claimLaborSplit.slips.map((s) => (
+                          <li key={s.序號} className="flex justify-between">
+                            <span>單據 #{s.序號}</span>
+                            <span className="font-semibold">{s.給付總額.toLocaleString("zh-TW")}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-red-600">無法計算拆單，請確認金額。</p>
+                  )}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-stone-500">勞務期間起</label>
+                      <input
+                        type="date"
+                        value={claimForm.勞務期間起}
+                        onChange={(e) => setClaimForm((f) => ({ ...f, 勞務期間起: e.target.value }))}
+                        className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm focus:border-amber-400 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-stone-500">勞務期間迄</label>
+                      <input
+                        type="date"
+                        value={claimForm.勞務期間迄}
+                        onChange={(e) => setClaimForm((f) => ({ ...f, 勞務期間迄: e.target.value }))}
+                        className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm focus:border-amber-400 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">勞務內容</label>
+                    <textarea
+                      value={claimForm.勞務內容}
+                      onChange={(e) => setClaimForm((f) => ({ ...f, 勞務內容: e.target.value }))}
+                      rows={2}
+                      className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm focus:border-amber-400 focus:outline-none"
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-stone-500">身分證字號</label>
+                      <input
+                        type="text"
+                        value={claimForm.身分證字號}
+                        onChange={(e) => setClaimForm((f) => ({ ...f, 身分證字號: e.target.value }))}
+                        className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm focus:border-amber-400 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-stone-500">聯絡電話</label>
+                      <input
+                        type="text"
+                        value={claimForm.聯絡電話}
+                        onChange={(e) => setClaimForm((f) => ({ ...f, 聯絡電話: e.target.value }))}
+                        className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm focus:border-amber-400 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">戶籍地址</label>
+                    <input
+                      type="text"
+                      value={claimForm.戶籍地址}
+                      onChange={(e) => setClaimForm((f) => ({ ...f, 戶籍地址: e.target.value }))}
+                      className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm focus:border-amber-400 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">電子簽名（整批共用）</label>
+                    <SignaturePad
+                      value={claimForm.勞報簽名}
+                      onChange={(v) => setClaimForm((f) => ({ ...f, 勞報簽名: v }))}
+                      disabled={claimSaving}
+                    />
+                  </div>
+                  <label className="flex cursor-pointer items-start gap-2 text-sm text-stone-700">
+                    <input
+                      type="checkbox"
+                      checked={claimForm.勞報簽署}
+                      onChange={(e) => setClaimForm((f) => ({ ...f, 勞報簽署: e.target.checked }))}
+                      className="mt-1 h-4 w-4 rounded border-stone-300 text-amber-600"
+                    />
+                    <span>我確認以上勞務報酬內容正確，並同意以同一簽名套用至本批所有拆單據。</span>
+                  </label>
+                </div>
+              )}
+
+              {claimError ? <p className="text-sm font-medium text-red-600">{claimError}</p> : null}
+            </div>
+
+            <footer className="flex justify-end gap-3 border-t border-stone-200 px-5 py-4">
+              <button
+                type="button"
+                disabled={claimSaving}
+                onClick={() => setClaimCheckoutOpen(false)}
+                className="rounded-xl border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-600 hover:bg-stone-50 disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={claimSaving}
+                onClick={() => void submitClaimBatch()}
+                className="rounded-xl bg-amber-500 px-5 py-2 text-sm font-bold text-slate-900 shadow hover:bg-amber-400 disabled:opacity-50"
+              >
+                {claimSaving ? "送出中…" : "確認提領"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1599,6 +1599,7 @@ export default function DashboardPage() {
   const [masterKolInvoiceForm, setMasterKolInvoiceForm] = useState({
     KOL發票號碼: "",
     KOL發票日期: "",
+    KOL發票金額: "",
     KOL發票備註: "",
   });
   const [masterKolInvoiceSaving, setMasterKolInvoiceSaving] = useState(false);
@@ -2631,7 +2632,7 @@ export default function DashboardPage() {
         }
         return merged.filter((k) => allKeys.includes(k));
       }
-      /** 大總表：主表只自動補發票摘要（僅董事長／會計）；款項進度移到展開細節中顯示 */
+      /** 大總表：主表不顯示款項進度；發票摘要僅董事長／會計 */
       if (tableKey === "master") {
         const merged = [...normalized];
         if (merged.includes("專案引薦人") && !merged.includes("專案開發人") && allKeys.includes("專案開發人")) {
@@ -4041,7 +4042,7 @@ export default function DashboardPage() {
   useEffect(() => {
     const pid = String(selectedMaster?.專案ID ?? "").trim();
     if (!pid) {
-      setMasterKolInvoiceForm({ KOL發票號碼: "", KOL發票日期: "", KOL發票備註: "" });
+      setMasterKolInvoiceForm({ KOL發票號碼: "", KOL發票日期: "", KOL發票金額: "", KOL發票備註: "" });
       setMasterKolInvoiceNotice(null);
       setMasterKolInvoiceApplyCandidates([]);
       setMasterKolInvoiceApplyToOthers(false);
@@ -4052,15 +4053,23 @@ export default function DashboardPage() {
     void fetch(`/api/kol-invoices?專案ID=${encodeURIComponent(pid)}`, { cache: "no-store" })
       .then(safeResJson)
       .then((res) => {
-        const inv = (res as { invoice?: { KOL發票號碼?: string; KOL發票日期?: string; KOL發票備註?: string } | null }).invoice;
+        const inv = (res as {
+          invoice?: {
+            KOL發票號碼?: string;
+            KOL發票日期?: string;
+            KOL發票金額?: string;
+            KOL發票備註?: string;
+          } | null;
+        }).invoice;
         setMasterKolInvoiceForm({
           KOL發票號碼: String(inv?.KOL發票號碼 ?? "").trim(),
           KOL發票日期: String(inv?.KOL發票日期 ?? "").trim().slice(0, 10),
+          KOL發票金額: String(inv?.KOL發票金額 ?? "").trim(),
           KOL發票備註: String(inv?.KOL發票備註 ?? "").trim(),
         });
       })
       .catch(() => {
-        setMasterKolInvoiceForm({ KOL發票號碼: "", KOL發票日期: "", KOL發票備註: "" });
+        setMasterKolInvoiceForm({ KOL發票號碼: "", KOL發票日期: "", KOL發票金額: "", KOL發票備註: "" });
       });
 
     const kolName = String(selectedMaster?.KOL名稱 ?? "").trim();
@@ -4863,6 +4872,40 @@ export default function DashboardPage() {
       }
     },
     [kolRemitDrafts, loadKolRemittanceList, refreshDashboardData]
+  );
+
+  const revokeKolClaimFromFinance = useCallback(
+    async (row: { 專案ID: string; 專案名稱?: string | null }) => {
+      const pid = String(row.專案ID ?? "").trim();
+      if (!pid) return;
+      if (
+        !window.confirm(
+          `確定撤回「${row.專案名稱 || pid}」的請款憑證？\n清除後會回到可請款（若為批次提領，同批未匯款專案會一併撤回）。`
+        )
+      ) {
+        return;
+      }
+      setKolRemittanceSavingPid(pid);
+      setKolRemittanceError(null);
+      try {
+        const res = await fetch("/api/kol-invoices", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 專案ID: pid }),
+        });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string; cleared?: number };
+        if (!res.ok || !data.ok) {
+          setKolRemittanceError(data.error ?? "撤回請款失敗");
+          return;
+        }
+        await loadKolRemittanceList();
+      } catch (e) {
+        setKolRemittanceError(e instanceof Error ? e.message : "撤回請款失敗");
+      } finally {
+        setKolRemittanceSavingPid(null);
+      }
+    },
+    [loadKolRemittanceList]
   );
 
   const deletePaymentRecordsByIdList = useCallback(
@@ -6210,9 +6253,6 @@ export default function DashboardPage() {
                       const projectChildren = masterChildrenByParentId.get(String(pid).trim()) ?? [];
                       const invoiceSummary = invoiceSummaryByProjectId.get(String(pid).trim());
                       const projectInvoices = invoiceSummary?.rows ?? [];
-                      const projectFinance = financeByProjectId.get(String(pid).trim());
-                      const financeProgress = financeProgressShortLabel(projectFinance);
-                      const financeProgressInfo = financeProgressDetail(projectFinance);
                       return (
                         <Fragment key={row.id ?? pid}>
                           <tr
@@ -6428,25 +6468,6 @@ export default function DashboardPage() {
                             <tr key={`${pid}-tasks`}>
                               <td colSpan={masterColsForDisplay.length || 15} className="border-t-0 bg-stone-50 px-4 py-4">
                                 <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
-                                  <div className="mb-4 rounded-lg border border-stone-200 bg-white/90 p-3">
-                                    <div className="flex flex-wrap items-center justify-between gap-3">
-                                      <div>
-                                        <h3 className="text-sm font-bold uppercase tracking-wider text-stone-700">款項進度</h3>
-                                        <p className="mt-1 text-xs text-stone-500">{financeProgressInfo}</p>
-                                      </div>
-                                      <div className="flex flex-wrap items-center gap-2 text-xs">
-                                        <span className={`rounded-full px-2.5 py-0.5 font-semibold ${financeProgressBadgeClass(financeProgress)}`}>
-                                          {financeProgress}
-                                        </span>
-                                        <span className="text-stone-500">
-                                          廠商付款：{projectFinance?.廠商付款日期 || "—"}
-                                        </span>
-                                        <span className="text-stone-500">
-                                          員工分潤：{projectFinance?.員工分潤日期 || "—"}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </div>
                                   <div className="mb-5 rounded-xl border border-sky-200/90 bg-sky-50/50 p-3">
                                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                                       <h3 className="text-sm font-bold uppercase tracking-wider text-sky-900">
@@ -6464,21 +6485,18 @@ export default function DashboardPage() {
                                             <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-sky-900/70">專案名稱</th>
                                             <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase text-sky-900/70">專案狀態</th>
                                             <th className="whitespace-nowrap px-3 py-2 text-right text-xs font-semibold uppercase text-sky-900/70">專案總金額未稅</th>
-                                            <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase text-sky-900/70">款項進度</th>
                                           </tr>
                                         </thead>
                                         <tbody className="divide-y divide-sky-100">
                                           {projectChildren.length === 0 ? (
                                             <tr>
-                                              <td colSpan={4} className="px-3 py-4 text-center text-sm text-stone-500">
+                                              <td colSpan={3} className="px-3 py-4 text-center text-sm text-stone-500">
                                                 尚無子專案（於子案詳情設定「母專案」即可掛在此）
                                               </td>
                                             </tr>
                                           ) : (
                                             projectChildren.map((child) => {
                                               const childPid = String(child.專案ID ?? "").trim();
-                                              const childFin = financeByProjectId.get(childPid);
-                                              const childProgress = financeProgressShortLabel(childFin);
                                               return (
                                                 <tr
                                                   key={child.id ?? childPid}
@@ -6504,13 +6522,6 @@ export default function DashboardPage() {
                                                     {canViewMasterAmountsForRow(child)
                                                       ? formatAmount(String(child.專案總金額未稅 ?? ""))
                                                       : "—"}
-                                                  </td>
-                                                  <td className="whitespace-nowrap px-3 py-2.5">
-                                                    <span
-                                                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${financeProgressBadgeClass(childProgress)}`}
-                                                    >
-                                                      {childProgress}
-                                                    </span>
                                                   </td>
                                                 </tr>
                                               );
@@ -9614,7 +9625,7 @@ export default function DashboardPage() {
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{kolRemittanceError}</p>
               )}
               <p className="mb-2 text-[11px] text-stone-500">
-                KOL 填寫請款憑證（發票或勞務報酬單）後會出現在「待匯款」。登記匯款會同時寫入付款記錄（類型 KOL），KOL 入口即顯示已匯款與匯款日期。
+                KOL 填寫請款憑證（發票或勞務報酬單）後會出現在「待匯款」。登記匯款會同時寫入付款記錄（類型 KOL），KOL 入口即顯示已匯款與匯款日期。填錯可按「撤回請款」清除憑證回到可請款。
                 {canPreviewKolPortalView ? " 可按「老師視角」以唯讀方式查看該 KOL 入口。" : ""}
               </p>
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
@@ -9760,6 +9771,14 @@ export default function DashboardPage() {
                                       className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-60"
                                     >
                                       {saving ? "登記中…" : "登記匯款"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={saving}
+                                      onClick={() => void revokeKolClaimFromFinance(row)}
+                                      className="text-[11px] font-semibold text-rose-700 underline-offset-2 hover:underline disabled:opacity-60"
+                                    >
+                                      撤回請款
                                     </button>
                                     {canPreviewKolPortalView ? (
                                       <button
@@ -12855,10 +12874,16 @@ export default function DashboardPage() {
                       />
                     </div>
                     <InputField
+                      label="KOL 發票金額"
+                      value={masterKolInvoiceForm.KOL發票金額}
+                      onChange={(v) => setMasterKolInvoiceForm((f) => ({ ...f, KOL發票金額: v }))}
+                      className="col-span-2 sm:col-span-1"
+                    />
+                    <InputField
                       label="備註"
                       value={masterKolInvoiceForm.KOL發票備註}
                       onChange={(v) => setMasterKolInvoiceForm((f) => ({ ...f, KOL發票備註: v }))}
-                      className="col-span-2"
+                      className="col-span-2 sm:col-span-1"
                     />
                   </div>
                   {masterKolInvoiceApplyCandidates.length > 0 && masterKolInvoiceForm.KOL發票號碼.trim() ? (
@@ -12884,7 +12909,59 @@ export default function DashboardPage() {
                       </span>
                     </label>
                   ) : null}
-                  <div className="mt-3 flex justify-end">
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                    {masterKolInvoiceForm.KOL發票號碼.trim() || masterKolInvoiceForm.KOL發票金額.trim() ? (
+                      <button
+                        type="button"
+                        disabled={masterKolInvoiceSaving || !selectedMaster.專案ID}
+                        onClick={async () => {
+                          if (
+                            !window.confirm(
+                              "確定清除此專案的 KOL 請款憑證？清除後會回到可請款（同批未匯款專案會一併撤回）。"
+                            )
+                          ) {
+                            return;
+                          }
+                          setMasterKolInvoiceSaving(true);
+                          setMasterKolInvoiceNotice(null);
+                          try {
+                            const res = await fetch("/api/kol-invoices", {
+                              method: "DELETE",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ 專案ID: selectedMaster.專案ID }),
+                            });
+                            const data = (await safeResJson(res)) as {
+                              ok?: boolean;
+                              error?: string;
+                              cleared?: number;
+                            };
+                            if (!res.ok || !data.ok) {
+                              setMasterKolInvoiceNotice(data.error ?? "清除失敗");
+                              return;
+                            }
+                            setMasterKolInvoiceForm({
+                              KOL發票號碼: "",
+                              KOL發票日期: "",
+                              KOL發票金額: "",
+                              KOL發票備註: "",
+                            });
+                            setMasterKolInvoiceNotice(
+                              data.cleared && data.cleared > 1
+                                ? `已清除 ${data.cleared} 筆請款憑證`
+                                : "已清除請款憑證，狀態回到可請款"
+                            );
+                            void loadKolRemittanceList();
+                          } catch (e) {
+                            setMasterKolInvoiceNotice(e instanceof Error ? e.message : "清除失敗");
+                          } finally {
+                            setMasterKolInvoiceSaving(false);
+                          }
+                        }}
+                        className="rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+                      >
+                        清除請款憑證
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       disabled={masterKolInvoiceSaving || !selectedMaster.專案ID}
@@ -12903,6 +12980,7 @@ export default function DashboardPage() {
                               專案ID: selectedMaster.專案ID,
                               KOL發票號碼: masterKolInvoiceForm.KOL發票號碼.trim() || null,
                               KOL發票日期: masterKolInvoiceForm.KOL發票日期.trim() || null,
+                              KOL發票金額: masterKolInvoiceForm.KOL發票金額.trim().replace(/,/g, "") || null,
                               KOL發票備註: masterKolInvoiceForm.KOL發票備註.trim() || null,
                               applyToProjectIds,
                             }),
