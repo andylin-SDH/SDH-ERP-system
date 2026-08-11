@@ -3118,29 +3118,31 @@ export default function DashboardPage() {
     const cols = masterVisibleCols.filter(
       (k) =>
         !MASTER_LIST_HIDDEN_KEYS.has(k) &&
-        (canViewMasterInvoiceSummary || k !== "發票摘要")
-    );
-    // 負責人欄已自列表移除；不再並排顯示兩組角色欄提示
-    const withoutRoles = cols.filter(
-      (k) =>
+        (canViewMasterInvoiceSummary || k !== "發票摘要") &&
         !MASTER_PAYOUT_MODE_A_COL_KEYS.has(k) &&
         !MASTER_PAYOUT_MODE_B_COL_KEYS.has(k) &&
         !MASTER_PAYOUT_MODE_A_ONLY_COL_KEYS.has(k) &&
-        !MASTER_PAYOUT_MODE_B_ONLY_COL_KEYS.has(k)
+        !MASTER_PAYOUT_MODE_B_ONLY_COL_KEYS.has(k) &&
+        k !== MASTER_LIST_CONTENT_NOTES_KEY
     );
-    const withContent = withoutRoles.includes(MASTER_LIST_CONTENT_NOTES_KEY)
-      ? withoutRoles
-      : (() => {
-          const next = [...withoutRoles];
-          const afterInvoice = next.indexOf("發票摘要");
-          const afterDate = next.indexOf("開案日期");
-          const insertAt =
-            afterDate !== -1 ? afterDate + 1 : afterInvoice !== -1 ? afterInvoice + 1 : next.length;
-          next.splice(insertAt, 0, MASTER_LIST_CONTENT_NOTES_KEY);
-          return next;
-        })();
+    /** 固定順序：左側資訊緊湊，內容與備註吃滿右側，減少中間空洞與橫向捲動 */
+    const preferredOrder = [
+      "專案ID",
+      "專案名稱",
+      "發票摘要",
+      "開案日期",
+      "款項進度",
+    ];
+    const ordered: string[] = [];
+    for (const key of preferredOrder) {
+      if (cols.includes(key)) ordered.push(key);
+    }
+    for (const key of cols) {
+      if (!ordered.includes(key)) ordered.push(key);
+    }
+    ordered.push(MASTER_LIST_CONTENT_NOTES_KEY);
     return {
-      masterColsForDisplay: withContent,
+      masterColsForDisplay: ordered,
       masterFilteredListHasBothPayoutModes: false,
     };
   }, [masterVisibleCols, canViewMasterInvoiceSummary]);
@@ -5959,26 +5961,26 @@ export default function DashboardPage() {
               )}
             </div>
             <div className="overflow-x-auto rounded-xl border border-stone-200/90 ring-1 ring-amber-100/60">
-              <table className="min-w-full table-fixed divide-y divide-stone-200">
+              <table className="w-full table-fixed divide-y divide-stone-200">
                 <colgroup>
-                  {masterColsForDisplay.map((k) => (
-                    <col
-                      key={k}
-                      className={
-                        k === "專案ID"
-                          ? "w-[5rem] min-w-[5rem]"
-                          : k === "專案名稱"
-                            ? "min-w-[12rem]"
-                            : k === "款項進度"
-                              ? "min-w-[5.5rem]"
-                              : k === "發票摘要"
-                                ? "min-w-[11rem]"
-                                : k === MASTER_LIST_CONTENT_NOTES_KEY
-                                  ? "min-w-[16rem] w-[28%]"
-                                  : "min-w-[5rem]"
-                      }
-                    />
-                  ))}
+                  {masterColsForDisplay.map((k) => {
+                    if (k === MASTER_LIST_CONTENT_NOTES_KEY) {
+                      return <col key={k} />;
+                    }
+                    const width =
+                      k === "專案ID"
+                        ? "4.5rem"
+                        : k === "專案名稱"
+                          ? "13rem"
+                          : k === "發票摘要"
+                            ? "9.5rem"
+                            : k === "開案日期"
+                              ? "6.5rem"
+                              : k === "款項進度"
+                                ? "5.5rem"
+                                : "6rem";
+                    return <col key={k} style={{ width }} />;
+                  })}
                 </colgroup>
                 <thead className="sticky top-0 z-20 bg-stone-100">
                   <tr>
@@ -5987,16 +5989,16 @@ export default function DashboardPage() {
                         key={k}
                         className={
                           k === "專案ID"
-                            ? "sticky left-0 z-30 w-[5rem] min-w-[5rem] max-w-[5rem] bg-stone-100 px-2 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
+                            ? "sticky left-0 z-30 w-[4.5rem] bg-stone-100 px-2 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
                             : k === "專案名稱"
-                              ? "sticky left-[5rem] z-30 w-48 min-w-[12rem] max-w-[12rem] bg-stone-100 px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
-                              : k === "款項進度"
-                                ? "min-w-[5.5rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
-                                : k === "發票摘要"
-                                  ? "min-w-[11rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
+                              ? "sticky left-[4.5rem] z-30 w-[13rem] bg-stone-100 px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
+                              : k === "發票摘要"
+                                ? "px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
+                                : k === "開案日期"
+                                  ? "px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600 whitespace-nowrap"
                                   : k === MASTER_LIST_CONTENT_NOTES_KEY
-                                    ? "min-w-[16rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
-                                    : "min-w-[5rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600 whitespace-nowrap"
+                                    ? "px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
+                                    : "px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600 whitespace-nowrap"
                         }
                       >
                         {k === MASTER_LIST_CONTENT_NOTES_KEY
@@ -6080,7 +6082,7 @@ export default function DashboardPage() {
                                 (!modeBRow && MASTER_PAYOUT_MODE_B_COL_KEYS.has(k));
                               if (k === "專案ID") {
                                 return (
-                                  <td key={k} className="sticky left-0 z-20 w-[5rem] min-w-[5rem] max-w-[5rem] bg-white/90 px-2 py-3.5" title={pid}>
+                                  <td key={k} className="sticky left-0 z-20 w-[4.5rem] bg-white/90 px-2 py-3" title={pid}>
                                     <button
                                       type="button"
                                       onClick={(e) => {
@@ -6109,7 +6111,7 @@ export default function DashboardPage() {
                                 return (
                                   <td
                                     key={k}
-                                    className="sticky left-[5rem] z-20 w-48 min-w-[12rem] max-w-[12rem] bg-white/90 px-4 py-3.5"
+                                    className="sticky left-[4.5rem] z-20 w-[13rem] bg-white/90 px-3 py-3"
                                     title={kolName ? `${projectName} · ${kolName}` : projectName}
                                   >
                                     <div className="flex min-w-0 items-start gap-1.5">
@@ -6202,19 +6204,19 @@ export default function DashboardPage() {
                                 return (
                                   <td
                                     key={k}
-                                    className="min-w-[16rem] max-w-[28rem] px-4 py-3 align-top"
+                                    className="px-3 py-2.5 align-top"
                                     title={titleBits || undefined}
                                   >
-                                    <div className="rounded-lg border border-stone-200/80 bg-gradient-to-br from-white to-stone-50/90 px-3 py-2.5 shadow-sm ring-1 ring-stone-100/80">
+                                    <div className="rounded-lg border border-stone-200/70 bg-gradient-to-br from-white to-stone-50/80 px-3 py-2 ring-1 ring-stone-100/70">
                                       {content ? (
-                                        <p className="line-clamp-2 text-sm leading-relaxed text-stone-800">
+                                        <p className="line-clamp-3 text-sm leading-relaxed text-stone-800">
                                           {content}
                                         </p>
                                       ) : (
                                         <p className="text-sm italic text-stone-400">尚無專案內容</p>
                                       )}
                                       {note ? (
-                                        <div className="mt-2 border-t border-dashed border-amber-200/90 pt-2">
+                                        <div className="mt-1.5 border-t border-dashed border-amber-200/90 pt-1.5">
                                           <p className="line-clamp-2 text-xs leading-relaxed text-stone-600">
                                             <span className="mr-1.5 inline-block rounded bg-amber-100/90 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-amber-900/90">
                                               備註
