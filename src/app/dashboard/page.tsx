@@ -1098,7 +1098,20 @@ const MASTER_LIST_HIDDEN_KEYS = new Set([
   "廠商名稱",
   "廠商預計付款日",
   "專案引薦人",
+  /** 結案會進「已結案」分頁；列表不必再佔一欄下拉 */
+  "專案狀態",
+  /** 負責人改於詳情編輯；列表改顯示內容與備註 */
+  "專案開發人",
+  "專案BDPM",
+  "專案管理員",
+  "執行管理員",
+  "經紀人",
+  "主管",
+  "KOL開發者",
 ]);
+
+/** 大總表列表合成欄：專案內容 + 備註同一格 */
+const MASTER_LIST_CONTENT_NOTES_KEY = "內容與備註";
 
 function fieldMatchesUser(val: string | null | undefined, userName: string, userEmail: string): boolean {
   const v = String(val ?? "").trim();
@@ -2022,6 +2035,8 @@ export default function DashboardPage() {
   const canPreviewKolPortalView = Boolean(me?.role && ["董事長", "管理者", "會計"].includes(me.role));
   /** 董事長／會計：可編輯專案額外獎金 */
   const canEditExtraBonus = Boolean(me?.role && ["董事長", "會計"].includes(me.role));
+  /** 董事長／會計：大總表「發票摘要」與展開發票明細 */
+  const canViewMasterInvoiceSummary = Boolean(me?.role && ["董事長", "會計"].includes(me.role));
   /** 大總表金額／營收／成本（分潤成數仍僅 Config／此權限）；其餘欄位登入即可編輯 */
   const canEditMasterNumbers = useMemo(
     () => Boolean(me?.role && canEditMasterNumericFields(me.role, rolePermissions)),
@@ -2561,23 +2576,29 @@ export default function DashboardPage() {
         }
         return merged.filter((k) => allKeys.includes(k));
       }
-      /** 大總表：主表只自動補發票摘要；款項進度移到展開細節中顯示 */
+      /** 大總表：主表只自動補發票摘要（僅董事長／會計）；款項進度移到展開細節中顯示 */
       if (tableKey === "master") {
         const merged = [...normalized];
         if (merged.includes("專案引薦人") && !merged.includes("專案開發人") && allKeys.includes("專案開發人")) {
           const idx = merged.indexOf("專案引薦人");
           merged.splice(idx + 1, 0, "專案開發人");
         }
-        if (allKeys.includes("發票摘要") && !merged.includes("發票摘要")) {
+        const canSeeInvoiceSummary = Boolean(me?.role && ["董事長", "會計"].includes(me.role));
+        if (canSeeInvoiceSummary && allKeys.includes("發票摘要") && !merged.includes("發票摘要")) {
           const idx = merged.indexOf("專案狀態");
           if (idx !== -1) merged.splice(idx + 1, 0, "發票摘要");
           else merged.push("發票摘要");
         }
-        return merged.filter((k) => allKeys.includes(k) && k !== "款項進度");
+        return merged.filter(
+          (k) =>
+            allKeys.includes(k) &&
+            k !== "款項進度" &&
+            (canSeeInvoiceSummary || k !== "發票摘要")
+        );
       }
       return normalized;
     },
-    [myVisibility]
+    [myVisibility, me?.role]
   );
 
   /** 文字搜尋：在指定欄位中做簡單子字串比對（大小寫不分） */
@@ -3012,11 +3033,20 @@ export default function DashboardPage() {
   const searchedMasterHits = useMemo(() => {
     const q = deferredMasterSearch.trim().toLowerCase();
     if (!q) return masterTabFilteredList;
-    return masterTabFilteredList.filter((row) =>
-      masterVisibleCols.some((k) =>
-        masterTableCellText(row, k, partnerByKolName, financeByProjectId, invoiceSummaryByProjectId).toLowerCase().includes(q)
-      )
-    );
+    return masterTabFilteredList.filter((row) => {
+      if (
+        masterVisibleCols.some((k) =>
+          masterTableCellText(row, k, partnerByKolName, financeByProjectId, invoiceSummaryByProjectId)
+            .toLowerCase()
+            .includes(q)
+        )
+      ) {
+        return true;
+      }
+      const content = String(row.專案內容 ?? "").toLowerCase();
+      const note = String(row.備註 ?? "").toLowerCase();
+      return content.includes(q) || note.includes(q);
+    });
   }, [masterTabFilteredList, masterVisibleCols, deferredMasterSearch, partnerByKolName, financeByProjectId, invoiceSummaryByProjectId]);
 
   /** 目前分頁內：母專案ID → 子專案列（含子案本身也在篩選結果內者） */
@@ -3085,28 +3115,35 @@ export default function DashboardPage() {
    * 單一專案類型分頁時通常只會出現一組角色欄；「全部」且兩種專案並存時仍顯示兩組。
    */
   const { masterColsForDisplay, masterFilteredListHasBothPayoutModes } = useMemo(() => {
-    const cols = masterVisibleCols.filter((k) => !MASTER_LIST_HIDDEN_KEYS.has(k));
-    if (masterTabFilteredList.length === 0) {
-      return { masterColsForDisplay: cols, masterFilteredListHasBothPayoutModes: false };
-    }
-    let hasModeA = false;
-    let hasModeB = false;
-    for (const row of masterTabFilteredList) {
-      if (isPayoutModeB(String(row.專案類型 ?? ""))) hasModeB = true;
-      else hasModeA = true;
-    }
-    const filtered = cols.filter((k) => {
-      if (MASTER_PAYOUT_MODE_A_COL_KEYS.has(k)) return hasModeA;
-      if (MASTER_PAYOUT_MODE_B_COL_KEYS.has(k)) return hasModeB;
-      if (MASTER_PAYOUT_MODE_A_ONLY_COL_KEYS.has(k)) return hasModeA;
-      if (MASTER_PAYOUT_MODE_B_ONLY_COL_KEYS.has(k)) return hasModeB;
-      return true;
-    });
+    const cols = masterVisibleCols.filter(
+      (k) =>
+        !MASTER_LIST_HIDDEN_KEYS.has(k) &&
+        (canViewMasterInvoiceSummary || k !== "發票摘要")
+    );
+    // 負責人欄已自列表移除；不再並排顯示兩組角色欄提示
+    const withoutRoles = cols.filter(
+      (k) =>
+        !MASTER_PAYOUT_MODE_A_COL_KEYS.has(k) &&
+        !MASTER_PAYOUT_MODE_B_COL_KEYS.has(k) &&
+        !MASTER_PAYOUT_MODE_A_ONLY_COL_KEYS.has(k) &&
+        !MASTER_PAYOUT_MODE_B_ONLY_COL_KEYS.has(k)
+    );
+    const withContent = withoutRoles.includes(MASTER_LIST_CONTENT_NOTES_KEY)
+      ? withoutRoles
+      : (() => {
+          const next = [...withoutRoles];
+          const afterInvoice = next.indexOf("發票摘要");
+          const afterDate = next.indexOf("開案日期");
+          const insertAt =
+            afterDate !== -1 ? afterDate + 1 : afterInvoice !== -1 ? afterInvoice + 1 : next.length;
+          next.splice(insertAt, 0, MASTER_LIST_CONTENT_NOTES_KEY);
+          return next;
+        })();
     return {
-      masterColsForDisplay: filtered,
-      masterFilteredListHasBothPayoutModes: hasModeA && hasModeB,
+      masterColsForDisplay: withContent,
+      masterFilteredListHasBothPayoutModes: false,
     };
-  }, [masterVisibleCols, masterTabFilteredList]);
+  }, [masterVisibleCols, canViewMasterInvoiceSummary]);
 
   /** 專案詳情／任務提示金額：董事長／管理者，或列上相關人員／任務負責人 */
   const canViewMasterAmountsForRow = useCallback(
@@ -5936,7 +5973,9 @@ export default function DashboardPage() {
                               ? "min-w-[5.5rem]"
                               : k === "發票摘要"
                                 ? "min-w-[11rem]"
-                                : "min-w-[5rem]"
+                                : k === MASTER_LIST_CONTENT_NOTES_KEY
+                                  ? "min-w-[16rem] w-[28%]"
+                                  : "min-w-[5rem]"
                       }
                     />
                   ))}
@@ -5955,10 +5994,14 @@ export default function DashboardPage() {
                                 ? "min-w-[5.5rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
                                 : k === "發票摘要"
                                   ? "min-w-[11rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
-                                  : "min-w-[5rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600 whitespace-nowrap"
+                                  : k === MASTER_LIST_CONTENT_NOTES_KEY
+                                    ? "min-w-[16rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
+                                    : "min-w-[5rem] px-4 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-stone-600 whitespace-nowrap"
                         }
                       >
-                        {tableColumnLabels.master?.[k] ?? k}
+                        {k === MASTER_LIST_CONTENT_NOTES_KEY
+                          ? "內容與備註"
+                          : (tableColumnLabels.master?.[k] ?? k)}
                       </th>
                     ))}
                   </tr>
@@ -6147,6 +6190,40 @@ export default function DashboardPage() {
                                         </span>
                                       )}
                                     </button>
+                                  </td>
+                                );
+                              }
+                              if (k === MASTER_LIST_CONTENT_NOTES_KEY) {
+                                const content = String(row.專案內容 ?? "").trim();
+                                const note = String(row.備註 ?? "").trim();
+                                const titleBits = [content && `內容：${content}`, note && `備註：${note}`]
+                                  .filter(Boolean)
+                                  .join("\n\n");
+                                return (
+                                  <td
+                                    key={k}
+                                    className="min-w-[16rem] max-w-[28rem] px-4 py-3 align-top"
+                                    title={titleBits || undefined}
+                                  >
+                                    <div className="rounded-lg border border-stone-200/80 bg-gradient-to-br from-white to-stone-50/90 px-3 py-2.5 shadow-sm ring-1 ring-stone-100/80">
+                                      {content ? (
+                                        <p className="line-clamp-2 text-sm leading-relaxed text-stone-800">
+                                          {content}
+                                        </p>
+                                      ) : (
+                                        <p className="text-sm italic text-stone-400">尚無專案內容</p>
+                                      )}
+                                      {note ? (
+                                        <div className="mt-2 border-t border-dashed border-amber-200/90 pt-2">
+                                          <p className="line-clamp-2 text-xs leading-relaxed text-stone-600">
+                                            <span className="mr-1.5 inline-block rounded bg-amber-100/90 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-amber-900/90">
+                                              備註
+                                            </span>
+                                            {note}
+                                          </p>
+                                        </div>
+                                      ) : null}
+                                    </div>
                                   </td>
                                 );
                               }
@@ -6485,6 +6562,7 @@ export default function DashboardPage() {
                                       </tbody>
                                     </table>
                                   </div>
+                                  {canViewMasterInvoiceSummary ? (
                                   <div className="mb-4 rounded-lg border border-emerald-100 bg-white/90 p-3">
                                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                                       <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-800">此專案發票</h3>
@@ -6548,6 +6626,7 @@ export default function DashboardPage() {
                                       </div>
                                     )}
                                   </div>
+                                  ) : null}
                                   {addingTaskFor === pid ? (
                                     <form
                                       className="flex flex-wrap items-end gap-3 rounded-lg border border-amber-200 bg-amber-500/5 p-4"
