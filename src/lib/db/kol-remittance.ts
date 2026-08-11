@@ -119,8 +119,9 @@ export async function registerKolRemittance(input: RegisterKolRemittanceInput): 
   payment: Awaited<ReturnType<typeof createPaymentRecordsBatch>>[number];
 }> {
   const pid = String(input.專案ID ?? "").trim();
-  const 匯款日期 = String(input.匯款日期 ?? "").trim().slice(0, 10);
+  let 匯款日期 = String(input.匯款日期 ?? "").trim().slice(0, 10);
   if (!pid) throw new Error("專案ID 為必填");
+  if (!匯款日期) 匯款日期 = new Date().toISOString().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(匯款日期)) throw new Error("請填寫有效的匯款日期");
 
   const masters = await getMasterList();
@@ -174,4 +175,24 @@ export async function registerKolRemittance(input: RegisterKolRemittanceInput): 
   });
 
   return { invoice, payment };
+}
+
+export async function registerKolRemittanceBatch(
+  items: RegisterKolRemittanceInput[]
+): Promise<{ ok: string[]; failed: Array<{ 專案ID: string; error: string }> }> {
+  const ok: string[] = [];
+  const failed: Array<{ 專案ID: string; error: string }> = [];
+  for (const item of items) {
+    const pid = String(item.專案ID ?? "").trim();
+    try {
+      await registerKolRemittance(item);
+      ok.push(pid);
+    } catch (e) {
+      failed.push({ 專案ID: pid || "—", error: e instanceof Error ? e.message : "登記失敗" });
+    }
+  }
+  if (ok.length === 0 && failed.length > 0) {
+    throw new Error(failed.map((f) => `${f.專案ID}：${f.error}`).join("；"));
+  }
+  return { ok, failed };
 }

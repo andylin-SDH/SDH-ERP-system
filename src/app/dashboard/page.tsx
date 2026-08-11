@@ -1928,6 +1928,10 @@ export default function DashboardPage() {
   const [kolRemitDrafts, setKolRemitDrafts] = useState<
     Record<string, { 匯款日期: string; 匯款金額: string; 付款對象: string; 備註: string }>
   >({});
+  const [selectedKolRemitPids, setSelectedKolRemitPids] = useState<string[]>([]);
+  const [kolRemitBatchOpen, setKolRemitBatchOpen] = useState(false);
+  const [kolRemitBatchDate, setKolRemitBatchDate] = useState("");
+  const [kolRemitBatchSaving, setKolRemitBatchSaving] = useState(false);
   const [financeEmployeePayoutSearch, setFinanceEmployeePayoutSearch] = useState("");
   const [financePayoutSavingIds, setFinancePayoutSavingIds] = useState<string[]>([]);
   const [financePayoutEditError, setFinancePayoutEditError] = useState<string | null>(null);
@@ -3534,6 +3538,21 @@ export default function DashboardPage() {
     () => (financeKolRemittanceTab === "pending" ? kolRemittancePendingItems : kolRemittanceRemittedItems),
     [financeKolRemittanceTab, kolRemittancePendingItems, kolRemittanceRemittedItems]
   );
+  const selectedKolRemitRows = useMemo(() => {
+    const set = new Set(selectedKolRemitPids);
+    return kolRemittancePendingItems.filter((r) => set.has(r.專案ID));
+  }, [kolRemittancePendingItems, selectedKolRemitPids]);
+  const selectedKolRemitTotal = useMemo(
+    () =>
+      selectedKolRemitRows.reduce((sum, r) => {
+        const draft = kolRemitDrafts[r.專案ID];
+        const amt =
+          draft?.匯款金額 ||
+          (r.請款方式 === "勞務報酬" ? r.實領金額 || r.給付總額 || r.KOL費用未稅 : r.KOL費用未稅);
+        return sum + parseNumericField(amt);
+      }, 0),
+    [selectedKolRemitRows, kolRemitDrafts]
+  );
   const kolRemittanceCounts = useMemo(() => {
     let pending = 0;
     let pendingAmount = 0;
@@ -4816,18 +4835,21 @@ export default function DashboardPage() {
       }
       const items = Array.isArray(data.items) ? data.items : [];
       setKolRemittanceItems(items);
-      const today = new Date().toISOString().slice(0, 10);
       const nextDrafts: typeof kolRemitDrafts = {};
       for (const row of items) {
         if (row.結帳狀態 !== "待匯款") continue;
         nextDrafts[row.專案ID] = {
-          匯款日期: today,
-          匯款金額: row.請款方式 === "勞務報酬" ? row.實領金額 || row.給付總額 || row.KOL費用未稅 || "" : row.KOL費用未稅 || "",
+          匯款日期: "",
+          匯款金額:
+            row.請款方式 === "勞務報酬"
+              ? row.實領金額 || row.給付總額 || row.KOL費用未稅 || ""
+              : row.KOL費用未稅 || "",
           付款對象: row.KOL名稱 || "",
           備註: "",
         };
       }
       setKolRemitDrafts(nextDrafts);
+      setSelectedKolRemitPids([]);
     } catch (e) {
       setKolRemittanceError(e instanceof Error ? e.message : "讀取失敗");
     } finally {
@@ -4840,11 +4862,12 @@ export default function DashboardPage() {
       const pid = String(row.專案ID ?? "").trim();
       if (!pid) return;
       const draft = kolRemitDrafts[pid] ?? {
-        匯款日期: new Date().toISOString().slice(0, 10),
+        匯款日期: "",
         匯款金額: row.KOL費用未稅 || "",
         付款對象: row.KOL名稱 || "",
         備註: "",
       };
+      const 匯款日期 = draft.匯款日期.trim() || new Date().toISOString().slice(0, 10);
       setKolRemittanceSavingPid(pid);
       setKolRemittanceError(null);
       try {
@@ -4853,7 +4876,7 @@ export default function DashboardPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             專案ID: pid,
-            匯款日期: draft.匯款日期,
+            匯款日期,
             匯款金額: draft.匯款金額,
             付款對象: draft.付款對象,
             備註: draft.備註,
@@ -4873,6 +4896,73 @@ export default function DashboardPage() {
     },
     [kolRemitDrafts, loadKolRemittanceList, refreshDashboardData]
   );
+
+  const openKolRemitBatch = useCallback(() => {
+    if (selectedKolRemitPids.length === 0) {
+      setKolRemittanceError("請先勾選要登記匯款的專案");
+      return;
+    }
+    setKolRemitBatchDate(new Date().toISOString().slice(0, 10));
+    setKolRemitBatchOpen(true);
+  }, [selectedKolRemitPids.length]);
+
+  const submitKolRemitBatch = useCallback(async () => {
+    if (selectedKolRemitPids.length === 0) return;
+    const 匯款日期 = kolRemitBatchDate.trim() || new Date().toISOString().slice(0, 10);
+    setKolRemitBatchSaving(true);
+    setKolRemittanceError(null);
+    try {
+      const items = selectedKolRemitPids.map((pid) => {
+        const row = kolRemittancePendingItems.find((r) => r.專案ID === pid);
+        const draft = kolRemitDrafts[pid];
+        return {
+          專案ID: pid,
+          匯款日期,
+          匯款金額:
+            draft?.匯款金額 ||
+            (row?.請款方式 === "勞務報酬"
+              ? row.實領金額 || row.給付總額 || row.KOL費用未稅 || ""
+              : row?.KOL費用未稅 || ""),
+          付款對象: draft?.付款對象 || row?.KOL名稱 || "",
+          備註: draft?.備註 || "",
+        };
+      });
+      const res = await fetch("/api/kol-remittance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items, 匯款日期 }),
+      });
+      const data = (await safeResJson(res)) as {
+        ok?: boolean;
+        error?: string;
+        updated?: number;
+        failed?: Array<{ 專案ID: string; error: string }>;
+      };
+      if (!res.ok || !data.ok) {
+        setKolRemittanceError(data.error ?? "批次登記匯款失敗");
+        return;
+      }
+      setKolRemitBatchOpen(false);
+      setSelectedKolRemitPids([]);
+      if (data.failed && data.failed.length > 0) {
+        setKolRemittanceError(
+          `已登記 ${data.updated ?? 0} 筆；失敗：${data.failed.map((f) => `${f.專案ID}（${f.error}）`).join("、")}`
+        );
+      }
+      await Promise.all([loadKolRemittanceList(), refreshDashboardData(["payments"])]);
+    } catch (e) {
+      setKolRemittanceError(e instanceof Error ? e.message : "批次登記匯款失敗");
+    } finally {
+      setKolRemitBatchSaving(false);
+    }
+  }, [
+    selectedKolRemitPids,
+    kolRemitBatchDate,
+    kolRemitDrafts,
+    kolRemittancePendingItems,
+    loadKolRemittanceList,
+    refreshDashboardData,
+  ]);
 
   const revokeKolClaimFromFinance = useCallback(
     async (row: { 專案ID: string; 專案名稱?: string | null }) => {
@@ -4944,6 +5034,13 @@ export default function DashboardPage() {
     if (activeSection !== "finance") return;
     void loadKolRemittanceList();
   }, [activeSection, loadKolRemittanceList]);
+
+  useEffect(() => {
+    if (financeKolRemittanceTab !== "pending") {
+      setSelectedKolRemitPids([]);
+      setKolRemitBatchOpen(false);
+    }
+  }, [financeKolRemittanceTab]);
 
   const loadKolPortalPreviewOptions = useCallback(async () => {
     if (!canPreviewKolPortalView) return;
@@ -9625,7 +9722,7 @@ export default function DashboardPage() {
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{kolRemittanceError}</p>
               )}
               <p className="mb-2 text-[11px] text-stone-500">
-                KOL 填寫請款憑證（發票或勞務報酬單）後會出現在「待匯款」。登記匯款會同時寫入付款記錄（類型 KOL），KOL 入口即顯示已匯款與匯款日期。填錯可按「撤回請款」清除憑證回到可請款。
+                KOL 填寫請款憑證後會出現在「待匯款」。勾選多筆可看合計並批次登記匯款（匯款日期空白時，登記當下帶入今日）。登記會寫入付款記錄（類型 KOL）。
                 {canPreviewKolPortalView ? " 可按「老師視角」以唯讀方式查看該 KOL 入口。" : ""}
               </p>
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
@@ -9641,6 +9738,27 @@ export default function DashboardPage() {
                   <table className="min-w-full divide-y divide-stone-200">
                     <thead className="bg-stone-100">
                       <tr>
+                        {financeKolRemittanceTab === "pending" ? (
+                          <th className="w-10 px-3 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={
+                                searchedKolRemittanceItems.length > 0 &&
+                                searchedKolRemittanceItems.every((r) =>
+                                  selectedKolRemitPids.includes(r.專案ID)
+                                )
+                              }
+                              onChange={() => {
+                                const ids = searchedKolRemittanceItems.map((r) => r.專案ID);
+                                setSelectedKolRemitPids((prev) =>
+                                  ids.length > 0 && ids.every((id) => prev.includes(id)) ? [] : ids
+                                );
+                              }}
+                              className="h-4 w-4 rounded border-stone-300 text-amber-600 focus:ring-amber-500"
+                              aria-label="全選待匯款專案"
+                            />
+                          </th>
+                        ) : null}
                         <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">專案</th>
                         <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">KOL</th>
                         <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-stone-600">KOL費用未稅</th>
@@ -9668,15 +9786,30 @@ export default function DashboardPage() {
                     <tbody className="divide-y divide-stone-200 bg-white">
                       {searchedKolRemittanceItems.map((row) => {
                         const pid = row.專案ID;
-                        const saving = kolRemittanceSavingPid === pid;
+                        const saving = kolRemittanceSavingPid === pid || kolRemitBatchSaving;
                         const draft = kolRemitDrafts[pid] ?? {
-                          匯款日期: new Date().toISOString().slice(0, 10),
+                          匯款日期: "",
                           匯款金額: row.KOL費用未稅 || "",
                           付款對象: row.KOL名稱 || "",
                           備註: "",
                         };
                         return (
                           <tr key={pid} className="hover:bg-amber-50/40">
+                            {financeKolRemittanceTab === "pending" ? (
+                              <td className="px-3 py-3 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedKolRemitPids.includes(pid)}
+                                  onChange={() =>
+                                    setSelectedKolRemitPids((prev) =>
+                                      prev.includes(pid) ? prev.filter((x) => x !== pid) : [...prev, pid]
+                                    )
+                                  }
+                                  className="h-4 w-4 rounded border-stone-300 text-amber-600 focus:ring-amber-500"
+                                  aria-label={`選取 ${row.專案名稱}`}
+                                />
+                              </td>
+                            ) : null}
                             <td className="px-4 py-3 text-sm">
                               <div className="max-w-xs truncate font-semibold text-stone-900" title={row.專案名稱}>
                                 {row.專案名稱 || pid}
@@ -9732,6 +9865,7 @@ export default function DashboardPage() {
                                       }))
                                     }
                                     className="w-full min-w-[8.5rem] rounded border border-stone-200 bg-white px-2 py-1 text-xs disabled:opacity-60"
+                                    title="空白則登記時帶入當日"
                                   />
                                 </td>
                                 <td className="whitespace-nowrap px-2 py-2">
@@ -9770,7 +9904,7 @@ export default function DashboardPage() {
                                       onClick={() => void registerKolRemittance(row)}
                                       className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-60"
                                     >
-                                      {saving ? "登記中…" : "登記匯款"}
+                                      {saving && kolRemittanceSavingPid === pid ? "登記中…" : "登記匯款"}
                                     </button>
                                     <button
                                       type="button"
@@ -9820,6 +9954,107 @@ export default function DashboardPage() {
                   </table>
                 )}
               </div>
+
+              {financeKolRemittanceTab === "pending" && selectedKolRemitPids.length > 0 ? (
+                <div className="sticky bottom-4 z-40 mt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-white/95 px-4 py-3 shadow-xl ring-1 ring-emerald-100 backdrop-blur">
+                    <div className="text-sm">
+                      <span className="font-bold text-emerald-800">已選 {selectedKolRemitPids.length} 筆</span>
+                      <span className="ml-2 tabular-nums text-stone-600">
+                        合計 NT$ {selectedKolRemitTotal.toLocaleString("zh-TW")}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={kolRemitBatchSaving}
+                      onClick={openKolRemitBatch}
+                      className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow transition hover:bg-emerald-500 disabled:opacity-60"
+                    >
+                      登記匯款
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {kolRemitBatchOpen ? (
+                <div className="fixed inset-0 z-[80] flex items-end justify-center bg-stone-900/50 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+                  <div
+                    className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-stone-200 bg-white shadow-2xl sm:rounded-2xl"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="kol-remit-batch-title"
+                  >
+                    <header className="flex items-center justify-between border-b border-stone-200 px-5 py-4">
+                      <div>
+                        <h3 id="kol-remit-batch-title" className="text-lg font-bold text-stone-900">
+                          批次登記匯款
+                        </h3>
+                        <p className="mt-0.5 text-xs text-stone-500">
+                          {selectedKolRemitPids.length} 筆 · 合計 NT$ {selectedKolRemitTotal.toLocaleString("zh-TW")}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={kolRemitBatchSaving}
+                        onClick={() => setKolRemitBatchOpen(false)}
+                        className="rounded-xl border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-600 hover:bg-stone-50 disabled:opacity-50"
+                      >
+                        關閉
+                      </button>
+                    </header>
+                    <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-stone-500">匯款日期</label>
+                        <input
+                          type="date"
+                          value={kolRemitBatchDate}
+                          onChange={(e) => setKolRemitBatchDate(e.target.value)}
+                          className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm focus:border-emerald-400 focus:outline-none"
+                        />
+                        <p className="mt-1 text-[11px] text-stone-500">開啟時預設為今日；同一日期套用到所有勾選專案。</p>
+                      </div>
+                      <ul className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm">
+                        {selectedKolRemitRows.map((r) => {
+                          const draft = kolRemitDrafts[r.專案ID];
+                          const amt =
+                            draft?.匯款金額 ||
+                            (r.請款方式 === "勞務報酬"
+                              ? r.實領金額 || r.給付總額 || r.KOL費用未稅
+                              : r.KOL費用未稅);
+                          return (
+                            <li key={r.專案ID} className="flex justify-between gap-2">
+                              <span className="min-w-0 truncate text-stone-700">
+                                {r.KOL名稱} · {r.專案名稱}
+                              </span>
+                              <span className="shrink-0 tabular-nums font-semibold text-stone-900">
+                                {formatAmount(amt)}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                    <footer className="flex justify-end gap-3 border-t border-stone-200 px-5 py-4">
+                      <button
+                        type="button"
+                        disabled={kolRemitBatchSaving}
+                        onClick={() => setKolRemitBatchOpen(false)}
+                        className="rounded-xl border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-600 hover:bg-stone-50 disabled:opacity-50"
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        disabled={kolRemitBatchSaving || !kolRemitBatchDate}
+                        onClick={() => void submitKolRemitBatch()}
+                        className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-bold text-white shadow hover:bg-emerald-500 disabled:opacity-50"
+                      >
+                        {kolRemitBatchSaving ? "登記中…" : "確認登記匯款"}
+                      </button>
+                    </footer>
+                  </div>
+                </div>
+              ) : null}
             </>
           )}
 

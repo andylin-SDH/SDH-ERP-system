@@ -1,11 +1,15 @@
 /**
  * GET — KOL 匯款清單（待匯款／已匯款）
- * POST — 登記 KOL 匯款（寫付款記錄 + 更新 KOL發票）
+ * POST — 登記 KOL 匯款（單筆或批次；寫付款記錄 + 更新 KOL發票）
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireEmployee } from "@/lib/auth/api";
-import { getKolRemittanceList, registerKolRemittance } from "@/lib/db/kol-remittance";
+import {
+  getKolRemittanceList,
+  registerKolRemittance,
+  registerKolRemittanceBatch,
+} from "@/lib/db/kol-remittance";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +42,35 @@ export async function POST(request: NextRequest) {
       匯款金額?: string | null;
       付款對象?: string | null;
       備註?: string | null;
+      items?: Array<{
+        專案ID?: string;
+        匯款日期?: string;
+        匯款金額?: string | null;
+        付款對象?: string | null;
+        備註?: string | null;
+      }>;
     } | null;
+
+    const 登記人 = fillerLabel(auth.user);
+    const rawItems = Array.isArray(body?.items) ? body!.items! : null;
+
+    if (rawItems && rawItems.length > 0) {
+      const items = rawItems.map((it) => ({
+        專案ID: String(it?.專案ID ?? "").trim(),
+        匯款日期: String(it?.匯款日期 ?? body?.匯款日期 ?? "").trim(),
+        匯款金額: it?.匯款金額,
+        付款對象: it?.付款對象,
+        備註: it?.備註,
+        登記人,
+      }));
+      const result = await registerKolRemittanceBatch(items);
+      return NextResponse.json({
+        ok: true,
+        updated: result.ok.length,
+        okProjectIds: result.ok,
+        failed: result.failed,
+      });
+    }
 
     const result = await registerKolRemittance({
       專案ID: String(body?.專案ID ?? "").trim(),
@@ -46,7 +78,7 @@ export async function POST(request: NextRequest) {
       匯款金額: body?.匯款金額,
       付款對象: body?.付款對象,
       備註: body?.備註,
-      登記人: fillerLabel(auth.user),
+      登記人,
     });
 
     return NextResponse.json({ ok: true, ...result });
