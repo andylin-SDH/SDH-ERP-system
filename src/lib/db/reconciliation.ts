@@ -273,15 +273,36 @@ export async function runReconciliationMatching(): Promise<{
   return { scanned: transactions.length, transactionsWithCandidates, candidates: candidateCount };
 }
 
-export async function confirmReconciliationMatch(matchId: string, confirmedBy: string): Promise<void> {
+function externalErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = String((error as { message?: unknown }).message ?? "").trim();
+    if (message) return message;
+  }
+  return fallback;
+}
+
+export async function confirmReconciliationMatch(
+  matchId: string,
+  confirmedBy: string
+): Promise<{ projectId: string; syncWarning: string | null }> {
   const { data, error } = await getSupabase().rpc("confirm_reconciliation_match", {
     p_match_id: matchId,
     p_confirmed_by: confirmedBy,
   });
-  if (error) throw error;
+  if (error) throw new Error(externalErrorMessage(error, "確認對帳資料庫操作失敗"));
   const first = Array.isArray(data) ? data[0] : data;
   const projectId = String(first?.專案ID ?? "").trim();
-  if (projectId) await syncFinanceVendorDateFromInvoicesForProject(projectId);
+  if (!projectId) return { projectId: "", syncWarning: null };
+  try {
+    await syncFinanceVendorDateFromInvoicesForProject(projectId);
+    return { projectId, syncWarning: null };
+  } catch (syncError) {
+    return {
+      projectId,
+      syncWarning: externalErrorMessage(syncError, "財務與分潤同步失敗，請人工檢查"),
+    };
+  }
 }
 
 export async function rejectReconciliationMatch(matchId: string): Promise<void> {

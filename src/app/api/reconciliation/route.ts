@@ -10,6 +10,15 @@ import {
 
 export const dynamic = "force-dynamic";
 
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = String((error as { message?: unknown }).message ?? "").trim();
+    if (message) return message;
+  }
+  return "對帳操作失敗";
+}
+
 export async function GET(request: NextRequest) {
   const auth = await requireFinanceOperator(request);
   if (auth instanceof NextResponse) return auth;
@@ -40,8 +49,8 @@ export async function POST(request: NextRequest) {
     if (body.action === "confirm") {
       const matchId = String(body.matchId ?? "").trim();
       if (!matchId) return NextResponse.json({ ok: false, error: "缺少對帳候選 ID" }, { status: 400 });
-      await confirmReconciliationMatch(matchId, auth.user.email);
-      return NextResponse.json({ ok: true });
+      const result = await confirmReconciliationMatch(matchId, auth.user.email);
+      return NextResponse.json({ ok: true, ...result });
     }
     if (body.action === "reject") {
       const matchId = String(body.matchId ?? "").trim();
@@ -59,7 +68,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("POST /api/reconciliation", error);
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "對帳操作失敗" },
+      { ok: false, error: errorMessage(error) },
       { status: 500 }
     );
   }

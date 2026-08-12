@@ -179,7 +179,8 @@ export default function ReconciliationPage() {
       });
       const data = await readJson(response);
       if (!response.ok || !data.ok) throw new Error(String(data.error ?? "操作失敗"));
-      setNotice(successMessage);
+      const syncWarning = String(data.syncWarning ?? "").trim();
+      setNotice(syncWarning ? `${successMessage}；但後續同步發生問題：${syncWarning}` : successMessage);
       await loadDashboard();
     } catch (e) {
       setError(e instanceof Error ? e.message : "操作失敗");
