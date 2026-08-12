@@ -1,18 +1,15 @@
-/** 勞報收據 PDF 匯出（逐頁截圖，避開 oklab／跨域圖／錯誤分頁） */
+/** 勞報收據 PDF：隔離 iframe + html2canvas-pro 逐頁截圖（徹底避開 Tailwind lab 色碼） */
 
-import { exportElementToPdfSafe, prepareDomForHtml2Canvas } from "@/lib/pdf/html2pdf-safe";
+import { captureElementInIsolatedFrame } from "@/lib/pdf/html2pdf-safe";
 
 /** A4 寬度 px（96dpi）：210mm ≈ 794px；高度 297mm ≈ 1123px */
 const A4_WIDTH_PX = 794;
 const A4_HEIGHT_PX = 1123;
 
-/**
- * 優先：逐頁 html2canvas + jsPDF（分頁最準）
- * 後備：整份 html2pdf（仍含 oklab 防護）
- */
 export async function exportLaborReceiptsPdf(root: HTMLElement, filename: string): Promise<void> {
   const pages = Array.from(root.querySelectorAll<HTMLElement>(".labor-receipt-a4-page"));
   if (pages.length === 0) {
+    const { exportElementToPdfSafe } = await import("@/lib/pdf/html2pdf-safe");
     await exportElementToPdfSafe({
       root,
       filename,
@@ -24,33 +21,12 @@ export async function exportLaborReceiptsPdf(root: HTMLElement, filename: string
     return;
   }
 
-  try {
-    await exportLaborReceiptsPdfByPages(root, pages, filename);
-  } catch (firstErr) {
-    console.warn("labor receipt page-by-page PDF failed, fallback html2pdf", firstErr);
-    await exportElementToPdfSafe({
-      root,
-      filename,
-      margin: [0, 0, 0, 0],
-      backgroundColor: "#ffffff",
-      captureWidthPx: A4_WIDTH_PX,
-      pagebreak: { mode: ["css", "legacy"], after: ".labor-receipt-a4-page" },
-      imageQuality: 0.95,
-    });
-  }
-}
-
-async function exportLaborReceiptsPdfByPages(
-  root: HTMLElement,
-  pages: HTMLElement[],
-  filename: string
-): Promise<void> {
-  const html2canvas = (await import("html2canvas-pro")).default;
   const { jsPDF } = await import("jspdf");
+  const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
 
-  const pageStyleBackups: { el: HTMLElement; style: string | null }[] = [];
-  for (const page of pages) {
-    pageStyleBackups.push({ el: page, style: page.getAttribute("style") });
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i]!;
+    const styleBackup = page.getAttribute("style");
     page.style.width = `${A4_WIDTH_PX}px`;
     page.style.maxWidth = `${A4_WIDTH_PX}px`;
     page.style.minHeight = `${A4_HEIGHT_PX}px`;
@@ -59,35 +35,24 @@ async function exportLaborReceiptsPdfByPages(
     page.style.boxShadow = "none";
     page.style.overflow = "hidden";
     page.style.background = "#ffffff";
-  }
 
-  const restore = await prepareDomForHtml2Canvas(root, { captureWidthPx: A4_WIDTH_PX });
-
-  try {
-    const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
-    for (let i = 0; i < pages.length; i++) {
-      const page = pages[i]!;
-      const canvas = await html2canvas(page, {
+    try {
+      const canvas = await captureElementInIsolatedFrame(page, {
+        widthPx: A4_WIDTH_PX,
+        heightPx: A4_HEIGHT_PX,
         scale: 2,
-        useCORS: true,
-        allowTaint: false,
-        logging: false,
         backgroundColor: "#ffffff",
-        width: A4_WIDTH_PX,
-        windowWidth: A4_WIDTH_PX,
       });
       const img = canvas.toDataURL("image/jpeg", 0.95);
       if (i > 0) pdf.addPage();
       pdf.addImage(img, "JPEG", 0, 0, 210, 297);
-    }
-    pdf.save(filename);
-  } finally {
-    restore();
-    for (const { el, style } of pageStyleBackups) {
-      if (style == null) el.removeAttribute("style");
-      else el.setAttribute("style", style);
+    } finally {
+      if (styleBackup == null) page.removeAttribute("style");
+      else page.setAttribute("style", styleBackup);
     }
   }
+
+  pdf.save(filename);
 }
 
 export function laborReceiptPdfFilename(kolName: string, projectId: string): string {
