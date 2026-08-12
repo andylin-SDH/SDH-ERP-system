@@ -16,7 +16,6 @@ export interface BankImportRow {
   sourceAccount?: string | null;
   raw?: Record<string, unknown>;
 }
-
 export interface MatchingBankTransaction {
   id: string;
   transactionDate: string;
@@ -95,4 +94,3 @@ export interface ReconciliationDashboardRun {
   createdBy: string;
   createdAt: string;
 }
-

@@ -24,7 +24,15 @@ function ymdOrNull(value: unknown): string | null {
   if (!match) return null;
   const ymd = `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
   const date = new Date(`${ymd}T00:00:00Z`);
-  return Number.isNaN(date.getTime()) ? null : ymd;
+  if (Number.isNaN(date.getTime())) return null;
+  if (
+    date.getUTCFullYear() !== Number(match[1]) ||
+    date.getUTCMonth() + 1 !== Number(match[2]) ||
+    date.getUTCDate() !== Number(match[3])
+  ) {
+    return null;
+  }
+  return ymd;
 }
 
 function moneyOrNull(value: unknown): number | null {

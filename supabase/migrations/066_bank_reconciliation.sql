@@ -1,4 +1,4 @@
--- 銀行收款自動對帳（第一版：CSV 匯入、規則候選、人工確認後寫回發票）
+-- 銀行收款自動對帳（第一版：銀行檔匯入、規則候選、人工確認後寫回發票）
 
 CREATE TABLE IF NOT EXISTS public."對帳執行紀錄" (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -24,7 +24,6 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-
 export async function POST(request: NextRequest) {
   const auth = await requireFinanceOperator(request);
   if (auth instanceof NextResponse) return auth;
@@ -65,4 +64,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

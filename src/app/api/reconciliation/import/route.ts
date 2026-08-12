@@ -17,13 +17,22 @@ export async function POST(request: NextRequest) {
     if (body.rows.length > 5000) {
       return NextResponse.json({ ok: false, error: "單次最多匯入 5,000 筆交易" }, { status: 400 });
     }
-    const imported = await importBankTransactions(body.rows, {
+    const creditRows = body.rows.filter((row) => row?.direction !== "debit");
+    if (creditRows.length === 0) {
+      return NextResponse.json({ ok: false, error: "檔案內沒有可匯入的入帳交易" }, { status: 400 });
+    }
+    const imported = await importBankTransactions(creditRows, {
       filename: body.filename,
       importedBy: auth.user.email,
       source: "cathay_csv",
     });
     const matching = await runReconciliationMatching();
-    return NextResponse.json({ ok: true, ...imported, matching });
+    return NextResponse.json({
+      ok: true,
+      ...imported,
+      skippedDebits: body.rows.length - creditRows.length,
+      matching,
+    });
   } catch (error) {
     console.error("POST /api/reconciliation/import", error);
     return NextResponse.json(
@@ -32,4 +41,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

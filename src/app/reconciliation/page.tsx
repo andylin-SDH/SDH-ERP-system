@@ -117,6 +117,11 @@ export default function ReconciliationPage() {
     return transactions.filter((row) => row.status === filter);
   }, [filter, transactions]);
 
+  const previewCredits = useMemo(
+    () => preview?.rows.filter((row) => row.direction !== "debit") ?? [],
+    [preview]
+  );
+
   async function chooseFile(file: File | null) {
     setPreview(null);
     setError(null);
@@ -125,14 +130,16 @@ export default function ReconciliationPage() {
     try {
       const parsed = parseBankCsv(await file.arrayBuffer());
       setPreview({ ...parsed, filename: file.name });
+      const creditCount = parsed.rows.filter((row) => row.direction !== "debit").length;
       if (parsed.rows.length === 0) setError(parsed.errors[0] ?? "找不到可匯入的交易");
+      else if (creditCount === 0) setError("檔案內沒有入帳交易；支出已全部略過");
     } catch (e) {
       setError(e instanceof Error ? e.message : "無法解析 CSV");
     }
   }
 
   async function importPreview() {
-    if (!preview || preview.rows.length === 0) return;
+    if (!preview || previewCredits.length === 0) return;
     setActionId("import");
     setError(null);
     setNotice(null);
@@ -141,7 +148,7 @@ export default function ReconciliationPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: preview.filename, rows: preview.rows }),
+        body: JSON.stringify({ filename: preview.filename, rows: previewCredits }),
       });
       const data = await readJson(response);
       if (!response.ok || !data.ok) throw new Error(String(data.error ?? "匯入失敗"));
@@ -250,13 +257,14 @@ export default function ReconciliationPage() {
                 <div>
                   <p className="text-sm font-bold text-stone-900">{preview.filename}</p>
                   <p className="mt-1 text-xs text-stone-600">
-                    偵測 {preview.format}／{preview.encoding}；共解析 {preview.rows.length} 筆交易，其中入帳 {preview.rows.filter((row) => row.direction !== "debit").length} 筆
+                    偵測 {preview.format}／{preview.encoding}；可匯入 {previewCredits.length} 筆入帳交易
+                    {preview.rows.length > previewCredits.length ? `，另有 ${preview.rows.length - previewCredits.length} 筆支出已自動略過` : ""}
                   </p>
                   {preview.errors.length > 0 ? <p className="mt-1 text-xs text-red-700">另有 {preview.errors.length} 列無法辨識，匯入時會略過。</p> : null}
                 </div>
                 <button
                   type="button"
-                  disabled={actionId != null || preview.rows.length === 0}
+                  disabled={actionId != null || previewCredits.length === 0}
                   onClick={() => void importPreview()}
                   className="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-bold text-white hover:bg-stone-700 disabled:opacity-50"
                 >
@@ -267,10 +275,10 @@ export default function ReconciliationPage() {
                 <table className="min-w-full text-left text-xs">
                   <thead className="text-stone-500"><tr><th className="px-2 py-2">日期</th><th className="px-2 py-2">方向</th><th className="px-2 py-2 text-right">金額</th><th className="px-2 py-2">匯款人</th><th className="px-2 py-2">末五碼</th><th className="px-2 py-2">摘要</th></tr></thead>
                   <tbody className="divide-y divide-amber-100">
-                    {preview.rows.slice(0, 8).map((row: BankImportRow, index) => (
+                    {previewCredits.slice(0, 8).map((row: BankImportRow, index) => (
                       <tr key={`${row.transactionDate}-${index}`}>
                         <td className="whitespace-nowrap px-2 py-2">{row.transactionDate}</td>
-                        <td className="px-2 py-2">{row.direction === "debit" ? "支出（略過）" : "入帳"}</td>
+                        <td className="px-2 py-2">入帳</td>
                         <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums">{money(Number(row.amount), String(row.currency ?? "TWD"))}</td>
                         <td className="px-2 py-2">{row.counterpartyName || "—"}</td>
                         <td className="px-2 py-2 font-mono">{row.counterpartyLast5 || String(row.counterpartyAccount ?? "").replace(/\D/g, "").slice(-5) || "—"}</td>
