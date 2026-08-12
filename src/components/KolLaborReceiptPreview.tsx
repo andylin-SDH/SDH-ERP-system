@@ -223,6 +223,7 @@ export function KolLaborReceiptPreview({
               <img
                 src={String(idCardFrontUrl)}
                 alt="身分證正面"
+                crossOrigin="anonymous"
                 className={`w-full object-contain ${compact ? "max-h-[26mm]" : "max-h-[42mm]"}`}
               />
             ) : (
@@ -235,6 +236,7 @@ export function KolLaborReceiptPreview({
               <img
                 src={String(idCardBackUrl)}
                 alt="身分證反面"
+                crossOrigin="anonymous"
                 className={`w-full object-contain ${compact ? "max-h-[26mm]" : "max-h-[42mm]"}`}
               />
             ) : (

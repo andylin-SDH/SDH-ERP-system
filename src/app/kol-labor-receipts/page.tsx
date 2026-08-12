@@ -32,6 +32,7 @@ function LaborReceiptsInner() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const printRootRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -75,13 +76,16 @@ function LaborReceiptsInner() {
   async function handleDownloadPdf() {
     if (!printRootRef.current || !receipt) return;
     setExporting(true);
+    setExportError(null);
     try {
       await exportLaborReceiptsPdf(
         printRootRef.current,
         laborReceiptPdfFilename(receipt.KOL名稱, receipt.專案ID)
       );
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : "PDF 下載失敗");
+      const msg = e instanceof Error ? e.message : "PDF 下載失敗";
+      setExportError(`${msg}（可改用「列印 → 另存為 PDF」）`);
+      window.alert(`${msg}\n\n可改用「列印」→ 另存為 PDF。`);
     } finally {
       setExporting(false);
     }
@@ -153,6 +157,9 @@ function LaborReceiptsInner() {
             </button>
           </div>
         </div>
+        {exportError ? (
+          <p className="mx-auto mt-2 max-w-4xl text-xs font-medium text-red-700">{exportError}</p>
+        ) : null}
       </header>
 
       <main className="mx-auto max-w-4xl px-3 py-6">
