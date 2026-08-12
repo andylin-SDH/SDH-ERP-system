@@ -44,6 +44,7 @@ export async function PUT(request: NextRequest) {
         "payout_dedupe_rules",
         "overview_kpi_by_role",
         "task_type_options",
+        "kol_catalog_category_covers",
       ].includes(key)
     ) {
       return NextResponse.json({ ok: false, error: "不允許的 key" }, { status: 400 });

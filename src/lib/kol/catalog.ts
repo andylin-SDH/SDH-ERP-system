@@ -60,3 +60,31 @@ export function catalogCategoryTabs(items: KolCatalogItem[]): { key: string; lab
     .map(([key, count]) => ({ key, label: key, count }));
   return [{ key: "all", label: "全部", count: items.length }, ...tabs];
 }
+
+/** 依手動選定的 PartnerID 組封面圖；不足時用該類有形象照的 KOL 補齊（最多 3） */
+export function resolveCategoryCoverAvatars(
+  items: KolCatalogItem[],
+  categoryKey: string,
+  preferredPartnerIds: string[] | undefined
+): string[] {
+  const inCat = items.filter((i) => (i.category1 || "未分類") === categoryKey);
+  const byId = new Map(inCat.map((i) => [i.id, i]));
+  const out: string[] = [];
+  const used = new Set<string>();
+
+  for (const id of preferredPartnerIds ?? []) {
+    const hit = byId.get(String(id).trim());
+    if (!hit?.avatarUrl || used.has(hit.id)) continue;
+    out.push(hit.avatarUrl);
+    used.add(hit.id);
+    if (out.length >= 3) return out;
+  }
+
+  for (const i of inCat) {
+    if (!i.avatarUrl || used.has(i.id)) continue;
+    out.push(i.avatarUrl);
+    used.add(i.id);
+    if (out.length >= 3) break;
+  }
+  return out;
+}

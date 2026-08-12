@@ -21,6 +21,8 @@ import { DEFAULT_PROJECT_EXPENSE_TYPE_OPTIONS } from "@/config/project-expense-t
 export type PayoutDefaults = Record<string, string>;
 export type ProjectTypes = string[];
 export type RoleVisibility = Record<string, { sections: string[]; fullAccess?: boolean }>;
+/** KOL 型錄：各「類別一」封面用的 PartnerID（最多 3 位） */
+export type KolCatalogCategoryCovers = Record<string, string[]>;
 
 export type { PayoutDedupeRule, PayoutDedupeRulesByMode };
 
@@ -77,6 +79,7 @@ export async function getSystemConfig(): Promise<{
   role_permissions: RolePermissions;
   payout_dedupe_rules: PayoutDedupeRulesByMode;
   overview_kpi_by_role: Record<string, string[]>;
+  kol_catalog_category_covers: KolCatalogCategoryCovers;
 }> {
   const { data } = await getSupabase().from("system_config").select("key, value");
   const map = new Map<string, unknown>();
@@ -95,6 +98,7 @@ export async function getSystemConfig(): Promise<{
   const dedupeRaw = map.get("payout_dedupe_rules") as PayoutDedupeRulesByMode | PayoutDedupeRule[] | undefined;
   const overviewKpiRaw = map.get("overview_kpi_by_role") as Record<string, string[]> | undefined;
   const taskTypeRaw = (map.get("task_type_options") ?? map.get("task_status_options")) as string[] | undefined;
+  const coversRaw = map.get("kol_catalog_category_covers") as KolCatalogCategoryCovers | undefined;
 
   const roles = Array.isArray(rolesRaw) && rolesRaw.length > 0 ? rolesRaw : [...ROLES];
   const defaultPerms = getDefaultRolePermissions(roles);
@@ -137,6 +141,18 @@ export async function getSystemConfig(): Promise<{
         ? { ...DEFAULT_PAYOUT_DEDUPE_RULES, mode_a: [], mode_b: normalizeDedupe(dedupeRaw as PayoutDedupeRule[]) }
         : { ...DEFAULT_PAYOUT_DEDUPE_RULES };
 
+  const kol_catalog_category_covers: KolCatalogCategoryCovers = {};
+  if (coversRaw && typeof coversRaw === "object" && !Array.isArray(coversRaw)) {
+    for (const [cat, ids] of Object.entries(coversRaw)) {
+      const key = String(cat ?? "").trim();
+      if (!key) continue;
+      const list = Array.isArray(ids)
+        ? ids.map((id) => String(id ?? "").trim()).filter(Boolean).slice(0, 3)
+        : [];
+      if (list.length) kol_catalog_category_covers[key] = list;
+    }
+  }
+
   return {
     master_payout_defaults: payoutRaw && Object.keys(payoutRaw).length > 0
       ? { ...MASTER_PAYOUT_DEFAULTS, ...payoutRaw }
@@ -159,6 +175,7 @@ export async function getSystemConfig(): Promise<{
     role_permissions: mergedPerms,
     payout_dedupe_rules: dedupeRules,
     overview_kpi_by_role: mergeOverviewKpiByRole(overviewKpiRaw, roles),
+    kol_catalog_category_covers,
   };
 }
 

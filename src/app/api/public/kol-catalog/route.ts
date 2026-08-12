@@ -1,18 +1,23 @@
 import { NextResponse } from "next/server";
 import { getPartnersWithError } from "@/lib/db/partners";
 import { buildKolCatalogItems } from "@/lib/kol/catalog";
+import { getSystemConfig } from "@/lib/db/system-config";
 
 export const dynamic = "force-dynamic";
 
 /** GET — 公開 KOL 名單（僅提案用欄位，不含聯絡／分潤） */
 export async function GET() {
   try {
-    const { partners, error } = await getPartnersWithError();
+    const [{ partners, error }, config] = await Promise.all([
+      getPartnersWithError(),
+      getSystemConfig(),
+    ]);
     const items = buildKolCatalogItems(partners);
     return NextResponse.json({
       ok: true,
       count: items.length,
       items,
+      categoryCovers: config.kol_catalog_category_covers ?? {},
       generatedAt: new Date().toISOString(),
       ...(error ? { warning: error } : {}),
     });
