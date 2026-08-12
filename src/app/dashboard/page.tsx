@@ -5085,6 +5085,12 @@ export default function DashboardPage() {
     window.open(`/kol?previewPartner=${encodeURIComponent(id)}`, "_blank", "noopener,noreferrer");
   }, []);
 
+  const openKolLaborReceipt = useCallback((專案ID: string) => {
+    const pid = String(專案ID ?? "").trim();
+    if (!pid) return;
+    window.open(`/kol-labor-receipts?專案ID=${encodeURIComponent(pid)}`, "_blank", "noopener,noreferrer");
+  }, []);
+
   const searchedKolPortalPreviewOptions = useMemo(() => {
     const q = kolPortalPreviewSearch.trim().toLowerCase();
     if (!q) return kolPortalPreviewOptions;
@@ -9776,9 +9782,7 @@ export default function DashboardPage() {
                           <>
                             <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">匯款日期</th>
                             <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-stone-600">匯款金額</th>
-                            {canPreviewKolPortalView ? (
-                              <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-stone-600">視角</th>
-                            ) : null}
+                            <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-stone-600">操作</th>
                           </>
                         )}
                       </tr>
@@ -9914,6 +9918,15 @@ export default function DashboardPage() {
                                     >
                                       撤回請款
                                     </button>
+                                    {row.請款方式 === "勞務報酬" ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => openKolLaborReceipt(pid)}
+                                        className="text-[11px] font-semibold text-amber-800 underline-offset-2 hover:underline"
+                                      >
+                                        下載勞報
+                                      </button>
+                                    ) : null}
                                     {canPreviewKolPortalView ? (
                                       <button
                                         type="button"
@@ -9934,17 +9947,31 @@ export default function DashboardPage() {
                                 <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold tabular-nums text-stone-900">
                                   {formatAmount(row.KOL匯款金額 || row.KOL費用未稅)}
                                 </td>
-                                {canPreviewKolPortalView ? (
-                                  <td className="whitespace-nowrap px-3 py-2 text-center">
-                                    <button
-                                      type="button"
-                                      onClick={() => openKolPortalPreview(row.PartnerID)}
-                                      className="rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-900 hover:bg-sky-100"
-                                    >
-                                      老師視角
-                                    </button>
-                                  </td>
-                                ) : null}
+                                <td className="whitespace-nowrap px-3 py-2 text-center">
+                                  <div className="flex flex-col items-center gap-1">
+                                    {row.請款方式 === "勞務報酬" ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => openKolLaborReceipt(pid)}
+                                        className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-950 hover:bg-amber-100"
+                                      >
+                                        下載勞報
+                                      </button>
+                                    ) : null}
+                                    {canPreviewKolPortalView ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => openKolPortalPreview(row.PartnerID)}
+                                        className="rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-900 hover:bg-sky-100"
+                                      >
+                                        老師視角
+                                      </button>
+                                    ) : null}
+                                    {row.請款方式 !== "勞務報酬" && !canPreviewKolPortalView ? (
+                                      <span className="text-[11px] text-stone-400">—</span>
+                                    ) : null}
+                                  </div>
+                                </td>
                               </>
                             )}
                           </tr>
@@ -13145,6 +13172,15 @@ export default function DashboardPage() {
                     </label>
                   ) : null}
                   <div className="mt-3 flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      disabled={!selectedMaster.專案ID}
+                      onClick={() => openKolLaborReceipt(String(selectedMaster.專案ID ?? ""))}
+                      className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-100 disabled:opacity-60"
+                      title="僅勞務報酬請款可下載；若尚未填勞報會顯示錯誤"
+                    >
+                      下載勞報收據
+                    </button>
                     {masterKolInvoiceForm.KOL發票號碼.trim() || masterKolInvoiceForm.KOL發票金額.trim() ? (
                       <button
                         type="button"

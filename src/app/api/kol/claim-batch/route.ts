@@ -41,6 +41,8 @@ export async function POST(request: NextRequest) {
       戶籍地址?: string | null;
       勞報簽署?: boolean;
       勞報簽名?: string | null;
+      勞報身分證正面?: string | null;
+      勞報身分證反面?: string | null;
     } | null;
 
     const mode = body?.請款方式 === "勞務報酬" ? "勞務報酬" : "發票";
@@ -140,6 +142,8 @@ export async function POST(request: NextRequest) {
       戶籍地址: body?.戶籍地址,
       勞報簽署: body?.勞報簽署,
       勞報簽名: body?.勞報簽名,
+      勞報身分證正面: body?.勞報身分證正面,
+      勞報身分證反面: body?.勞報身分證反面,
       填寫人,
       填寫來源: "KOL",
     });
@@ -149,6 +153,8 @@ export async function POST(request: NextRequest) {
         身分證字號: String(body?.身分證字號 ?? "").trim(),
         聯絡電話: String(body?.聯絡電話 ?? "").trim(),
         戶籍地址: String(body?.戶籍地址 ?? "").trim(),
+        身分證正面: String(body?.勞報身分證正面 ?? "").trim() || undefined,
+        身分證反面: String(body?.勞報身分證反面 ?? "").trim() || undefined,
       });
     }
 

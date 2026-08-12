@@ -13,6 +13,8 @@ export interface KolInvoiceRow extends KolRequestCredential {
   KOL發票日期?: string | null;
   KOL發票金額?: string | null;
   KOL發票備註?: string | null;
+  勞報身分證正面?: string | null;
+  勞報身分證反面?: string | null;
   KOL匯款日期?: string | null;
   KOL匯款金額?: string | null;
   請款批次ID?: string | null;
@@ -55,6 +57,8 @@ function rowToKolInvoice(r: Record<string, unknown>): KolInvoiceRow {
     實領金額: (r.實領金額 ?? null) as string | null,
     勞報簽署時間: (r.勞報簽署時間 ?? null) as string | null,
     勞報簽名: (r.勞報簽名 ?? null) as string | null,
+    勞報身分證正面: (r.勞報身分證正面 ?? null) as string | null,
+    勞報身分證反面: (r.勞報身分證反面 ?? null) as string | null,
     KOL匯款日期: sliceDate(r.KOL匯款日期 ?? r.kol_remittance_date),
     KOL匯款金額: (r.KOL匯款金額 ?? r.kol_remittance_amount ?? null) as string | null,
     請款批次ID: (r.請款批次ID ?? null) as string | null,
@@ -197,6 +201,8 @@ export type UpsertKolInvoiceInput = {
   /** 勞務報酬：KOL 勾選確認並送出 */
   勞報簽署?: boolean;
   勞報簽名?: string | null;
+  勞報身分證正面?: string | null;
+  勞報身分證反面?: string | null;
   /** 批次請款產生時寫入 */
   請款批次ID?: string | null;
   /** 批次勞報：不做扣繳（單據已拆成 < 2 萬；專案列亦強制 0 稅） */
@@ -255,6 +261,8 @@ export async function upsertKolInvoice(input: UpsertKolInvoiceInput): Promise<Ko
     payload.實領金額 = null;
     payload.勞報簽署時間 = null;
     payload.勞報簽名 = null;
+    payload.勞報身分證正面 = null;
+    payload.勞報身分證反面 = null;
   } else {
     const start = String(input.勞務期間起 ?? "").trim().slice(0, 10);
     const end = String(input.勞務期間迄 ?? "").trim().slice(0, 10);
@@ -300,6 +308,8 @@ export async function upsertKolInvoice(input: UpsertKolInvoiceInput): Promise<Ko
     payload.實領金額 = String(w.實領金額);
     payload.勞報簽署時間 = now;
     payload.勞報簽名 = signature;
+    payload.勞報身分證正面 = String(input.勞報身分證正面 ?? "").trim() || null;
+    payload.勞報身分證反面 = String(input.勞報身分證反面 ?? "").trim() || null;
     payload.KOL發票號碼 = null;
     payload.KOL發票日期 = null;
     payload.KOL發票金額 = null;
@@ -369,6 +379,8 @@ export async function clearKolRequestCredential(
     實領金額: null,
     勞報簽署時間: null,
     勞報簽名: null,
+    勞報身分證正面: null,
+    勞報身分證反面: null,
     請款批次ID: null,
     填寫來源: meta.填寫來源,
     填寫人,

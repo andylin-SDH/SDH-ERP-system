@@ -29,6 +29,8 @@ export type CreateKolClaimBatchInput = {
   戶籍地址?: string | null;
   勞報簽署?: boolean;
   勞報簽名?: string | null;
+  勞報身分證正面?: string | null;
+  勞報身分證反面?: string | null;
   填寫人: string;
   填寫來源?: "KOL" | "內部";
 };
@@ -123,6 +125,11 @@ export async function createKolClaimBatch(input: CreateKolClaimBatchInput): Prom
     batchPayload.勞報簽名 = signature;
     batchPayload.勞報簽署時間 = now;
     batchPayload.KOL發票備註 = String(input.KOL發票備註 ?? "").trim() || null;
+    const idFront = String(input.勞報身分證正面 ?? "").trim();
+    const idBack = String(input.勞報身分證反面 ?? "").trim();
+    if (!idFront || !idBack) throw new Error("請上傳身分證正反面影本");
+    batchPayload.勞報身分證正面 = idFront;
+    batchPayload.勞報身分證反面 = idBack;
   }
 
   const sb = getSupabase();
@@ -219,6 +226,8 @@ export async function createKolClaimBatch(input: CreateKolClaimBatchInput): Prom
           KOL發票備註: input.KOL發票備註,
           勞報簽署: true,
           勞報簽名: input.勞報簽名,
+          勞報身分證正面: input.勞報身分證正面,
+          勞報身分證反面: input.勞報身分證反面,
           請款批次ID: batchId,
           skipLaborWithholding: true,
           填寫來源,

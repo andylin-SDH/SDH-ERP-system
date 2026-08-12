@@ -372,6 +372,8 @@ function KolHomeInner() {
     身分證字號: "",
     聯絡電話: "",
     戶籍地址: "",
+    身分證正面: "",
+    身分證反面: "",
   });
   const [projects, setProjects] = useState<KolPortalProject[]>([]);
   const [settlementTab, setSettlementTab] = useState<SettlementTab>("執行中");
@@ -393,9 +395,12 @@ function KolHomeInner() {
     戶籍地址: "",
     勞報簽名: "",
     勞報簽署: false,
+    勞報身分證正面: "",
+    勞報身分證反面: "",
   });
   const [claimSaving, setClaimSaving] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
+  const [idCardUploading, setIdCardUploading] = useState<"front" | "back" | null>(null);
   const [revokingPid, setRevokingPid] = useState<string | null>(null);
   const loadSeqRef = useRef(0);
   const settlementTabInitialized = useRef(false);
@@ -447,7 +452,13 @@ function KolHomeInner() {
       }
       setPartnerName(data.partnerName ?? "");
       setPartnerId(data.partnerId ?? "");
-      const profile = data.laborProfile ?? { 身分證字號: "", 聯絡電話: "", 戶籍地址: "" };
+      const profile = data.laborProfile ?? {
+        身分證字號: "",
+        聯絡電話: "",
+        戶籍地址: "",
+        身分證正面: "",
+        身分證反面: "",
+      };
       setLaborProfile(profile);
       const list = (Array.isArray(data.projects) ? data.projects : []).map((p) =>
         isPreview ? { ...p, canEditKolInvoice: false } : p
@@ -605,9 +616,46 @@ function KolHomeInner() {
       戶籍地址: laborProfile.戶籍地址 || "",
       勞報簽名: "",
       勞報簽署: false,
+      勞報身分證正面: laborProfile.身分證正面 || "",
+      勞報身分證反面: laborProfile.身分證反面 || "",
     });
     setClaimError(null);
     setClaimCheckoutOpen(true);
+  }
+
+  async function uploadLaborIdCard(side: "front" | "back", file: File | null) {
+    if (!file || isPreview) return;
+    setIdCardUploading(side);
+    setClaimError(null);
+    try {
+      const fd = new FormData();
+      fd.set("side", side);
+      fd.set("file", file);
+      const res = await fetch("/api/kol/labor-id-card", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      const data = (await safeResJson(res)) as {
+        ok?: boolean;
+        error?: string;
+        url?: string;
+        laborProfile?: KolLaborProfile;
+      };
+      if (!res.ok || !data.ok || !data.url) {
+        setClaimError(data.error ?? "身分證上傳失敗");
+        return;
+      }
+      if (data.laborProfile) setLaborProfile(data.laborProfile);
+      setClaimForm((f) => ({
+        ...f,
+        ...(side === "front" ? { 勞報身分證正面: data.url! } : { 勞報身分證反面: data.url! }),
+      }));
+    } catch (e) {
+      setClaimError(e instanceof Error ? e.message : "身分證上傳失敗");
+    } finally {
+      setIdCardUploading(null);
+    }
   }
 
   async function submitClaimBatch() {
@@ -635,6 +683,8 @@ function KolHomeInner() {
                 KOL發票備註: claimForm.KOL發票備註.trim() || null,
                 勞報簽署: claimForm.勞報簽署,
                 勞報簽名: claimForm.勞報簽名.trim() || null,
+                勞報身分證正面: claimForm.勞報身分證正面.trim() || null,
+                勞報身分證反面: claimForm.勞報身分證反面.trim() || null,
               }
             : {
                 專案IDs: claimableSelected.map((p) => p.專案ID),
@@ -1190,6 +1240,8 @@ function KolHomeInner() {
                         請款方式: mode,
                         勞報簽署: false,
                         勞報簽名: "",
+                        勞報身分證正面: f.勞報身分證正面 || laborProfile.身分證正面 || "",
+                        勞報身分證反面: f.勞報身分證反面 || laborProfile.身分證反面 || "",
                       }))
                     }
                     className={`rounded-md px-3 py-1.5 font-semibold transition ${
@@ -1365,6 +1417,55 @@ function KolHomeInner() {
                       onChange={(e) => setClaimForm((f) => ({ ...f, 戶籍地址: e.target.value }))}
                       className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm focus:border-amber-400 focus:outline-none"
                     />
+                  </div>
+                  <div>
+                    <p className="mb-1 text-xs font-semibold text-stone-500">身分證正反面影本</p>
+                    <p className="mb-2 text-[11px] text-stone-500">上傳一次後會記住，下次提領自動帶出。</p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {(
+                        [
+                          { side: "front" as const, label: "正面", url: claimForm.勞報身分證正面 },
+                          { side: "back" as const, label: "反面", url: claimForm.勞報身分證反面 },
+                        ] as const
+                      ).map((item) => (
+                        <div
+                          key={item.side}
+                          className="rounded-xl border border-stone-200 bg-stone-50 p-3"
+                        >
+                          <p className="mb-2 text-xs font-semibold text-stone-600">{item.label}</p>
+                          {item.url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={item.url}
+                              alt={`身分證${item.label}`}
+                              className="mb-2 h-28 w-full rounded-lg object-contain bg-white ring-1 ring-stone-200"
+                            />
+                          ) : (
+                            <div className="mb-2 flex h-28 items-center justify-center rounded-lg border border-dashed border-stone-300 bg-white text-xs text-stone-400">
+                              尚未上傳
+                            </div>
+                          )}
+                          <label className="inline-flex cursor-pointer items-center justify-center rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 ring-1 ring-stone-300 hover:bg-stone-50">
+                            {idCardUploading === item.side
+                              ? "上傳中…"
+                              : item.url
+                                ? "更換"
+                                : "選擇圖片"}
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp"
+                              className="hidden"
+                              disabled={claimSaving || idCardUploading !== null}
+                              onChange={(e) => {
+                                const file = e.target.files?.[0] ?? null;
+                                e.target.value = "";
+                                void uploadLaborIdCard(item.side, file);
+                              }}
+                            />
+                          </label>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-semibold text-stone-500">電子簽名（整批共用）</label>

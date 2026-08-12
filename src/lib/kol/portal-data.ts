@@ -28,7 +28,13 @@ export type KolPortalDataOk = {
   ok: true;
   partnerId: string;
   partnerName: string;
-  laborProfile: { 身分證字號: string; 聯絡電話: string; 戶籍地址: string };
+  laborProfile: {
+    身分證字號: string;
+    聯絡電話: string;
+    戶籍地址: string;
+    身分證正面: string;
+    身分證反面: string;
+  };
   projects: KolPortalProject[];
 };
 
