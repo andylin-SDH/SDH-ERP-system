@@ -23,6 +23,8 @@ export async function deleteMasterProjectByRowId(rowId: string): Promise<{ 專�
   await deleteTasksBy專案ID(專案ID);
   await deletePayoutBy專案ID(專案ID);
   await deleteFinanceBy專案ID(專案ID);
+  const { deleteMasterEditLogs } = await import("@/lib/db/master-edit-log");
+  await deleteMasterEditLogs(專案ID);
 
   const { error: delErr } = await supabase.from("大總表").delete().eq("id", id);
   if (delErr) throw delErr;

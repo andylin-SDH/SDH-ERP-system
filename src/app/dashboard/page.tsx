@@ -13,6 +13,7 @@ import {
 import type { MasterRow } from "@/lib/db/master";
 import { PaymentCollectionLink } from "@/components/PaymentCollectionLink";
 import { PaymentCollectionLinkIcon } from "@/components/PaymentCollectionLinkIcon";
+import { MasterEditHistory, type MasterEditLogItem } from "@/components/MasterEditHistory";
 import type { PaymentSubmissionWithProject } from "@/lib/db/payment-collection";
 import { formatTaipeiDateTime } from "@/lib/taiwan-date";
 import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, PaymentRecordRow } from "@/modules/finance";
@@ -24,7 +25,6 @@ import {
   displayPayoutTypeLabel,
   isExtraBonusPayoutType,
 } from "@/lib/payout-dedupe";
-import { canEditMasterNumericFields } from "@/config/master-permissions";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
 import { PROJECT_TYPES, costFromTotalByProjectType } from "@/config/project-types";
 import { DEFAULT_PROJECT_STATUS_OPTIONS } from "@/config/project-status-defaults";
@@ -1511,6 +1511,8 @@ export default function DashboardPage() {
   });
   const [selectedMaster, setSelectedMaster] = useState<MasterRow | null>(null);
   const [isEditingMaster, setIsEditingMaster] = useState(false);
+  const [masterEditLogs, setMasterEditLogs] = useState<MasterEditLogItem[]>([]);
+  const [masterEditLogsLoading, setMasterEditLogsLoading] = useState(false);
   const [showDeleteMasterConfirm, setShowDeleteMasterConfirm] = useState(false);
   const [deletingMaster, setDeletingMaster] = useState(false);
   const [savingMaster, setSavingMaster] = useState(false);
@@ -2097,11 +2099,6 @@ export default function DashboardPage() {
   const canEditExtraBonus = Boolean(me?.role && ["董事長", "會計"].includes(me.role));
   /** 董事長／會計：大總表「發票摘要」與展開發票明細 */
   const canViewMasterInvoiceSummary = Boolean(me?.role && ["董事長", "會計"].includes(me.role));
-  /** 大總表金額／營收／成本（分潤成數仍僅 Config／此權限）；其餘欄位登入即可編輯 */
-  const canEditMasterNumbers = useMemo(
-    () => Boolean(me?.role && canEditMasterNumericFields(me.role, rolePermissions)),
-    [me?.role, rolePermissions]
-  );
 
   const loadMasterTaskTemplates = useCallback(async (projectId: string) => {
     const pid = String(projectId ?? "").trim();
@@ -2433,6 +2430,25 @@ export default function DashboardPage() {
       else setPartnerEditLogs([]);
     } finally {
       setPartnerEditLogsLoading(false);
+    }
+  }, []);
+
+  const fetchMasterEditLogs = useCallback(async (projectId: string) => {
+    const pid = String(projectId ?? "").trim();
+    if (!pid) {
+      setMasterEditLogs([]);
+      return;
+    }
+    setMasterEditLogsLoading(true);
+    try {
+      const res = await fetch(`/api/master/edit-log?專案ID=${encodeURIComponent(pid)}`, {
+        cache: "no-store",
+      });
+      const data = (await safeResJson(res)) as { ok?: boolean; logs?: MasterEditLogItem[] };
+      if (res.ok && Array.isArray(data.logs)) setMasterEditLogs(data.logs);
+      else setMasterEditLogs([]);
+    } finally {
+      setMasterEditLogsLoading(false);
     }
   }, []);
 
@@ -3051,6 +3067,15 @@ export default function DashboardPage() {
     }
     return m;
   }, [masterList]);
+
+  useEffect(() => {
+    const pid = String(selectedMaster?.專案ID ?? "").trim();
+    if (!pid) {
+      setMasterEditLogs([]);
+      return;
+    }
+    void fetchMasterEditLogs(pid);
+  }, [selectedMaster?.專案ID, fetchMasterEditLogs]);
 
   const openProjectDetailById = useCallback(
     (projectId: string) => {
@@ -3761,6 +3786,7 @@ export default function DashboardPage() {
         if (!prev || prev.id !== data.master!.id) return prev;
         return data.master!;
       });
+      void fetchMasterEditLogs(data.master.專案ID);
       await refreshDashboardData(["master", "payout", "finance"]);
     } catch (err) {
       setInlineStatusError(err instanceof Error ? err.message : "更新專案狀態失敗");
@@ -7450,12 +7476,12 @@ export default function DashboardPage() {
                   </button>
                 </div>
                 <p className="mb-2 text-xs text-stone-500">
-                  勾選各角色可執行的操作。未勾選即沒有該操作權限。
+                  勾選各角色可執行的操作。未勾選即沒有該操作權限。金額／成本已全面開放修改，異動會寫入「修改紀錄」；「編輯分潤成數」僅控分潤成數欄位。
                 </p>
                 <div className="space-y-2">
                   {[
                     { key: "create" as const, label: "新增專案" },
-                    { key: "update" as const, label: "編輯金額／數字" },
+                    { key: "update" as const, label: "編輯分潤成數" },
                     { key: "delete" as const, label: "刪除專案" },
                   ].map(({ key, label }) => (
                     <div key={key} className="flex items-center gap-3">
@@ -12615,15 +12641,6 @@ export default function DashboardPage() {
                             id: selectedMaster.id,
                             ...(() => {
                               const { 專案BDPM分潤成數, 專案引薦人分潤成數, 專案開發人分潤成數, 專案管理員分潤成數, 執行管理員分潤成數, ...rest } = editMasterForm;
-                              if (!canEditMasterNumbers) {
-                                return {
-                                  ...rest,
-                                  專案總金額未稅: selectedMaster.專案總金額未稅 ?? "",
-                                  專案成本: selectedMaster.專案成本 ?? "",
-                                  KOL費用未稅: selectedMaster.KOL費用未稅 ?? "",
-                                  專案營收: selectedMaster.專案營收 ?? "",
-                                };
-                              }
                               return {
                                 ...rest,
                                 專案營收: calc專案營收(
@@ -12643,6 +12660,7 @@ export default function DashboardPage() {
                         }
                         setMasterList((prev) => prev.map((r) => (r.id === data.master!.id ? data.master! : r)));
                         setSelectedMaster(data.master);
+                        await fetchMasterEditLogs(data.master.專案ID);
                         await refreshDashboardData(["master", "payout", "finance"]);
                         setIsEditingMaster(false);
                         setSavingMaster(false);
@@ -12673,9 +12691,6 @@ export default function DashboardPage() {
                       value={editMasterForm.專案類型}
                       onChange={(v) =>
                         setEditMasterForm((f) => {
-                          if (!canEditMasterNumbers) {
-                            return { ...f, 專案類型: v };
-                          }
                           const autoCost = costFromTotalByProjectType(v, f.專案總金額未稅);
                           const nextCost = autoCost != null ? autoCost : f.專案成本;
                           return {
@@ -12998,13 +13013,13 @@ export default function DashboardPage() {
                   </p>
                 ) : (
                   <>
-                {isEditingMaster && !canEditMasterNumbers && (
-                  <p className="mb-3 rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-600">
-                    金額欄位僅董事長／管理者（或於「專案權限設定」勾選「編輯金額／數字」的角色）可修改；其餘欄位仍可儲存。
+                {isEditingMaster ? (
+                  <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                    金額欄位開放修改；儲存後會留下<strong className="font-semibold">修改紀錄</strong>（含修改人與變更前後金額）。
                   </p>
-                )}
+                ) : null}
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                  {isEditingMaster && canEditMasterNumbers ? (
+                  {isEditingMaster ? (
                     <NumberField
                       label="專案總金額未稅"
                       value={editMasterForm.專案總金額未稅}
@@ -13025,7 +13040,7 @@ export default function DashboardPage() {
                     <Field label="專案總金額未稅" value={formatAmount(selectedMaster.專案總金額未稅)} />
                   )}
 
-                  {isEditingMaster && canEditMasterNumbers ? (
+                  {isEditingMaster ? (
                     <div>
                       <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-500">專案營收</p>
                       <p className="text-sm font-medium text-stone-700 tabular-nums">{formatAmount(editMasterForm.專案營收)}</p>
@@ -13035,7 +13050,7 @@ export default function DashboardPage() {
                     <Field label="專案營收" value={formatAmount(selectedMaster.專案營收)} />
                   )}
 
-                  {isEditingMaster && canEditMasterNumbers ? (
+                  {isEditingMaster ? (
                     <div>
                       <NumberField
                         label="專案成本"
@@ -13056,7 +13071,7 @@ export default function DashboardPage() {
                     <Field label="專案成本" value={formatAmount(selectedMaster.專案成本)} />
                   )}
 
-                  {isEditingMaster && canEditMasterNumbers ? (
+                  {isEditingMaster ? (
                     <NumberField
                       label="KOL費用未稅"
                       value={editMasterForm.KOL費用未稅}
@@ -13100,6 +13115,10 @@ export default function DashboardPage() {
                   )}
                 </div>
               </section>
+
+              {canViewSelectedMasterAmounts ? (
+                <MasterEditHistory logs={masterEditLogs} loading={masterEditLogsLoading} />
+              ) : null}
 
               <section>
                 <h3 className="mb-3 text-base font-bold text-amber-800">收款表單</h3>

@@ -2,7 +2,7 @@
  * 大總表 API
  * GET：回傳所有大總表資料（需登入）
  * POST：新增一筆大總表（需登入，任何人可建立專案）
- * PATCH：更新大總表（登入即可；金額／營收／成本／分潤成數僅 master.update 角色可改）
+ * PATCH：更新大總表（登入即可；金額全開並寫入修改紀錄；分潤成數僅 master.update 角色可改）
  * DELETE：刪除專案（僅董事長；連動任務、分潤表、財務）
  */
 
@@ -11,12 +11,27 @@ import {
   applyMasterNumericFieldPolicy,
   canEditMasterNumericFields,
 } from "@/config/master-permissions";
-import { createMaster, getMasterById, getMasterList, updateMaster, type NewMasterInput, type UpdateMasterInput } from "@/lib/db/master";
+import {
+  createMaster,
+  getMasterById,
+  getMasterList,
+  updateMaster,
+  type NewMasterInput,
+  type UpdateMasterInput,
+} from "@/lib/db/master";
+import {
+  buildMasterChangeDiff,
+  insertMasterEditLog,
+  MASTER_EDIT_ACTION,
+  masterCreateSnapshot,
+  updateMasterPayloadToRecord,
+} from "@/lib/db/master-edit-log";
 import { deleteMasterProjectByRowId } from "@/lib/db/master-project-delete";
 import { getSystemConfig } from "@/lib/db/system-config";
 import { syncPayoutForProject } from "@/lib/db/payout";
 import { syncFinanceForProject } from "@/lib/db/finance";
-import { requireAdmin, requireEmployee } from "@/lib/auth/api";
+import { requireEmployee } from "@/lib/auth/api";
+import { partnerEditorLabel } from "@/lib/partners/editor-label";
 
 export async function GET(request: NextRequest) {
   const auth = await requireEmployee(request);
@@ -86,6 +101,13 @@ export async function POST(request: NextRequest) {
     };
 
     const master = await createMaster(payload);
+    const editor = partnerEditorLabel(auth.user);
+    await insertMasterEditLog({
+      專案ID: master.專案ID,
+      操作: MASTER_EDIT_ACTION.CREATE,
+      更新者: editor,
+      變更內容: masterCreateSnapshot(payload),
+    });
     try {
       await syncPayoutForProject(master, master_payout_defaults);
       await syncFinanceForProject(master);
@@ -113,7 +135,7 @@ export async function PATCH(request: NextRequest) {
     }
     const { role_permissions } = await getSystemConfig();
     const role = auth.user.role;
-    const canEditNumbers = canEditMasterNumericFields(role, role_permissions);
+    const canEditRates = canEditMasterNumericFields(role, role_permissions);
 
     const existing = await getMasterById(id);
     if (!existing) {
@@ -153,12 +175,22 @@ export async function PATCH(request: NextRequest) {
     };
 
     const payload = applyMasterNumericFieldPolicy(
-      rawPayload,
+      rawPayload as unknown as Record<string, unknown>,
       existing as unknown as Record<string, unknown>,
-      canEditNumbers
+      canEditRates
     ) as UpdateMasterInput;
 
+    const diff = buildMasterChangeDiff(existing, updateMasterPayloadToRecord(payload));
     const master = await updateMaster(payload);
+    if (diff) {
+      await insertMasterEditLog({
+        專案ID: master.專案ID || existing.專案ID,
+        操作: MASTER_EDIT_ACTION.UPDATE,
+        更新者: partnerEditorLabel(auth.user),
+        變更內容: diff.變更內容,
+        變更前快照: diff.變更前快照,
+      });
+    }
     if (master) {
       const { master_payout_defaults } = await getSystemConfig();
       try {
