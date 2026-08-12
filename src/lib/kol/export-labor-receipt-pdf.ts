@@ -45,7 +45,7 @@ async function exportLaborReceiptsPdfByPages(
   pages: HTMLElement[],
   filename: string
 ): Promise<void> {
-  const html2canvas = (await import("html2canvas")).default;
+  const html2canvas = (await import("html2canvas-pro")).default;
   const { jsPDF } = await import("jspdf");
 
   const pageStyleBackups: { el: HTMLElement; style: string | null }[] = [];

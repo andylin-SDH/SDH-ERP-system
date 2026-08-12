@@ -1,6 +1,8 @@
 /**
  * html2pdf / html2canvas 安全匯出
- * Tailwind v4 的 oklab 色碼會讓 html2canvas 炸掉；匯出前改內嵌 rgb 並暫時移除 stylesheet。
+ * Tailwind v4 的 lab/oklab/oklch 會讓舊版 html2canvas 炸掉：
+ * 1) 內嵌樣式時把現代色碼轉成 rgb
+ * 2) 暫時移除 stylesheet，避免再解析到 lab
  */
 
 const PDF_EXPORT_ATTR = "data-pdf-export-id";
@@ -18,12 +20,15 @@ const INLINE_STYLE_PROPS = [
   "border-radius",
   "border-width",
   "border-style",
+  "outline",
+  "outline-color",
   "font-size",
   "font-weight",
   "font-family",
   "line-height",
   "letter-spacing",
   "text-align",
+  "text-decoration-color",
   "padding",
   "padding-top",
   "padding-right",
@@ -59,11 +64,93 @@ const INLINE_STYLE_PROPS = [
   "border-collapse",
 ] as const;
 
+const MODERN_COLOR_FN_RE = /(?:ok)?lab\(|(?:ok)?lch\(|color-mix\(|color\(/i;
+
+let measureCtx: CanvasRenderingContext2D | null | undefined;
+
+function getMeasureCtx(): CanvasRenderingContext2D | null {
+  if (measureCtx !== undefined) return measureCtx;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    measureCtx = canvas.getContext("2d", { willReadFrequently: true });
+  } catch {
+    measureCtx = null;
+  }
+  return measureCtx;
+}
+
+/** 把 lab/oklab/oklch/color() 轉成 rgb／hex（舊 html2canvas 才讀得懂） */
+export function cssColorToRgb(cssColor: string): string {
+  const v = String(cssColor ?? "").trim();
+  if (!v || v === "none" || v === "transparent" || v === "currentcolor") return v;
+  if (!MODERN_COLOR_FN_RE.test(v)) return v;
+  const ctx = getMeasureCtx();
+  if (!ctx) return "rgb(0, 0, 0)";
+  try {
+    ctx.fillStyle = "#000000";
+    ctx.fillStyle = v;
+    const normalized = String(ctx.fillStyle || "");
+    if (normalized && !MODERN_COLOR_FN_RE.test(normalized)) return normalized;
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillRect(0, 0, 1, 1);
+    const d = ctx.getImageData(0, 0, 1, 1).data;
+    const a = (d[3] ?? 255) / 255;
+    if (a >= 0.999) return `rgb(${d[0]}, ${d[1]}, ${d[2]})`;
+    return `rgba(${d[0]}, ${d[1]}, ${d[2]}, ${Number(a.toFixed(4))})`;
+  } catch {
+    return "rgb(0, 0, 0)";
+  }
+}
+
+function replaceModernColorsInCssValue(value: string): string {
+  if (!MODERN_COLOR_FN_RE.test(value)) return value;
+  const re = /((?:ok)?lab|(?:ok)?lch|color-mix|color)\(/gi;
+  let result = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(value))) {
+    const start = m.index;
+    let i = start + m[0].length;
+    let depth = 1;
+    while (i < value.length && depth > 0) {
+      const ch = value[i];
+      if (ch === "(") depth += 1;
+      else if (ch === ")") depth -= 1;
+      i += 1;
+    }
+    const fn = value.slice(start, i);
+    result += value.slice(last, start) + cssColorToRgb(fn);
+    last = i;
+    re.lastIndex = i;
+  }
+  result += value.slice(last);
+  return result;
+}
+
+function sanitizeCssValue(prop: string, value: string): string {
+  if (!value) return value;
+  if (!MODERN_COLOR_FN_RE.test(value)) return value;
+  if (
+    prop === "color" ||
+    prop.endsWith("-color") ||
+    prop === "background-color" ||
+    prop === "border-color" ||
+    prop === "outline-color" ||
+    prop === "text-decoration-color"
+  ) {
+    return cssColorToRgb(value);
+  }
+  return replaceModernColorsInCssValue(value);
+}
+
 function copyComputedStyles(source: HTMLElement, target: HTMLElement): void {
   const computed = window.getComputedStyle(source);
   for (const prop of INLINE_STYLE_PROPS) {
-    const value = computed.getPropertyValue(prop);
-    if (value) target.style.setProperty(prop, value);
+    const raw = computed.getPropertyValue(prop);
+    if (!raw) continue;
+    target.style.setProperty(prop, sanitizeCssValue(prop, raw));
   }
 }
 
@@ -172,7 +259,7 @@ export async function inlineImagesAsDataUrls(root: HTMLElement): Promise<() => v
   };
 }
 
-/** 準備 DOM 給 html2canvas（oklab 防護）；回傳還原函式 */
+/** 準備 DOM 給 html2canvas（lab／oklab 防護）；回傳還原函式 */
 export async function prepareDomForHtml2Canvas(
   root: HTMLElement,
   opts?: { hideSelectors?: string[]; captureWidthPx?: number }
@@ -196,6 +283,7 @@ export async function prepareDomForHtml2Canvas(
   }
 
   const restoreImages = await inlineImagesAsDataUrls(root);
+  // 先內嵌並把 lab→rgb，再移除 stylesheet，避免 html2canvas 再解析到現代色碼
   const restoreStyles = inlineCaptureStyles(root);
   const restoreStylesheets = suspendDocumentStylesheets();
 
