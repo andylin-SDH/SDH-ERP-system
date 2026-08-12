@@ -1,19 +1,8 @@
 import type { NextConfig } from "next";
-import { join } from "node:path";
 
 const nextConfig: NextConfig = {
-  // html2pdf.js 依賴舊版 html2canvas（不支援 lab/oklch）；改指向 html2canvas-pro
-  webpack: (config) => {
-    config.resolve = config.resolve ?? {};
-    const alias = config.resolve.alias;
-    const aliasObj =
-      alias && typeof alias === "object" && !Array.isArray(alias)
-        ? { ...(alias as Record<string, string | false | string[]>) }
-        : {};
-    aliasObj.html2canvas = join(process.cwd(), "node_modules/html2canvas-pro");
-    config.resolve.alias = aliasObj;
-    return config;
-  },
+  // Next.js 16 預設 Turbopack；PDF 已直接用 html2canvas-pro，不需 webpack alias
+  turbopack: {},
 };
 
 export default nextConfig;
