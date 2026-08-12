@@ -13,7 +13,8 @@ export async function exportLaborReceiptsPdf(root: HTMLElement, filename: string
     await html2pdf()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .set({
-        margin: [6, 6, 6, 6],
+        // 兩份一頁已自訂 210×297mm，邊距改 0 避免半張被擠到下一頁
+        margin: [0, 0, 0, 0],
         filename,
         image: { type: "jpeg", quality: 0.95 },
         html2canvas: {
