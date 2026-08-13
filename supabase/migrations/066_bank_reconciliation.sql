@@ -145,10 +145,10 @@ BEGIN
     RAISE EXCEPTION '候選發票已有不同的入帳日期，請先人工檢查';
   END IF;
 
-  UPDATE public."發票"
+  UPDATE public."發票" AS invoice
   SET "廠商付款日期" = m."交易日期"::text
-  WHERE id = ANY(m."發票IDs")
-    AND NULLIF(trim(COALESCE("廠商付款日期", '')), '') IS NULL;
+  WHERE invoice.id = ANY(m."發票IDs")
+    AND NULLIF(trim(COALESCE(invoice."廠商付款日期", '')), '') IS NULL;
 
   IF NOT FOUND THEN
     -- 允許相同日期的重試，但至少要確認發票仍存在。
@@ -157,19 +157,19 @@ BEGIN
     END IF;
   END IF;
 
-  UPDATE public."對帳結果"
+  UPDATE public."對帳結果" AS result
   SET
-    "狀態" = CASE WHEN id = p_match_id THEN 'confirmed' ELSE 'rejected' END,
-    "確認人" = CASE WHEN id = p_match_id THEN p_confirmed_by ELSE "確認人" END,
-    "確認時間" = CASE WHEN id = p_match_id THEN now() ELSE "確認時間" END,
-    "寫回日期" = CASE WHEN id = p_match_id THEN m."交易日期" ELSE "寫回日期" END,
+    "狀態" = CASE WHEN result.id = p_match_id THEN 'confirmed' ELSE 'rejected' END,
+    "確認人" = CASE WHEN result.id = p_match_id THEN p_confirmed_by ELSE result."確認人" END,
+    "確認時間" = CASE WHEN result.id = p_match_id THEN now() ELSE result."確認時間" END,
+    "寫回日期" = CASE WHEN result.id = p_match_id THEN m."交易日期" ELSE result."寫回日期" END,
     updated_at = now()
-  WHERE "銀行交易ID" = m."銀行交易ID"
-    AND "狀態" = 'suggested';
+  WHERE result."銀行交易ID" = m."銀行交易ID"
+    AND result."狀態" = 'suggested';
 
-  UPDATE public."銀行交易"
+  UPDATE public."銀行交易" AS transaction
   SET "狀態" = 'matched', updated_at = now()
-  WHERE id = m."銀行交易ID";
+  WHERE transaction.id = m."銀行交易ID";
 
   RETURN QUERY SELECT m."專案ID"::text, m."交易日期"::date;
 END;
