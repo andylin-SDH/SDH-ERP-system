@@ -381,7 +381,16 @@ export async function getReconciliationDashboard(): Promise<{
     matches = (result.data ?? []) as Record<string, unknown>[];
   }
 
-  const invoiceNumberById = new Map(invoices.map((row) => [String(row.id ?? ""), String(row.發票號碼 ?? "")]));
+  const invoiceById = new Map(
+    invoices.map((row) => [
+      String(row.id ?? ""),
+      {
+        id: String(row.id ?? ""),
+        number: String(row.發票號碼 ?? "").trim(),
+        issueDate: String(row.發票日期 ?? "").trim().slice(0, 10),
+      },
+    ])
+  );
   const projectNameById = new Map(masters.map((row) => [String(row.專案ID ?? ""), String(row.專案名稱 ?? "")]));
   const matchesByTransaction = new Map<string, Record<string, unknown>[]>();
   for (const match of matches) {
@@ -404,12 +413,16 @@ export async function getReconciliationDashboard(): Promise<{
     matches: (matchesByTransaction.get(String(row.id)) ?? []).map((match) => {
       const invoiceIds = Array.isArray(match.發票IDs) ? match.發票IDs.map(String) : [];
       const projectId = String(match.專案ID ?? "");
+      const matchedInvoices = invoiceIds
+        .map((id) => invoiceById.get(id))
+        .filter((invoice): invoice is NonNullable<typeof invoice> => invoice != null);
       return {
         id: String(match.id),
         projectId,
         projectName: projectNameById.get(projectId) ?? "",
         invoiceIds,
-        invoiceNumbers: invoiceIds.map((id) => invoiceNumberById.get(id) ?? "").filter(Boolean),
+        invoiceNumbers: matchedInvoices.map((invoice) => invoice.number).filter(Boolean),
+        invoices: matchedInvoices,
         candidateAmount: moneyOrNull(match.候選金額) ?? 0,
         score: Number(match.分數 ?? 0),
         reasons: Array.isArray(match.匹配原因) ? match.匹配原因.map(String) : [],

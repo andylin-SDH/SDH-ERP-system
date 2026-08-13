@@ -340,9 +340,22 @@ export default function ReconciliationPage() {
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="text-sm font-bold text-stone-900">{match.projectName || match.projectId}</p>
-                            <p className="mt-0.5 text-xs text-stone-500">專案 {match.projectId} · 發票 {match.invoiceNumbers.join("、") || "未填號碼"}</p>
+                            <p className="mt-0.5 text-xs text-stone-500">專案 {match.projectId}</p>
                           </div>
                           <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-bold ${scoreClass(match.score)}`}>{match.score} 分</span>
+                        </div>
+                        <div className="mt-2 rounded-lg border border-white/80 bg-white/70 px-3 py-2">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">對應發票／開立日期</p>
+                          <ul className="mt-1 space-y-1 text-xs text-stone-700">
+                            {match.invoices.length > 0 ? match.invoices.map((invoice) => (
+                              <li key={invoice.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
+                                <span className="font-semibold">{invoice.number || "未填發票號碼"}</span>
+                                <span className="tabular-nums text-stone-500">{invoice.issueDate || "未填開立日期"}</span>
+                              </li>
+                            )) : (
+                              <li>{match.invoiceNumbers.join("、") || "未填發票資料"}</li>
+                            )}
+                          </ul>
                         </div>
                         <p className="mt-2 text-sm font-bold tabular-nums">候選金額 {money(match.candidateAmount, transaction.currency)}</p>
                         <ul className="mt-2 flex flex-wrap gap-1">

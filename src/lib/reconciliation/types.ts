@@ -62,6 +62,11 @@ export interface ReconciliationDashboardMatch {
   projectName: string;
   invoiceIds: string[];
   invoiceNumbers: string[];
+  invoices: Array<{
+    id: string;
+    number: string;
+    issueDate: string;
+  }>;
   candidateAmount: number;
   score: number;
   reasons: string[];
