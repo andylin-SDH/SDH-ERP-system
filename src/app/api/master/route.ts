@@ -26,7 +26,7 @@ import {
   masterCreateSnapshot,
   updateMasterPayloadToRecord,
 } from "@/lib/db/master-edit-log";
-import { deleteMasterProjectByRowId } from "@/lib/db/master-project-delete";
+import { softDeleteMasterProjectByRowId } from "@/lib/db/master-project-delete";
 import { getSystemConfig } from "@/lib/db/system-config";
 import { syncPayoutForProject } from "@/lib/db/payout";
 import { syncFinanceForProject } from "@/lib/db/finance";
@@ -210,7 +210,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-/** 刪除專案（僅董事長）；連動刪除任務、分潤表、財務之該專案資料 */
+/** 軟刪專案（僅董事長）；保留任務／分潤／財務與編輯紀錄，可還原 */
 export async function DELETE(request: NextRequest) {
   const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
@@ -218,13 +218,14 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "僅董事長可刪除專案" }, { status: 403 });
   }
   try {
-    const body = (await request.json().catch(() => ({}))) as { id?: string } | null;
+    const body = (await request.json().catch(() => ({}))) as { id?: string; reason?: string } | null;
     const id = String(body?.id ?? "").trim();
     if (!id) {
       return NextResponse.json({ ok: false, error: "id 為必填" }, { status: 400 });
     }
-    await deleteMasterProjectByRowId(id);
-    return NextResponse.json({ ok: true });
+    const editor = partnerEditorLabel(auth.user);
+    const result = await softDeleteMasterProjectByRowId(id, editor, body?.reason);
+    return NextResponse.json({ ok: true, softDeleted: true, ...result });
   } catch (error) {
     console.error("DELETE /api/master error:", error);
     return NextResponse.json(

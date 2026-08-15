@@ -70,6 +70,16 @@ export async function requireAdmin(request: NextRequest | Request): Promise<{ us
   return result;
 }
 
+/** 必須為董事長（稽核中心等） */
+export async function requireChairman(request: NextRequest | Request): Promise<{ user: User } | NextResponse> {
+  const result = await requireEmployee(request);
+  if (result instanceof NextResponse) return result;
+  if (String(result.user.role ?? "").trim() !== "董事長") {
+    return NextResponse.json({ ok: false, error: "僅董事長可執行此操作" }, { status: 403 });
+  }
+  return result;
+}
+
 /** 必須為 KOL 角色（與員工帳號區隔） */
 export async function requireKol(request: NextRequest | Request): Promise<{ user: User } | NextResponse> {
   const result = await requireAuth(request);

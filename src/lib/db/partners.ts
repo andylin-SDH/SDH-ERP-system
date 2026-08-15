@@ -9,7 +9,6 @@ import type { PartnerRow } from "@/modules/partners/types";
 import {
   buildPartnerChangeDiff,
   insertPartnerEditLog,
-  deletePartnerEditLogs,
   PARTNER_EDIT_ACTION,
   updatePayloadToRecord,
 } from "@/lib/db/partner-edit-log";
@@ -51,6 +50,9 @@ function rowToPartner(r: Record<string, unknown>): PartnerRow {
     建立者: (r["建立者"] as string) || undefined,
     最後更新者: (r["最後更新者"] as string) || undefined,
     最後更新時間: (r["最後更新時間"] as string) || undefined,
+    deleted_at: (r.deleted_at as string) || null,
+    deleted_by: (r.deleted_by as string) || null,
+    delete_reason: (r.delete_reason as string) || null,
   };
 }
 
@@ -268,12 +270,107 @@ export async function updatePartnerWithEditLog(
   return { partner };
 }
 
-export async function deletePartner(PartnerID: string): Promise<boolean> {
+export async function softDeletePartner(
+  PartnerID: string,
+  editor: string,
+  reason?: string | null
+): Promise<{ ok: boolean; error?: string; alreadyDeleted?: boolean }> {
   const pid = String(PartnerID ?? "").trim();
-  if (!pid) return false;
-  await deletePartnerEditLogs(pid);
-  const { error } = await getSupabase().from("partners").delete().eq("PartnerID", pid);
-  return !error;
+  if (!pid) return { ok: false, error: "PartnerID 為必填" };
+
+  const existing = await getPartnerById(pid, { includeDeleted: true });
+  if (!existing) return { ok: false, error: "找不到該合作夥伴" };
+  if (existing.deleted_at) return { ok: true, alreadyDeleted: true };
+
+  const now = new Date().toISOString();
+  const snapshot = { ...(existing as unknown as Record<string, unknown>) };
+  delete snapshot.deleted_at;
+  delete snapshot.deleted_by;
+  delete snapshot.delete_reason;
+
+  const { error } = await getSupabase()
+    .from("partners")
+    .update({
+      deleted_at: now,
+      deleted_by: editor || null,
+      delete_reason: reason?.trim() || null,
+      最後更新者: editor || null,
+      最後更新時間: now,
+    })
+    .eq("PartnerID", pid)
+    .is("deleted_at", null);
+
+  if (error) {
+    const msg = error.message ?? String(error);
+    if (/deleted_at|schema cache|column/i.test(msg)) {
+      return {
+        ok: false,
+        error: "資料庫尚未啟用軟刪欄位，請先執行 migration 066_soft_delete_partners_master.sql",
+      };
+    }
+    return { ok: false, error: msg };
+  }
+
+  await insertPartnerEditLog({
+    PartnerID: pid,
+    操作: PARTNER_EDIT_ACTION.DELETE,
+    更新者: editor || "系統",
+    變更內容: { deleted_at: now, ...(reason?.trim() ? { delete_reason: reason.trim() } : {}) },
+    變更前快照: snapshot,
+  });
+  return { ok: true };
+}
+
+/** @deprecated 請改用 softDeletePartner；保留名稱相容舊呼叫 */
+export async function deletePartner(PartnerID: string, editor = "系統"): Promise<boolean> {
+  const r = await softDeletePartner(PartnerID, editor);
+  return r.ok;
+}
+
+export async function restorePartner(
+  PartnerID: string,
+  editor: string
+): Promise<{ ok: boolean; error?: string; partner?: PartnerRow }> {
+  const pid = String(PartnerID ?? "").trim();
+  if (!pid) return { ok: false, error: "PartnerID 為必填" };
+
+  const existing = await getPartnerById(pid, { includeDeleted: true });
+  if (!existing) return { ok: false, error: "找不到該合作夥伴" };
+  if (!existing.deleted_at) return { ok: true, partner: existing };
+
+  const now = new Date().toISOString();
+  const { error } = await getSupabase()
+    .from("partners")
+    .update({
+      deleted_at: null,
+      deleted_by: null,
+      delete_reason: null,
+      最後更新者: editor || null,
+      最後更新時間: now,
+    })
+    .eq("PartnerID", pid);
+
+  if (error) {
+    const msg = error.message ?? String(error);
+    if (/deleted_at|schema cache|column/i.test(msg)) {
+      return {
+        ok: false,
+        error: "資料庫尚未啟用軟刪欄位，請先執行 migration 066_soft_delete_partners_master.sql",
+      };
+    }
+    return { ok: false, error: msg };
+  }
+
+  await insertPartnerEditLog({
+    PartnerID: pid,
+    操作: PARTNER_EDIT_ACTION.RESTORE,
+    更新者: editor || "系統",
+    變更內容: { deleted_at: null },
+    變更前快照: { deleted_at: existing.deleted_at, deleted_by: existing.deleted_by },
+  });
+
+  const partner = await getPartnerById(pid);
+  return { ok: true, partner: partner ?? undefined };
 }
 
 export interface GetPartnersResult {
@@ -287,19 +384,39 @@ export async function getPartnersApprovedWithError(): Promise<GetPartnersResult>
   return getPartnersWithError();
 }
 
+function filterOutDeletedPartners(partners: PartnerRow[]): PartnerRow[] {
+  return partners.filter((p) => !p.deleted_at);
+}
+
 export async function getPartnersWithError(): Promise<GetPartnersResult> {
   const supabase = getSupabase();
   try {
-    const { data, error } = await supabase
+    const withSoft = await supabase
       .from("partners")
-      .select(PARTNER_SELECT)
+      .select("*")
+      .is("deleted_at", null)
       .order("PartnerID");
-    if (!error && data) {
-      const partners = data.map(rowToPartner);
+    if (!withSoft.error && withSoft.data) {
+      const partners = (withSoft.data as unknown as Record<string, unknown>[]).map(rowToPartner);
       log("partners.db", "getPartners 筆數", { count: partners.length });
       return { partners, error: null };
     }
-    const msg = error?.message ?? String(error);
+
+    const softMsg = withSoft.error?.message ?? "";
+    const softMissing = /deleted_at|schema cache|column/i.test(softMsg);
+
+    const { data, error } = await supabase.from("partners").select(PARTNER_SELECT).order("PartnerID");
+    if (!error && data) {
+      const partners = filterOutDeletedPartners(
+        (data as unknown as Record<string, unknown>[]).map(rowToPartner)
+      );
+      log("partners.db", "getPartners 筆數", {
+        count: partners.length,
+        softFilterSkipped: softMissing,
+      });
+      return { partners, error: null };
+    }
+    const msg = error?.message ?? softMsg ?? String(error);
     log("partners.db", "getPartners 精確欄位查詢失敗，嘗試 select *", { error: msg });
 
     const { data: raw, error: err2 } = await supabase.from("partners").select("*").limit(2000);
@@ -307,7 +424,7 @@ export async function getPartnersWithError(): Promise<GetPartnersResult> {
       log("partners.db", "getPartners fallback 也失敗", { error: String(err2.message) });
       return { partners: [], error: msg || err2.message };
     }
-    const rows = (raw ?? []).map((r) => rowToPartner(r as Record<string, unknown>));
+    const rows = filterOutDeletedPartners((raw ?? []).map((r) => rowToPartner(r as Record<string, unknown>)));
     log("partners.db", "getPartners fallback 筆數", { count: rows.length, firstError: msg });
     return {
       partners: rows,
@@ -326,17 +443,27 @@ export async function getPartners(): Promise<PartnerRow[]> {
   return partners;
 }
 
-export async function getPartnerById(PartnerID: string): Promise<PartnerRow | null> {
+export async function getPartnerById(
+  PartnerID: string,
+  options?: { includeDeleted?: boolean }
+): Promise<PartnerRow | null> {
   const pid = String(PartnerID ?? "").trim();
   if (!pid) return null;
   try {
-    const { data, error } = await getSupabase()
-      .from("partners")
-      .select(PARTNER_SELECT)
-      .eq("PartnerID", pid)
-      .maybeSingle();
+    let q = getSupabase().from("partners").select("*").eq("PartnerID", pid);
+    if (!options?.includeDeleted) q = q.is("deleted_at", null);
+    let { data, error } = await q.maybeSingle();
+    if (error && /deleted_at|schema cache|column/i.test(error.message ?? "")) {
+      ({ data, error } = await getSupabase()
+        .from("partners")
+        .select(PARTNER_SELECT)
+        .eq("PartnerID", pid)
+        .maybeSingle());
+    }
     if (error || !data) return null;
-    return rowToPartner(data as Record<string, unknown>);
+    const row = rowToPartner(data as unknown as Record<string, unknown>);
+    if (!options?.includeDeleted && row.deleted_at) return null;
+    return row;
   } catch {
     return null;
   }
@@ -351,13 +478,22 @@ export async function getPartnersByScope(scopeStr: string): Promise<PartnerRow[]
   const ids = scopeStr.split(",").map((s) => s.trim()).filter(Boolean);
   if (ids.length === 0) return [];
   try {
+    const withSoft = await getSupabase()
+      .from("partners")
+      .select("*")
+      .in("PartnerID", ids)
+      .is("deleted_at", null)
+      .order("PartnerID");
+    if (!withSoft.error && withSoft.data) {
+      return (withSoft.data as unknown as Record<string, unknown>[]).map(rowToPartner);
+    }
     const { data, error } = await getSupabase()
       .from("partners")
       .select(PARTNER_SELECT)
       .in("PartnerID", ids)
       .order("PartnerID");
     if (error) return [];
-    return (data ?? []).map(rowToPartner);
+    return filterOutDeletedPartners((data as unknown as Record<string, unknown>[]).map(rowToPartner));
   } catch {
     return [];
   }

@@ -52,6 +52,9 @@ export interface MasterRow {
   執行管理員分潤成數: string | null;
   created_at?: string;
   updated_at?: string;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  delete_reason?: string | null;
 }
 
 function rowToMaster(r: Record<string, unknown>): MasterRow {
@@ -93,6 +96,9 @@ function rowToMaster(r: Record<string, unknown>): MasterRow {
     執行管理員分潤成數: (r.執行管理員分潤成數 as string) ?? null,
     created_at: r.created_at as string | undefined,
     updated_at: r.updated_at as string | undefined,
+    deleted_at: (r.deleted_at as string) ?? null,
+    deleted_by: (r.deleted_by as string) ?? null,
+    delete_reason: (r.delete_reason as string) ?? null,
   };
 }
 
@@ -105,26 +111,45 @@ function normalizeMoneyOrNull(v: string | null | undefined): string | null {
 }
 
 export async function getMasterList(): Promise<MasterRow[]> {
-  const { data, error } = await getSupabase()
+  const supabase = getSupabase();
+  const withSoft = await supabase
     .from("大總表")
     .select("*")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
-  if (error) {
-    log("master.db", "getMasterList 查詢錯誤", { error: String(error?.message) });
-    throw error;
+  if (!withSoft.error && withSoft.data) {
+    log("master.db", "getMasterList 筆數", { count: withSoft.data.length });
+    return withSoft.data.map((r) => rowToMaster(r as Record<string, unknown>));
   }
-  log("master.db", "getMasterList 筆數", { count: (data ?? []).length });
-  return (data ?? []).map((r) => rowToMaster(r as Record<string, unknown>));
+
+  const softMsg = withSoft.error?.message ?? "";
+  if (/deleted_at|schema cache|column/i.test(softMsg)) {
+    const { data, error } = await supabase.from("大總表").select("*").order("created_at", { ascending: false });
+    if (error) {
+      log("master.db", "getMasterList 查詢錯誤", { error: String(error?.message) });
+      throw error;
+    }
+    const rows = (data ?? [])
+      .map((r) => rowToMaster(r as Record<string, unknown>))
+      .filter((r) => !r.deleted_at);
+    log("master.db", "getMasterList 筆數（無 soft 欄位）", { count: rows.length });
+    return rows;
+  }
+
+  log("master.db", "getMasterList 查詢錯誤", { error: softMsg });
+  throw withSoft.error;
 }
 
-export async function getMasterById(id: string): Promise<MasterRow | null> {
+export async function getMasterById(id: string, options?: { includeDeleted?: boolean }): Promise<MasterRow | null> {
   const rowId = String(id ?? "").trim();
   if (!rowId) return null;
   const { data, error } = await getSupabase().from("大總表").select("*").eq("id", rowId).maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  return rowToMaster(data as Record<string, unknown>);
+  const row = rowToMaster(data as Record<string, unknown>);
+  if (!options?.includeDeleted && row.deleted_at) return null;
+  return row;
 }
 
 export type NewMasterInput = Omit<MasterRow, "id" | "created_at" | "updated_at">;

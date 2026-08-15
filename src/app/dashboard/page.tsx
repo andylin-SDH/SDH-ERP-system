@@ -50,6 +50,7 @@ import {
   type PartnersGradeFilter,
   type PartnersListPageSize,
 } from "@/components/partners/PartnersMasterDetail";
+import { AuditLogPanel } from "@/components/audit/AuditLogPanel";
 import { isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
 import { normalizePartnerBoolean } from "@/lib/partners/boolean";
 import { normalizeDecimalString } from "@/lib/number-normalize";
@@ -1367,7 +1368,7 @@ function normalizeDateForInput(raw: string | null | undefined): string {
   return "";
 }
 
-/** 發票清冊：依發票日期排；表頭不點，用獨立下拉 */
+/** 發票清冊：依發票日期排（字軌不是時間序）；表頭只切新到舊／舊到新 */
 type InvoiceListDateSortMode = "dateAsc" | "dateDesc";
 
 function applyInvoiceListSort(rows: InvoiceRow[], mode: InvoiceListDateSortMode): InvoiceRow[] {
@@ -1613,6 +1614,17 @@ export default function DashboardPage() {
     /** null = 依①角色總覽指標設定 */
     overview_kpis?: string[] | null;
   } | null>(null);
+  /** 使用者視角預覽（真實登入不變；僅套用目標可見性，唯讀） */
+  const [previewTarget, setPreviewTarget] = useState<{
+    user: User;
+    visibility: {
+      tables: string[];
+      columns: Record<string, string[]>;
+      overview_kpis?: string[] | null;
+    };
+  } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   /** Dashboard 分頁目前排序（拖曳用），null 代表沿用預設順序 */
   const [tabOrder, setTabOrder] = useState<string[] | null>(null);
   const [draggingTab, setDraggingTab] = useState<string | null>(null);
@@ -2065,13 +2077,22 @@ export default function DashboardPage() {
   const employeeUserNames = useMemo(() => buildEmployeeUserNames(users), [users]);
 
   /** 董事長／管理者可為使用者設定可見範圍、調整系統設定 */
-  const canEditVisibility = me && ["董事長", "管理者"].includes(me.role);
+  const canManageVisibility = Boolean(me && ["董事長", "管理者"].includes(me.role));
+  const isPreviewMode = Boolean(previewTarget);
+  /** 預覽中不可改設定／寫入；入口按鈕仍用 canManageVisibility */
+  const canEditVisibility = canManageVisibility && !isPreviewMode;
+  /** 列級／分頁可見性以預覽對象為準，否則為真實登入者 */
+  const visibilitySubject = previewTarget?.user ?? me;
+  const effectiveVisibility = previewTarget?.visibility ?? myVisibility;
+  const canMutate = Boolean(me) && !isPreviewMode;
   /** 董事長／管理者／會計：可預覽 KOL 老師入口 */
-  const canPreviewKolPortalView = Boolean(me?.role && ["董事長", "管理者", "會計"].includes(me.role));
+  const canPreviewKolPortalView = Boolean(me?.role && ["董事長", "管理者", "會計"].includes(me.role)) && !isPreviewMode;
   /** 董事長／會計：可編輯專案額外獎金 */
-  const canEditExtraBonus = Boolean(me?.role && ["董事長", "會計"].includes(me.role));
-  /** 董事長／會計：大總表「發票摘要」與展開發票明細 */
-  const canViewMasterInvoiceSummary = Boolean(me?.role && ["董事長", "會計"].includes(me.role));
+  const canEditExtraBonus = Boolean(me?.role && ["董事長", "會計"].includes(me.role)) && canMutate;
+  /** 董事長／會計：大總表「發票摘要」與展開發票明細（預覽時依對象角色） */
+  const canViewMasterInvoiceSummary = Boolean(
+    visibilitySubject?.role && ["董事長", "會計"].includes(visibilitySubject.role)
+  );
 
   const loadMasterTaskTemplates = useCallback(async (projectId: string) => {
     const pid = String(projectId ?? "").trim();
@@ -2427,10 +2448,14 @@ export default function DashboardPage() {
 
   const handleDeletePartner = useCallback(
     async (pt: PartnerRow) => {
+      if (!canMutate) {
+        window.alert("預覽模式下為唯讀，無法刪除。");
+        return;
+      }
       const pid = String(pt.PartnerID ?? "").trim();
       const name = String(pt.合作夥伴名稱 ?? pid).trim() || pid;
       if (!pid) return;
-      if (!window.confirm(`確定要刪除 KOL「${name}」（${pid}）？此操作無法復原。`)) return;
+      if (!window.confirm(`確定要封存 KOL「${name}」（${pid}）？列表將不再顯示，資料會保留約一個月，期間可由異動紀錄還原；逾期將永久清除主檔（異動紀錄仍留）。`)) return;
       try {
         const res = await fetch(`/api/partners?PartnerID=${encodeURIComponent(pid)}`, {
           method: "DELETE",
@@ -2447,7 +2472,7 @@ export default function DashboardPage() {
         window.alert(err instanceof Error ? err.message : "刪除失敗");
       }
     },
-    [selectedPartnerId]
+    [selectedPartnerId, canMutate]
   );
 
   /** 是否顯示儲存／可編輯欄位：任一同登入者可編輯（除 KOL開發者） */
@@ -2490,29 +2515,33 @@ export default function DashboardPage() {
     [fetchPartnerEditLogs]
   );
 
-  const canPartnerAgentSave = useMemo(() => Boolean(me && editingPartnerSource), [me, editingPartnerSource]);
+  const canPartnerAgentSave = useMemo(
+    () => Boolean(me && editingPartnerSource && canMutate),
+    [me, editingPartnerSource, canMutate]
+  );
 
   /** 非董事長／管理者：除 KOL開發者（及審核欄位）外皆可編輯 */
   const partnerFieldEditable = useCallback(
     (key: string) => {
+      if (!canMutate) return false;
       if (canEditVisibility) return true;
       if (!canPartnerAgentSave || !editingPartnerSource) return false;
       if (isPartnerAgentBlockedKey(key)) return false;
       return true;
     },
-    [canEditVisibility, canPartnerAgentSave, editingPartnerSource]
+    [canMutate, canEditVisibility, canPartnerAgentSave, editingPartnerSource]
   );
 
-  /** 目前登入者可見的資料區塊（③ 自訂 visibility 優先，否則 ① DB 角色可見區塊，最後 fallback 靜態 config） */
+  /** 目前登入者（或預覽對象）可見的資料區塊（③ 自訂 visibility 優先，否則 ① DB 角色可見區塊，最後 fallback 靜態 config） */
   const visibleSections = useMemo(() => {
-    if (!me) return [];
-    const defaultSecs = getSectionsForRole(me.role);
+    if (!visibilitySubject) return [];
+    const defaultSecs = getSectionsForRole(visibilitySubject.role);
     let base: string[];
-    if (myVisibility?.tables?.length) {
+    if (effectiveVisibility?.tables?.length) {
       /** ③ 自訂：是否顯示「總覽」分頁由 tables 是否含 overview 決定 */
-      base = [...myVisibility.tables];
+      base = [...effectiveVisibility.tables];
     } else {
-      const fromDb = systemConfig?.role_visibility?.[me.role]?.sections;
+      const fromDb = systemConfig?.role_visibility?.[visibilitySubject.role]?.sections;
       base = fromDb && fromDb.length > 0 ? [...fromDb] : [...defaultSecs];
       /** ① 不再勾選總覽區塊，儲存時仍會帶入 overview；舊 DB 若無則補上 */
       if (!base.includes("overview")) base = ["overview", ...base];
@@ -2520,13 +2549,24 @@ export default function DashboardPage() {
     /** 舊設定「發票」獨立區塊 → 整併為「財務」 */
     const merged = base.map((s) => (s === "invoices" ? "finance" : s));
     return [...new Set(merged)];
-  }, [me, myVisibility, systemConfig]);
+  }, [visibilitySubject, effectiveVisibility, systemConfig]);
 
-  /** Dashboard 分頁列表：一般使用者只有資料區塊；董事長/管理者多一個「可見性與權限」設定分頁；若有自訂排序則優先使用 */
+  /** Dashboard 分頁列表：一般使用者只有資料區塊；董事長/管理者多「可見性與權限」；董事長另有「異動紀錄」 */
+  const isChairman = visibilitySubject?.role === "董事長";
+  const realIsChairman = me?.role === "董事長";
+  const showAuditTab = realIsChairman && !isPreviewMode;
   const tabSections = useMemo(() => {
     if (!me) return [];
-    if (!visibleSections.length) return canEditVisibility ? ["visibility"] : [];
-    const base = canEditVisibility ? (["visibility", ...visibleSections] as string[]) : visibleSections;
+    if (!visibleSections.length) {
+      const adminOnly: string[] = [];
+      if (canEditVisibility) adminOnly.push("visibility");
+      if (showAuditTab) adminOnly.push("audit");
+      return adminOnly;
+    }
+    const prefix: string[] = [];
+    if (canEditVisibility) prefix.push("visibility");
+    if (showAuditTab) prefix.push("audit");
+    const base = prefix.length ? ([...prefix, ...visibleSections] as string[]) : visibleSections;
     if (!tabOrder || tabOrder.length === 0) return base;
     // 依照 tabOrder 排序，過濾掉已不存在的 key，並補上新增的 key
     const setBase = new Set(base);
@@ -2544,7 +2584,7 @@ export default function DashboardPage() {
       return ["overview", ...without];
     }
     return merged;
-  }, [me, visibleSections, canEditVisibility, tabOrder]);
+  }, [me, visibleSections, canEditVisibility, tabOrder, showAuditTab]);
 
   /** 目前選取的區塊（分頁）：預設為 visibleSections 第 1 個 */
   const [activeSection, setActiveSection] = useState<string | null>(null);
@@ -2555,12 +2595,15 @@ export default function DashboardPage() {
       return;
     }
     setActiveSection((prev) => {
-      // 管理者專屬的「可見性與權限」分頁不在 visibleSections 中，需額外允許
+      // 管理者專屬的「可見性與權限」／董事長「異動紀錄」不在 visibleSections 中，需額外允許
       if (canEditVisibility && prev === "visibility") return "visibility";
+      if (showAuditTab && prev === "audit") return "audit";
       if (prev === "invoices") return "finance";
-      return prev && visibleSections.includes(prev) ? prev : visibleSections[0] ?? (canEditVisibility ? "visibility" : null);
+      return prev && visibleSections.includes(prev)
+        ? prev
+        : visibleSections[0] ?? (canEditVisibility ? "visibility" : showAuditTab ? "audit" : null);
     });
-  }, [me, visibleSections, canEditVisibility]);
+  }, [me, visibleSections, canEditVisibility, showAuditTab]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2585,13 +2628,13 @@ export default function DashboardPage() {
   const getVisibleColumnKeys = useCallback(
     (tableKey: string): string[] => {
       if (tableKey === "overview") {
-        const cols = myVisibility?.columns?.overview;
+        const cols = effectiveVisibility?.columns?.overview;
         const allKeys = (TABLE_COLUMNS.overview ?? []).map((c) => c.key);
         if (!cols || cols.length === 0) return allKeys;
         if (cols.includes("*")) return allKeys;
         return cols.filter((k) => allKeys.includes(k));
       }
-      const cols = myVisibility?.columns?.[tableKey];
+      const cols = effectiveVisibility?.columns?.[tableKey];
       let normalized: string[] | undefined =
         tableKey === "tasks" && cols && !cols.includes("*")
           ? cols.map((c) => (c === "狀態" ? "任務類型" : c))
@@ -2632,7 +2675,9 @@ export default function DashboardPage() {
           const idx = merged.indexOf("專案引薦人");
           merged.splice(idx + 1, 0, "專案開發人");
         }
-        const canSeeInvoiceSummary = Boolean(me?.role && ["董事長", "會計"].includes(me.role));
+        const canSeeInvoiceSummary = Boolean(
+          visibilitySubject?.role && ["董事長", "會計"].includes(visibilitySubject.role)
+        );
         if (canSeeInvoiceSummary && allKeys.includes("發票摘要") && !merged.includes("發票摘要")) {
           const idx = merged.indexOf("專案狀態");
           if (idx !== -1) merged.splice(idx + 1, 0, "發票摘要");
@@ -2647,7 +2692,7 @@ export default function DashboardPage() {
       }
       return normalized;
     },
-    [myVisibility, me?.role]
+    [effectiveVisibility, visibilitySubject?.role]
   );
 
   /** 文字搜尋：在指定欄位中做簡單子字串比對（大小寫不分） */
@@ -2680,15 +2725,15 @@ export default function DashboardPage() {
     return partnerByKolName.get(String(kolName ?? "").trim());
   }, [partnerByKolName, isEditingMaster, editMasterForm.KOL名稱, selectedMaster?.KOL名稱]);
 
-  /** 列過濾：依 ② 資料可見規則，非 fullAccess 時只顯示 match_fields 符合登入者姓名/Email 的列；空字串視同未勾選 */
+  /** 列過濾：依 ② 資料可見規則，非 fullAccess 時只顯示 match_fields 符合登入者（或預覽對象）姓名/Email 的列；空字串視同未勾選 */
   const filterRowsByVisibility = useCallback(
     <T extends Record<string, unknown>>(rows: T[], tableKey: string): T[] => {
-      if (!me || isFullAccessRole(me.role)) return rows;
+      if (!visibilitySubject || isFullAccessRole(visibilitySubject.role)) return rows;
       const raw = visibilityRules[tableKey] ?? [];
       const matchFields = (Array.isArray(raw) ? raw : []).map((f) => String(f).trim()).filter(Boolean);
       if (matchFields.length === 0) return rows;
-      const uName = (me.name ?? "").trim();
-      const uEmail = (me.email ?? "").trim();
+      const uName = (visibilitySubject.name ?? "").trim();
+      const uEmail = (visibilitySubject.email ?? "").trim();
       return rows.filter((row) => {
         for (const key of matchFields) {
           let val = String((row as unknown as Record<string, unknown>)[key] ?? "").trim();
@@ -2703,7 +2748,7 @@ export default function DashboardPage() {
         return false;
       });
     },
-    [me, visibilityRules, partnerByKolName]
+    [visibilitySubject, visibilityRules, partnerByKolName]
   );
 
   const masterListByCreatedAt = useMemo(
@@ -2723,9 +2768,9 @@ export default function DashboardPage() {
    * 任務清單本身仍只顯示 ② 可見列，兩者脫鉤。全權角色不擴充。
    */
   const taskVisibleProjectIdsForMasterAugment = useMemo(() => {
-    if (!me || isFullAccessRole(me.role)) return null;
-    const uName = (me.name ?? "").trim();
-    const uEmail = (me.email ?? "").trim();
+    if (!visibilitySubject || isFullAccessRole(visibilitySubject.role)) return null;
+    const uName = (visibilitySubject.name ?? "").trim();
+    const uEmail = (visibilitySubject.email ?? "").trim();
     const s = new Set<string>();
     for (const t of tasks) {
       if (!taskAssigneeIsUser(t, uName, uEmail)) continue;
@@ -2733,7 +2778,7 @@ export default function DashboardPage() {
       if (pid) s.add(pid);
     }
     return s;
-  }, [me, tasks]);
+  }, [visibilitySubject, tasks]);
 
   const filteredMasterList = useMemo(() => {
     const base = filterRowsByVisibility(
@@ -2836,12 +2881,12 @@ export default function DashboardPage() {
     [filteredTasks, tasksLifecycleTab]
   );
 
-  const overviewDirectorCompanyView = Boolean(me?.role === "董事長" && overviewScope === "company");
+  const overviewDirectorCompanyView = Boolean(visibilitySubject?.role === "董事長" && overviewScope === "company");
 
   const overviewMyTaskProjectIds = useMemo(() => {
-    if (!me) return new Set<string>();
-    const uName = (me.name ?? "").trim();
-    const uEmail = (me.email ?? "").trim();
+    if (!visibilitySubject) return new Set<string>();
+    const uName = (visibilitySubject.name ?? "").trim();
+    const uEmail = (visibilitySubject.email ?? "").trim();
     const next = new Set<string>();
     for (const t of filteredTasks) {
       if (!taskAssigneeIsUser(t, uName, uEmail)) continue;
@@ -2849,34 +2894,35 @@ export default function DashboardPage() {
       if (pid) next.add(pid);
     }
     return next;
-  }, [filteredTasks, me]);
+  }, [filteredTasks, visibilitySubject]);
 
   const overviewProjectRows = useMemo(() => {
-    if (!me) return [];
-    const uName = (me.name ?? "").trim();
-    const uEmail = (me.email ?? "").trim();
+    if (!visibilitySubject) return [];
+    const uName = (visibilitySubject.name ?? "").trim();
+    const uEmail = (visibilitySubject.email ?? "").trim();
     const inProgress = filteredMasterList.filter((row) => isProjectInProgress(row.專案狀態));
     if (overviewDirectorCompanyView) return inProgress.slice(0, 100);
     return inProgress
       .filter((row) => isMasterRowRelatedToUser(row, uName, uEmail, overviewMyTaskProjectIds, partnerByKolName))
       .slice(0, 100);
-  }, [filteredMasterList, me, overviewDirectorCompanyView, overviewMyTaskProjectIds, partnerByKolName]);
+  }, [filteredMasterList, visibilitySubject, overviewDirectorCompanyView, overviewMyTaskProjectIds, partnerByKolName]);
 
   const overviewTaskRows = useMemo(() => {
-    if (!me) return [];
-    const uName = (me.name ?? "").trim();
-    const uEmail = (me.email ?? "").trim();
+    if (!visibilitySubject) return [];
+    const uName = (visibilitySubject.name ?? "").trim();
+    const uEmail = (visibilitySubject.email ?? "").trim();
     const open = filteredTasks.filter((t) => !t.任務完成);
     if (overviewDirectorCompanyView) return open.slice(0, 150);
     return open.filter((t) => taskAssigneeIsUser(t, uName, uEmail)).slice(0, 150);
-  }, [filteredTasks, me, overviewDirectorCompanyView]);
+  }, [filteredTasks, visibilitySubject, overviewDirectorCompanyView]);
 
   /** 總覽頂部指標：③ columns.overview 優先；舊版 overview_kpis；最後依 system_config／靜態角色預設 */
   const visibleOverviewKpiKeys = useMemo((): OverviewKpiKey[] => {
-    if (!me) return [];
+    if (!visibilitySubject) return [];
     const fromRole =
-      systemConfig?.overview_kpi_by_role?.[me.role] ?? getDefaultOverviewKpisForRole(me.role);
-    const colKeys = myVisibility?.columns?.overview;
+      systemConfig?.overview_kpi_by_role?.[visibilitySubject.role] ??
+      getDefaultOverviewKpisForRole(visibilitySubject.role);
+    const colKeys = effectiveVisibility?.columns?.overview;
     if (colKeys && colKeys.length > 0) {
       if (colKeys.includes("*")) return [...OVERVIEW_KPI_KEYS] as OverviewKpiKey[];
       const filtered = colKeys.filter((k): k is OverviewKpiKey =>
@@ -2884,29 +2930,34 @@ export default function DashboardPage() {
       );
       return (filtered.length ? filtered : (fromRole as OverviewKpiKey[])) as OverviewKpiKey[];
     }
-    const legacy = myVisibility?.overview_kpis;
+    const legacy = effectiveVisibility?.overview_kpis;
     if (legacy !== null && legacy !== undefined && legacy.length > 0) {
       return legacy.filter((k): k is OverviewKpiKey => OVERVIEW_KPI_KEYS.includes(k as OverviewKpiKey));
     }
     if (legacy !== null && legacy !== undefined && legacy.length === 0) return [];
     const fromR = fromRole.filter((k) => OVERVIEW_KPI_KEYS.includes(k as OverviewKpiKey));
     return (fromR.length ? fromR : [...OVERVIEW_KPI_KEYS]) as OverviewKpiKey[];
-  }, [me, systemConfig?.overview_kpi_by_role, myVisibility?.columns?.overview, myVisibility?.overview_kpis]);
+  }, [
+    visibilitySubject,
+    systemConfig?.overview_kpi_by_role,
+    effectiveVisibility?.columns?.overview,
+    effectiveVisibility?.overview_kpis,
+  ]);
 
   const masterRowsForOverviewKpis = useMemo(() => {
-    if (!me) return [];
-    const uName = (me.name ?? "").trim();
-    const uEmail = (me.email ?? "").trim();
+    if (!visibilitySubject) return [];
+    const uName = (visibilitySubject.name ?? "").trim();
+    const uEmail = (visibilitySubject.email ?? "").trim();
     if (overviewDirectorCompanyView) return filteredMasterList;
     return filteredMasterList.filter((row) =>
       isMasterRowRelatedToUser(row, uName, uEmail, overviewMyTaskProjectIds, partnerByKolName)
     );
-  }, [filteredMasterList, me, overviewDirectorCompanyView, overviewMyTaskProjectIds, partnerByKolName]);
+  }, [filteredMasterList, visibilitySubject, overviewDirectorCompanyView, overviewMyTaskProjectIds, partnerByKolName]);
 
   const overviewKpiMetrics = useMemo(() => {
-    if (!me) return null;
-    const uName = (me.name ?? "").trim();
-    const uEmail = (me.email ?? "").trim();
+    if (!visibilitySubject) return null;
+    const uName = (visibilitySubject.name ?? "").trim();
+    const uEmail = (visibilitySubject.email ?? "").trim();
     const inProgress = (rows: MasterRow[]) => rows.filter((row) => isProjectInProgress(row.專案狀態));
     const projectCount = overviewDirectorCompanyView
       ? inProgress(filteredMasterList).length
@@ -2924,7 +2975,7 @@ export default function DashboardPage() {
     }
     const grossMarginPct = totalUntaxedAmount > 0 ? ((totalUntaxedAmount - totalCost) / totalUntaxedAmount) * 100 : null;
     return { projectCount, pendingTasks, totalRevenue: totalUntaxedAmount, totalCost, grossMarginPct };
-  }, [me, filteredMasterList, filteredTasks, overviewDirectorCompanyView, overviewMyTaskProjectIds, masterRowsForOverviewKpis, partnerByKolName]);
+  }, [visibilitySubject, filteredMasterList, filteredTasks, overviewDirectorCompanyView, overviewMyTaskProjectIds, masterRowsForOverviewKpis, partnerByKolName]);
 
   const masterVisibleCols = useMemo(() => getVisibleColumnKeys("master"), [getVisibleColumnKeys]);
   const partnersVisibleCols = useMemo(() => getVisibleColumnKeys("partners"), [getVisibleColumnKeys]);
@@ -5185,6 +5236,92 @@ export default function DashboardPage() {
     );
   }, []);
 
+  const endUserPreview = useCallback(() => {
+    setPreviewTarget(null);
+    setPreviewError(null);
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("previewUser");
+    window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+  }, []);
+
+  const openUserPreview = useCallback((user: User) => {
+    const role = String(user.role ?? "").trim();
+    if (role === "KOL") {
+      const scope = String(user.scope ?? "").trim();
+      if (scope) {
+        window.open(`/kol?previewPartner=${encodeURIComponent(scope)}`, "_blank", "noopener,noreferrer");
+        return;
+      }
+      window.alert("此 KOL 帳號尚未設定 scope（PartnerID），請先綁定後再開老師視角。");
+      return;
+    }
+    window.open(`/dashboard?previewUser=${encodeURIComponent(user.email)}`, "_blank", "noopener,noreferrer");
+  }, []);
+
+  /** URL ?previewUser= → 載入目標可見性（僅董事長／管理者） */
+  useEffect(() => {
+    if (!me || !canManageVisibility) return;
+    if (typeof window === "undefined") return;
+    const email = String(new URLSearchParams(window.location.search).get("previewUser") ?? "")
+      .trim()
+      .toLowerCase();
+    if (!email) {
+      setPreviewTarget(null);
+      setPreviewError(null);
+      return;
+    }
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/users/preview?email=${encodeURIComponent(email)}`, { cache: "no-store" });
+        const data = (await safeResJson(res)) as {
+          ok?: boolean;
+          error?: string;
+          user?: User;
+          visibility?: {
+            tables: string[];
+            columns: Record<string, string[]>;
+            overview_kpis?: string[] | null;
+          };
+          kolPreview?: { partnerId?: string | null; error?: string };
+        };
+        if (cancelled) return;
+        if (!res.ok || !data.ok || !data.user) {
+          setPreviewTarget(null);
+          setPreviewError(data.error ?? "無法載入使用者視角");
+          return;
+        }
+        if (String(data.user.role ?? "").trim() === "KOL") {
+          const pid = String(data.kolPreview?.partnerId ?? "").trim();
+          if (pid) {
+            window.location.replace(`/kol?previewPartner=${encodeURIComponent(pid)}`);
+            return;
+          }
+          setPreviewTarget(null);
+          setPreviewError(data.kolPreview?.error ?? "此 KOL 帳號無法開啟老師視角");
+          return;
+        }
+        setPreviewTarget({
+          user: data.user,
+          visibility: data.visibility ?? { tables: [], columns: {}, overview_kpis: null },
+        });
+      } catch (e) {
+        if (!cancelled) {
+          setPreviewTarget(null);
+          setPreviewError(e instanceof Error ? e.message : "無法載入使用者視角");
+        }
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [me, canManageVisibility]);
+
   useEffect(() => {
     if (sessionBootstrappedRef.current) return;
     sessionBootstrappedRef.current = true;
@@ -5585,6 +5722,44 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {(isPreviewMode || previewLoading || previewError) && (
+          <div className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm">
+            {previewLoading ? (
+              <p className="font-semibold">正在載入使用者視角…</p>
+            ) : previewError ? (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="font-semibold text-red-800">{previewError}</p>
+                <button
+                  type="button"
+                  onClick={endUserPreview}
+                  className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
+                >
+                  關閉
+                </button>
+              </div>
+            ) : previewTarget ? (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p>
+                  <span className="font-bold">正在預覽：</span>
+                  {previewTarget.user.name || previewTarget.user.email}
+                  <span className="text-amber-800/80">（{previewTarget.user.role}）</span>
+                  <span className="ml-2 rounded-md bg-amber-200/80 px-2 py-0.5 text-xs font-bold">唯讀</span>
+                  <span className="mt-1 block text-xs text-amber-900/70 sm:mt-0 sm:ml-2 sm:inline">
+                    登入身分仍為 {me?.name ?? me?.email}；此畫面僅模擬對方可見範圍。
+                  </span>
+                </p>
+                <button
+                  type="button"
+                  onClick={endUserPreview}
+                  className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-stone-800"
+                >
+                  結束預覽
+                </button>
+              </div>
+            ) : null}
+          </div>
+        )}
+
         <header className="mb-8 flex flex-wrap items-center justify-between gap-4 md:mb-10">
           <div>
             <Link href="/" className="text-sm font-medium text-stone-500 transition duration-150 hover:text-amber-800">
@@ -5592,7 +5767,9 @@ export default function DashboardPage() {
             </Link>
             <div className="mt-2 border-l-4 border-amber-500/80 pl-4">
               <h1 className="text-2xl font-bold tracking-tight text-stone-900 sm:text-3xl">
-                {me?.name ?? "總覽"} Dashboard
+                {isPreviewMode
+                  ? `${previewTarget?.user.name ?? "使用者"}｜視角預覽`
+                  : `${me?.name ?? "總覽"} Dashboard`}
               </h1>
             </div>
             {me && visibleSections.includes("overview") && activeSection !== "overview" && (
@@ -5609,6 +5786,13 @@ export default function DashboardPage() {
 
         {me && tabSections.length > 0 && (
           <div className="min-w-0 flex-1 space-y-10">
+            {/* 董事長專用：異動紀錄（稽核中心） */}
+            {showAuditTab && activeSection === "audit" && (
+              <section className="rounded-2xl border-2 border-amber-200 bg-white/90 p-6 shadow-xl ring-1 ring-amber-500/20">
+                <AuditLogPanel />
+              </section>
+            )}
+
             {/* 管理者專用：可見性與權限管理分頁內容 */}
             {canEditVisibility && activeSection === "visibility" && (
               <section className="rounded-2xl border-2 border-amber-200 bg-white/90 p-6 shadow-xl ring-1 ring-amber-500/20">
@@ -5913,6 +6097,7 @@ export default function DashboardPage() {
                             <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">姓名</th>
                             <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">角色</th>
                             <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">部門</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">視角</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-stone-200 bg-amber-50/40">
@@ -5922,6 +6107,18 @@ export default function DashboardPage() {
                               <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-stone-900">{user.name}</td>
                               <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-600">{user.role}</td>
                               <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-600">{user.dept}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-sm">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openUserPreview(user);
+                                  }}
+                                  className="rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-bold text-amber-900 transition hover:bg-amber-100"
+                                >
+                                  {String(user.role ?? "").trim() === "KOL" ? "老師視角" : "使用者視角"}
+                                </button>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -5944,7 +6141,7 @@ export default function DashboardPage() {
                     : "進行中且與您相關的專案，以及負責人為您的未完成任務。"}
                 </p>
               </div>
-              {me?.role === "董事長" && (
+              {isChairman && (
                 <div className="flex shrink-0 rounded-xl border border-stone-200 bg-amber-50/90 p-1">
                   <button
                     type="button"
@@ -6096,6 +6293,7 @@ export default function DashboardPage() {
                 >
                   週一晨會視圖
                 </Link>
+                {canMutate && (
                 <button
                   type="button"
                   onClick={() => {
@@ -6142,6 +6340,7 @@ export default function DashboardPage() {
                 >
                   新增專案
                 </button>
+                )}
               </div>
               </div>
               <div className="mt-4 rounded-2xl border border-stone-200/90 bg-gradient-to-br from-stone-50 to-white p-3">
@@ -12118,6 +12317,14 @@ export default function DashboardPage() {
                     {selectedUserForVisibility.name} · {selectedUserForVisibility.email}
                   </p>
                 </div>
+                <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => openUserPreview(selectedUserForVisibility)}
+                  className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
+                >
+                  {String(selectedUserForVisibility.role ?? "").trim() === "KOL" ? "老師視角" : "使用者視角"}
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -12130,6 +12337,7 @@ export default function DashboardPage() {
                 >
                   關閉
                 </button>
+                </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-1 rounded-xl border border-stone-200 bg-white/80 p-1">
                 {(
@@ -13510,11 +13718,11 @@ export default function DashboardPage() {
               aria-labelledby="delete-master-title"
             >
               <h3 id="delete-master-title" className="text-lg font-bold text-stone-900">
-                確認刪除專案？
+                確認封存專案？
               </h3>
               <p className="mt-2 text-sm leading-relaxed text-stone-600">
-                將永久刪除此筆大總表資料，並一併刪除同專案ID 之任務（{masterDeleteRelatedCounts.tasks}{" "}
-                筆）、分潤表列（{masterDeleteRelatedCounts.payouts} 筆）、財務表中該專案列。此操作無法復原。
+                專案將自大總表列表隱藏（封存）。約一個月內可由「異動紀錄」還原；逾期系統會永久清除主檔（任務／分潤／財務一併清除，異動紀錄仍留）。目前關聯：任務{" "}
+                {masterDeleteRelatedCounts.tasks} 筆、分潤 {masterDeleteRelatedCounts.payouts} 筆。
               </p>
               <p className="mt-2 text-xs font-medium text-stone-500">專案ID：{selectedMaster.專案ID}</p>
               <div className="mt-6 flex justify-end gap-3">

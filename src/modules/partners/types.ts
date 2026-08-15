@@ -39,4 +39,8 @@ export interface PartnerRow {
   最後更新者?: string;
   /** 最近一次儲存時間（ISO） */
   最後更新時間?: string;
+  /** 軟刪時間；有值＝已封存 */
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  delete_reason?: string | null;
 }

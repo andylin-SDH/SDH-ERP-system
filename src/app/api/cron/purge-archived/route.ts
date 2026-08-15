@@ -1,10 +1,10 @@
 /**
- * 排程：長期案任務模板自動建立任務（每日）
+ * 排程：封存滿 ARCHIVE_RETENTION_DAYS（預設 30）天後永久清除主檔
  * 驗證：Authorization: Bearer CRON_SECRET 或 ?secret=
+ * 每日會隨「長期案任務模板」cron 一併執行；此路徑可供手動測試。
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { runMasterTaskTemplatesForToday } from "@/lib/master-task-template-run";
 import { purgeExpiredArchives } from "@/lib/db/purge-archived";
 
 export const dynamic = "force-dynamic";
@@ -23,17 +23,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const result = await runMasterTaskTemplatesForToday();
-    let purge: Awaited<ReturnType<typeof purgeExpiredArchives>> | { error: string } | null = null;
-    try {
-      purge = await purgeExpiredArchives();
-    } catch (pe) {
-      console.error("purgeExpiredArchives after master-task-templates", pe);
-      purge = { error: pe instanceof Error ? pe.message : String(pe) };
-    }
-    return NextResponse.json({ ok: true, ...result, purge });
+    const result = await purgeExpiredArchives();
+    return NextResponse.json({ ok: true, ...result });
   } catch (e) {
-    console.error("GET /api/cron/master-task-templates", e);
+    console.error("GET /api/cron/purge-archived", e);
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
 }

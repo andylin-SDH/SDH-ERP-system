@@ -12,6 +12,8 @@ export const MASTER_EDIT_ACTION = {
   CREATE: "新增",
   UPDATE: "編輯",
   DELETE: "刪除",
+  RESTORE: "還原",
+  PURGE: "永久清除",
 } as const;
 
 export type MasterEditAction = (typeof MASTER_EDIT_ACTION)[keyof typeof MASTER_EDIT_ACTION];
@@ -147,8 +149,24 @@ export async function listMasterEditLogs(專案ID: string, limit = 80): Promise<
   }
 }
 
-export async function deleteMasterEditLogs(專案ID: string): Promise<void> {
-  const pid = String(專案ID ?? "").trim();
-  if (!pid) return;
-  await getSupabase().from("master_edit_log").delete().eq("專案ID", pid);
+/** @deprecated 稽核紀錄禁止隨主檔清除；保留函式僅避免舊呼叫編譯失敗，改為 no-op */
+export async function deleteMasterEditLogs(_專案ID: string): Promise<void> {
+  void _專案ID;
+  log("master_edit_log", "拒絕刪除編輯紀錄（資料保護）");
+}
+
+/** 近期全域紀錄（董事長稽核中心） */
+export async function listRecentMasterEditLogs(limit = 200): Promise<MasterEditLogRow[]> {
+  const supabase = getSupabase();
+  try {
+    const { data, error } = await supabase
+      .from("master_edit_log")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(Math.min(Math.max(limit, 1), 500));
+    if (error || !data) return [];
+    return (data as Record<string, unknown>[]).map(rowToEditLog);
+  } catch {
+    return [];
+  }
 }

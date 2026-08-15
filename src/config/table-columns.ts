@@ -23,6 +23,7 @@ export const TABLE_LABELS: Record<string, string> = {
   paymentRecords: "付款記錄（欄位）",
   // 僅用於管理者 Dashboard 的設定分頁，不對應實際資料 Table
   visibility: "可見性與權限",
+  audit: "異動紀錄",
 };
 
 /** 各 Table 的欄位 key → 顯示名稱 */

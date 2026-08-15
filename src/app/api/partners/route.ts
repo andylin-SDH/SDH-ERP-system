@@ -5,7 +5,7 @@ import {
   updatePartnerWithEditLog,
   findPartnerDuplicate,
   formatPartnerDuplicateError,
-  deletePartner,
+  softDeletePartner,
   getPartnerById,
   type NewPartnerInput,
   type UpdatePartnerInput,
@@ -13,7 +13,6 @@ import {
 import { requireAdmin, requireEmployee, ADMIN_ROLES } from "@/lib/auth/api";
 import { isPartnerAgentBlockedKey } from "@/lib/db/partner-approval";
 import { partnerEditorLabel } from "@/lib/partners/editor-label";
-import { deletePartnerAvatarObject } from "@/lib/partners/avatar-storage";
 import { normalizePartnerBoolean } from "@/lib/partners/boolean";
 
 function isAdminRole(role: string): boolean {
@@ -164,16 +163,21 @@ export async function DELETE(request: NextRequest) {
     if (!PartnerID) {
       return NextResponse.json({ ok: false, error: "PartnerID 為必填" }, { status: 400 });
     }
-    const ok = await deletePartner(PartnerID);
-    if (!ok) {
-      return NextResponse.json({ ok: false, error: "刪除失敗或找不到該合作夥伴" }, { status: 404 });
+    const editor = partnerEditorLabel(auth.user);
+    const result = await softDeletePartner(PartnerID, editor);
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error ?? "刪除失敗或找不到該合作夥伴" },
+        { status: 404 }
+      );
     }
-    try {
-      await deletePartnerAvatarObject(PartnerID);
-    } catch {
-      /* 無形象照時忽略 */
-    }
-    return NextResponse.json({ ok: true, PartnerID });
+    /** 軟刪保留形象照，方便還原 */
+    return NextResponse.json({
+      ok: true,
+      PartnerID,
+      softDeleted: true,
+      alreadyDeleted: Boolean(result.alreadyDeleted),
+    });
   } catch (error) {
     console.error("DELETE /api/partners error:", error);
     return NextResponse.json(
