@@ -13,6 +13,8 @@ type InvoiceTarget = {
   recipients: string[];
 };
 
+const MAX_BANK_SHORTFALL = 30;
+
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -121,10 +123,17 @@ export function findReconciliationCandidates(
 
   const candidates: ReconciliationCandidate[] = [];
   for (const target of buildInvoiceTargets(invoices)) {
-    if (Math.abs(target.amount - transaction.amount) >= 0.01) continue;
+    const bankShortfall = roundMoney(target.amount - transaction.amount);
+    if (bankShortfall < 0 || bankShortfall > MAX_BANK_SHORTFALL) continue;
 
     let score = 50;
-    const reasons = ["銀行入帳金額與未入帳發票一致"];
+    const reasons = [
+      bankShortfall === 0
+        ? "銀行入帳金額與未入帳發票一致"
+        : `銀行入帳較未入帳發票少 ${bankShortfall.toLocaleString("zh-TW", {
+            maximumFractionDigits: 2,
+          })} 元（容許差額）`,
+    ];
     let bestSubmission: MatchingSubmission | null = null;
     let bestExtra = { score: 0, reasons: [] as string[] };
     for (const submission of submissionsByProject.get(target.projectId) ?? []) {
