@@ -1157,6 +1157,43 @@ const MASTER_LIST_HIDDEN_KEYS = new Set([
 /** 大總表列表合成欄：專案內容 + 備註同一格 */
 const MASTER_LIST_CONTENT_NOTES_KEY = "內容與備註";
 
+/**
+ * 大總表可讀性：僅列斑馬紋（不加欄位交錯底色，避免直條「五花八門」）。
+ * sticky 欄必須與列同色（不可寫死 bg-white），否則橫向捲動時斑馬紋會被蓋掉。
+ * hover 用琥珀色，不用灰，避免像「選中變灰」。
+ */
+function masterListRowSurface(rowIndex: number, lifecycleClosed: boolean) {
+  const odd = rowIndex % 2 === 1;
+  if (lifecycleClosed) {
+    return odd
+      ? {
+          row: "group",
+          base: "bg-stone-50",
+          sticky: "bg-[#f7f6f4]",
+          hover: "group-hover:bg-amber-50",
+        }
+      : {
+          row: "group",
+          base: "bg-white",
+          sticky: "bg-white",
+          hover: "group-hover:bg-amber-50/80",
+        };
+  }
+  return odd
+    ? {
+        row: "group",
+        base: "bg-amber-50/50",
+        sticky: "bg-[#faf7f2]",
+        hover: "group-hover:bg-amber-100/70",
+      }
+    : {
+        row: "group",
+        base: "bg-white",
+        sticky: "bg-white",
+        hover: "group-hover:bg-amber-50",
+      };
+}
+
 function fieldMatchesUser(val: string | null | undefined, userName: string, userEmail: string): boolean {
   const v = String(val ?? "").trim();
   if (!v) return false;
@@ -1625,6 +1662,9 @@ export default function DashboardPage() {
   } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  /** 帳號視角側欄：員工／老師分頁與搜尋 */
+  const [userPerspectiveKind, setUserPerspectiveKind] = useState<"staff" | "kol">("staff");
+  const [userPerspectiveSearch, setUserPerspectiveSearch] = useState("");
   /** Dashboard 分頁目前排序（拖曳用），null 代表沿用預設順序 */
   const [tabOrder, setTabOrder] = useState<string[] | null>(null);
   const [draggingTab, setDraggingTab] = useState<string | null>(null);
@@ -2551,7 +2591,7 @@ export default function DashboardPage() {
     return [...new Set(merged)];
   }, [visibilitySubject, effectiveVisibility, systemConfig]);
 
-  /** Dashboard 分頁列表：一般使用者只有資料區塊；董事長/管理者多「可見性與權限」；董事長另有「異動紀錄」 */
+  /** Dashboard 分頁列表：一般使用者只有資料區塊；董事長/管理者多「可見性與權限」「帳號視角」；董事長另有「異動紀錄」 */
   const isChairman = visibilitySubject?.role === "董事長";
   const realIsChairman = me?.role === "董事長";
   const showAuditTab = realIsChairman && !isPreviewMode;
@@ -2559,12 +2599,16 @@ export default function DashboardPage() {
     if (!me) return [];
     if (!visibleSections.length) {
       const adminOnly: string[] = [];
-      if (canEditVisibility) adminOnly.push("visibility");
+      if (canEditVisibility) {
+        adminOnly.push("visibility", "user_perspectives");
+      }
       if (showAuditTab) adminOnly.push("audit");
       return adminOnly;
     }
     const prefix: string[] = [];
-    if (canEditVisibility) prefix.push("visibility");
+    if (canEditVisibility) {
+      prefix.push("visibility", "user_perspectives");
+    }
     if (showAuditTab) prefix.push("audit");
     const base = prefix.length ? ([...prefix, ...visibleSections] as string[]) : visibleSections;
     if (!tabOrder || tabOrder.length === 0) return base;
@@ -2574,12 +2618,19 @@ export default function DashboardPage() {
     const rest = base.filter((k) => !ordered.includes(k));
     let merged = [...ordered, ...rest];
     merged = merged.filter((k) => k !== "invoices");
-    /** 總覽固定緊接在「可見性與權限」之後（管理者），或置於資料分頁最前，方便回到總覽 */
+    /** 總覽固定緊接在管理分頁之後（或置於資料分頁最前） */
     if (merged.includes("overview")) {
       const without = merged.filter((k) => k !== "overview");
-      const visIdx = without.indexOf("visibility");
-      if (visIdx !== -1) {
-        return [...without.slice(0, visIdx + 1), "overview", ...without.slice(visIdx + 1)];
+      const insertAfter = without.includes("user_perspectives")
+        ? "user_perspectives"
+        : without.includes("visibility")
+          ? "visibility"
+          : without.includes("audit")
+            ? "audit"
+            : null;
+      if (insertAfter) {
+        const idx = without.indexOf(insertAfter);
+        return [...without.slice(0, idx + 1), "overview", ...without.slice(idx + 1)];
       }
       return ["overview", ...without];
     }
@@ -2595,8 +2646,9 @@ export default function DashboardPage() {
       return;
     }
     setActiveSection((prev) => {
-      // 管理者專屬的「可見性與權限」／董事長「異動紀錄」不在 visibleSections 中，需額外允許
+      // 管理者專屬分頁不在 visibleSections 中，需額外允許
       if (canEditVisibility && prev === "visibility") return "visibility";
+      if (canEditVisibility && prev === "user_perspectives") return "user_perspectives";
       if (showAuditTab && prev === "audit") return "audit";
       if (prev === "invoices") return "finance";
       return prev && visibleSections.includes(prev)
@@ -5259,6 +5311,20 @@ export default function DashboardPage() {
     window.open(`/dashboard?previewUser=${encodeURIComponent(user.email)}`, "_blank", "noopener,noreferrer");
   }, []);
 
+  /** 帳號視角：依員工／老師分頁 + 關鍵字篩選 */
+  const perspectiveUsers = useMemo(() => {
+    const isKol = (u: User) => String(u.role ?? "").trim() === "KOL";
+    const pool = users.filter((u) => (userPerspectiveKind === "kol" ? isKol(u) : !isKol(u)));
+    const q = userPerspectiveSearch.trim().toLowerCase();
+    if (!q) return pool;
+    return pool.filter((u) => {
+      const hay = [u.email, u.name, u.role, u.dept, u.scope]
+        .map((v) => String(v ?? "").toLowerCase())
+        .join(" ");
+      return hay.includes(q);
+    });
+  }, [users, userPerspectiveKind, userPerspectiveSearch]);
+
   /** URL ?previewUser= → 載入目標可見性（僅董事長／管理者） */
   useEffect(() => {
     if (!me || !canManageVisibility) return;
@@ -5797,7 +5863,7 @@ export default function DashboardPage() {
             {canEditVisibility && activeSection === "visibility" && (
               <section className="rounded-2xl border-2 border-amber-200 bg-white/90 p-6 shadow-xl ring-1 ring-amber-500/20">
                 <h2 className="mb-2 text-xl font-bold tracking-tight text-amber-800">可見性與權限管理</h2>
-                <p className="mb-4 text-sm text-stone-500">依序設定：角色管理 → ① 角色可見區塊 → ② 資料可見規則 → ③ 使用者可見範圍（含總覽頂部指標，與其他分頁欄位同一套）</p>
+                <p className="mb-4 text-sm text-stone-500">依序設定：角色管理 → ① 角色可見區塊 → ② 資料可見規則。③ 各帳號可見範圍與視角預覽請至側欄「帳號視角」。</p>
                 <p className="mb-4 text-sm text-stone-600">
                   <strong className="text-amber-800">系統設定</strong>（分潤預設、專案類型、
                   <strong className="text-amber-800">專案狀態</strong>
@@ -5806,6 +5872,15 @@ export default function DashboardPage() {
                     系統設定
                   </a>
                   」區塊，儲存後寫入 <code className="rounded bg-stone-100 px-1 text-xs">system_config</code>。
+                </p>
+                <p className="mb-4">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection("user_perspectives")}
+                    className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-900 transition hover:bg-amber-100"
+                  >
+                    前往「帳號視角」管理使用者／老師 →
+                  </button>
                 </p>
 
                 {/* 如何連結：可收合說明 */}
@@ -5820,7 +5895,7 @@ export default function DashboardPage() {
                       <p><strong className="text-stone-600">① 角色可見區塊</strong> → 存於 <code className="rounded bg-stone-100 px-1">system_config</code> 的 <code className="rounded bg-stone-100 px-1">role_visibility</code>。每個角色可勾選資料區塊（不含總覽；總覽分頁與頂部指標在 ③ 依帳號設定）。</p>
                       <p><strong className="text-stone-600">總覽頂部指標</strong> → 在 ③ 勾選「總覽」Table 後，於子欄位勾選（與大總表等相同），存於 <code className="rounded bg-stone-100 px-1">user_visibility.columns.overview</code>；舊資料可能仍在 <code className="rounded bg-stone-100 px-1">overview_kpis</code>。系統並以 <code className="rounded bg-stone-100 px-1">overview_kpi_by_role</code> 作為未細選時的預設。</p>
                       <p><strong className="text-stone-600">② 資料可見規則</strong> → 存於 <code className="rounded bg-stone-100 px-1">visibility_rules</code> 表。勾選的欄位若符合登入者姓名/Email，該列才會顯示（列級過濾）。</p>
-                      <p><strong className="text-stone-600">③ 使用者可見範圍</strong> → 存於 <code className="rounded bg-stone-100 px-1">user_visibility</code> 表（依 user_email）。若某使用者有設定，會覆蓋 ①，且可細到「每個 Table 顯示哪些欄位」。</p>
+                      <p><strong className="text-stone-600">③ 使用者可見範圍</strong> → 側欄「帳號視角」點選帳號設定；存於 <code className="rounded bg-stone-100 px-1">user_visibility</code> 表（依 user_email）。若某使用者有設定，會覆蓋 ①，且可細到「每個 Table 顯示哪些欄位」。</p>
                       <p>
                         <strong className="text-stone-600">下方「系統設定」</strong> → 存於 <code className="rounded bg-stone-100 px-1">system_config</code>：
                         <code className="ml-1 rounded bg-stone-100 px-1">project_types</code>（專案類型）、
@@ -6074,35 +6149,133 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  {/* 第3層：使用者可見範圍 */}
-                  <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
-                    <div className="mb-3 flex items-center justify-between">
-                      <h3 className="font-semibold text-amber-800">③ 使用者可見範圍</h3>
-                      <button
-                        type="button"
-                        onClick={() => { setCreateUserForm({ email: "", name: "", password: "", role: displayRoles.includes("經紀人") ? "經紀人" : (displayRoles[0] ?? "經紀人"), dept: "", scope: "" }); setCreateUserError(null); setShowCreateUser(true); }}
-                        className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60"
-                      >
-                        新增使用者
-                      </button>
-                    </div>
-                    <p className="mb-4 text-xs text-stone-500">
-                      點選使用者可編輯基本資料、重設登入密碼，或設定各 Table 可見欄位；「總覽」下可勾選頂部指標。
+                  {/* 第3層：已移至側欄「帳號視角」 */}
+                  <div className="rounded-xl border border-dashed border-amber-200 bg-amber-50/40 p-4">
+                    <h3 className="mb-1 font-semibold text-amber-800">③ 使用者可見範圍</h3>
+                    <p className="mb-3 text-xs text-stone-500">
+                      已獨立至側欄「帳號視角」：可依「使用者視角／老師視角」分類瀏覽、搜尋帳號，並編輯可見欄位或開啟預覽。
                     </p>
-                    <div className="overflow-hidden rounded-lg border border-stone-200/90">
-                      <table className="min-w-full divide-y divide-stone-200">
-                        <thead className="bg-stone-100">
-                          <tr>
-                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800">Email</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">姓名</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">角色</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">部門</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">視角</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-stone-200 bg-amber-50/40">
-                          {users.map((user) => (
-                            <tr key={user.email} className="cursor-pointer transition hover:bg-amber-50/80" onClick={() => setSelectedUserForVisibility(user)}>
+                    <button
+                      type="button"
+                      onClick={() => setActiveSection("user_perspectives")}
+                      className="rounded-lg bg-amber-100/90 px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-200/60"
+                    >
+                      開啟帳號視角
+                    </button>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* 帳號視角：使用者／老師分頁 + 搜尋 */}
+            {canEditVisibility && activeSection === "user_perspectives" && (
+              <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-bold tracking-tight text-stone-900">帳號視角</h2>
+                    <p className="mt-1 text-sm text-stone-500">
+                      點選列可編輯基本資料、重設密碼或設定各 Table 可見欄位；右側按鈕可開啟對應視角預覽。
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreateUserForm({
+                        email: "",
+                        name: "",
+                        password: "",
+                        role:
+                          userPerspectiveKind === "kol"
+                            ? "KOL"
+                            : displayRoles.includes("經紀人")
+                              ? "經紀人"
+                              : (displayRoles[0] ?? "經紀人"),
+                        dept: "",
+                        scope: "",
+                      });
+                      setCreateUserError(null);
+                      setShowCreateUser(true);
+                    }}
+                    className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 shadow-sm transition hover:bg-amber-400"
+                  >
+                    新增使用者
+                  </button>
+                </div>
+
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex rounded-xl border border-stone-200 bg-stone-50 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setUserPerspectiveKind("staff")}
+                      className={`rounded-lg px-3.5 py-2 text-xs font-bold transition ${
+                        userPerspectiveKind === "staff"
+                          ? "bg-amber-500 text-slate-900 shadow-sm"
+                          : "text-stone-600 hover:bg-white hover:text-stone-900"
+                      }`}
+                    >
+                      使用者視角
+                      <span className="ml-1.5 tabular-nums opacity-70">
+                        ({users.filter((u) => String(u.role ?? "").trim() !== "KOL").length})
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUserPerspectiveKind("kol")}
+                      className={`rounded-lg px-3.5 py-2 text-xs font-bold transition ${
+                        userPerspectiveKind === "kol"
+                          ? "bg-amber-500 text-slate-900 shadow-sm"
+                          : "text-stone-600 hover:bg-white hover:text-stone-900"
+                      }`}
+                    >
+                      老師視角
+                      <span className="ml-1.5 tabular-nums opacity-70">
+                        ({users.filter((u) => String(u.role ?? "").trim() === "KOL").length})
+                      </span>
+                    </button>
+                  </div>
+                  <div className="relative w-full sm:w-72">
+                    <input
+                      type="search"
+                      value={userPerspectiveSearch}
+                      onChange={(e) => setUserPerspectiveSearch(e.target.value)}
+                      placeholder="搜尋姓名、Email、角色、部門…"
+                      className="w-full rounded-full border border-stone-200 bg-stone-50 px-3.5 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="overflow-hidden rounded-xl border border-stone-200/90">
+                  <table className="min-w-full divide-y divide-stone-200">
+                    <thead className="bg-stone-100">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800">Email</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">姓名</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">角色</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">部門</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">視角</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-200 bg-white">
+                      {perspectiveUsers.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-10 text-center text-sm text-stone-500">
+                            {userPerspectiveSearch.trim()
+                              ? "沒有符合搜尋的帳號"
+                              : userPerspectiveKind === "kol"
+                                ? "目前沒有老師（KOL）帳號"
+                                : "目前沒有一般使用者帳號"}
+                          </td>
+                        </tr>
+                      ) : (
+                        perspectiveUsers.map((user, rowIndex) => {
+                          const isKol = String(user.role ?? "").trim() === "KOL";
+                          const rowBg = rowIndex % 2 === 1 ? "bg-amber-50/40" : "bg-white";
+                          return (
+                            <tr
+                              key={user.email}
+                              className={`cursor-pointer transition ${rowBg} hover:bg-amber-50`}
+                              onClick={() => setSelectedUserForVisibility(user)}
+                            >
                               <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-stone-900">{user.email}</td>
                               <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-stone-900">{user.name}</td>
                               <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-600">{user.role}</td>
@@ -6116,15 +6289,15 @@ export default function DashboardPage() {
                                   }}
                                   className="rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-bold text-amber-900 transition hover:bg-amber-100"
                                 >
-                                  {String(user.role ?? "").trim() === "KOL" ? "老師視角" : "使用者視角"}
+                                  {isKol ? "老師視角" : "使用者視角"}
                                 </button>
                               </td>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </section>
             )}
@@ -6503,13 +6676,7 @@ export default function DashboardPage() {
                     ))}
                   </tr>
                 </thead>
-                <tbody
-                  className={
-                    masterLifecycleTab === "closed"
-                      ? "divide-y divide-stone-200 bg-stone-50/50"
-                      : "divide-y divide-stone-200 bg-amber-50/40"
-                  }
-                >
+                <tbody className="divide-y divide-stone-200/90 bg-white">
                   {filteredMasterList.length === 0 ? (
                     <tr>
                       <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
@@ -6543,9 +6710,11 @@ export default function DashboardPage() {
                       </td>
                     </tr>
                   ) : (
-                    visibleMasterRows.map((row) => {
+                    visibleMasterRows.map((row, rowIndex) => {
                       const pid = row.專案ID ?? "";
                       const isExpanded = expandedProjectId === pid;
+                      const lifecycleClosed = masterLifecycleTab === "closed";
+                      const rowSurface = masterListRowSurface(rowIndex, lifecycleClosed);
                       // 大總表展開列：該專案任務全顯（不套用任務②可見規則）；側邊「任務」分頁仍為 filteredTasks
                       const projectTasks = sortTaskRows(
                         tasks.filter((t) => (t.專案ID ?? "").trim().toLowerCase() === pid.trim().toLowerCase()),
@@ -6558,9 +6727,7 @@ export default function DashboardPage() {
                         <Fragment key={row.id ?? pid}>
                           <tr
                             key={row.id ?? pid}
-                            className={`cursor-pointer transition ${
-                              masterLifecycleTab === "closed" ? "hover:bg-stone-100/85" : "hover:bg-amber-50/80"
-                            }`}
+                            className={`cursor-pointer transition ${rowSurface.row} ${rowSurface.base}`}
                             onClick={() => {
                               setSelectedMaster(row);
                               setIsEditingMaster(false);
@@ -6575,9 +6742,15 @@ export default function DashboardPage() {
                               const wrongModeRoleCol =
                                 (modeBRow && MASTER_PAYOUT_MODE_A_COL_KEYS.has(k)) ||
                                 (!modeBRow && MASTER_PAYOUT_MODE_B_COL_KEYS.has(k));
+                              const cellBg = `${rowSurface.base} ${rowSurface.hover}`;
+                              const stickyBg = `${rowSurface.sticky} ${rowSurface.hover}`;
                               if (k === "專案ID") {
                                 return (
-                                  <td key={k} className="sticky left-0 z-20 w-[4.5rem] bg-white/90 px-2 py-3" title={pid}>
+                                  <td
+                                    key={k}
+                                    className={`sticky left-0 z-20 w-[4.5rem] px-2 py-3 ${stickyBg}`}
+                                    title={pid}
+                                  >
                                     <button
                                       type="button"
                                       onClick={(e) => {
@@ -6606,7 +6779,7 @@ export default function DashboardPage() {
                                 return (
                                   <td
                                     key={k}
-                                    className="sticky left-[4.5rem] z-20 w-[13rem] bg-white/90 px-3 py-3"
+                                    className={`sticky left-[4.5rem] z-20 w-[13rem] px-3 py-3 ${stickyBg}`}
                                     title={kolName ? `${projectName} · ${kolName}` : projectName}
                                   >
                                     <div className="flex min-w-0 items-start gap-1.5">
@@ -6642,7 +6815,7 @@ export default function DashboardPage() {
                                 const short = financeProgressShortLabel(fr);
                                 const detail = financeProgressDetail(fr);
                                 return (
-                                  <td key={k} className="whitespace-nowrap bg-white/90 px-4 py-3.5" title={detail}>
+                                  <td key={k} className={`whitespace-nowrap px-4 py-3.5 ${cellBg}`} title={detail}>
                                     <span
                                       className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${financeProgressBadgeClass(short)}`}
                                     >
@@ -6663,7 +6836,7 @@ export default function DashboardPage() {
                                         ? "bg-orange-100 text-orange-800"
                                         : "bg-stone-100 text-stone-500";
                                 return (
-                                  <td key={k} className="whitespace-nowrap bg-white/90 px-4 py-2.5 text-xs text-stone-600">
+                                  <td key={k} className={`whitespace-nowrap px-4 py-2.5 text-xs text-stone-600 ${cellBg}`}>
                                     <button
                                       type="button"
                                       onClick={(e) => {
@@ -6699,10 +6872,10 @@ export default function DashboardPage() {
                                 return (
                                   <td
                                     key={k}
-                                    className="px-3 py-2.5 align-top"
+                                    className={`px-3 py-2.5 align-top ${cellBg}`}
                                     title={titleBits || undefined}
                                   >
-                                    <div className="rounded-lg border border-stone-200/70 bg-gradient-to-br from-white to-stone-50/80 px-3 py-2 ring-1 ring-stone-100/70">
+                                    <div className="rounded-lg border border-stone-200/70 bg-white/70 px-3 py-2">
                                       {content ? (
                                         <p className="line-clamp-3 text-sm leading-relaxed text-stone-800">
                                           {content}
@@ -6731,7 +6904,7 @@ export default function DashboardPage() {
                                 return (
                                   <td
                                     key={k}
-                                    className="whitespace-nowrap px-4 py-2.5 text-sm font-medium text-stone-600"
+                                    className={`whitespace-nowrap px-4 py-2.5 text-sm font-medium text-stone-600 ${cellBg}`}
                                     onClick={(e) => e.stopPropagation()}
                                   >
                                     <select
@@ -6758,7 +6931,7 @@ export default function DashboardPage() {
                               return (
                                 <td
                                   key={k}
-                                  className={`whitespace-nowrap px-4 py-3.5 text-sm font-medium ${wrongModeRoleCol ? "text-stone-400" : "text-stone-600"} ${isAmount ? "tabular-nums" : ""}`}
+                                  className={`whitespace-nowrap px-4 py-3.5 text-sm font-medium ${wrongModeRoleCol ? "text-stone-400" : "text-stone-600"} ${isAmount ? "tabular-nums" : ""} ${cellBg}`}
                                 >
                                   {isAmount ? formatAmount(cellText) : displayStr}
                                 </td>
