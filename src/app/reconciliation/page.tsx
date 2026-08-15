@@ -379,6 +379,11 @@ export default function ReconciliationPage() {
                         <div className="mt-3">
                           <p className="text-sm font-bold text-stone-800">完整判斷明細</p>
                           <p className="mt-0.5 text-xs text-stone-500">逐項列出銀行與 ERP 實際資料，以及本項加分。</p>
+                          {match.evidence.some((evidence) => evidence.key.startsWith("legacy-")) ? (
+                            <p className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-bold leading-5 text-sky-900">
+                              這是舊版候選資料；請按頁面上方「重新比對」，系統才會產生完整的金額、末五碼、日期與名稱判斷。
+                            </p>
+                          ) : null}
                           <ul className="mt-2 space-y-2">
                             {match.evidence.map((evidence) => {
                               const display = evidenceDisplay(evidence.status);
@@ -396,7 +401,7 @@ export default function ReconciliationPage() {
                                     <span className="mt-0.5 block break-words text-xs leading-5 text-stone-600">{evidence.detail}</span>
                                   </span>
                                   <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-black tabular-nums ${evidence.score > 0 ? "bg-emerald-50 text-emerald-800" : "bg-stone-100 text-stone-500"}`}>
-                                    +{evidence.score} 分
+                                    {evidence.key.startsWith("legacy-") ? "舊資料" : `+${evidence.score} 分`}
                                   </span>
                                 </li>
                               );
