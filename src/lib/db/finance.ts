@@ -346,16 +346,95 @@ async function syncFinanceVendorDatesForInvoiceProjectIds(projectIds: Iterable<s
   }
 }
 
-/** 發票清冊：固定依「發票號碼」排序（不依建立／更新時間），空白號碼排最後 */
+/** 僅供排序／分組用，不回寫資料庫 */
+export function normalizeInvoiceDateForSort(raw: string | null | undefined): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const loose = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (loose) {
+    return `${loose[1]}-${loose[2].padStart(2, "0")}-${loose[3].padStart(2, "0")}`;
+  }
+  const slash = /^(\d{4})[/.](\d{1,2})[/.](\d{1,2})/.exec(s);
+  if (slash) {
+    return `${slash[1]}-${slash[2].padStart(2, "0")}-${slash[3].padStart(2, "0")}`;
+  }
+  const t = Date.parse(s);
+  if (!Number.isNaN(t)) {
+    const d = new Date(t);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  return "";
+}
+
+/** 財政部電子發票字軌：兩碼英文 + 八碼數字（其餘如 SDH002 視為不在流水內） */
+function isClassicEInvoiceNo(raw: string): boolean {
+  return /^[A-Za-z]{2}\d{8}$/.test(String(raw).trim().replace(/\s+/g, ""));
+}
+
+function compareClassicInvoiceSerial(aNo: string, bNo: string, direction: "asc" | "desc"): number {
+  const a = aNo.trim().replace(/\s+/g, "").toUpperCase();
+  const b = bNo.trim().replace(/\s+/g, "").toUpperCase();
+  const serial = a.slice(2).localeCompare(b.slice(2), "en", { numeric: true });
+  const prefix = serial !== 0 ? serial : a.slice(0, 2).localeCompare(b.slice(0, 2));
+  return direction === "desc" ? -prefix : prefix;
+}
+
+function compareInvoiceNumber(a: InvoiceRow, b: InvoiceRow, direction: "asc" | "desc"): number {
+  const na = String(a.發票號碼 ?? "").trim();
+  const nb = String(b.發票號碼 ?? "").trim();
+  if (!na && !nb) return 0;
+  if (!na) return 1;
+  if (!nb) return -1;
+  const ca = isClassicEInvoiceNo(na);
+  const cb = isClassicEInvoiceNo(nb);
+  if (ca && cb) return compareClassicInvoiceSerial(na, nb, direction);
+  if (!ca && !cb) {
+    const cmp = na.localeCompare(nb, "zh-Hant", { numeric: true, sensitivity: "base" });
+    return direction === "desc" ? -cmp : cmp;
+  }
+  return ca ? -1 : 1;
+}
+
+/**
+ * 清冊排序：標準字軌依發票日期，同日流水號方向與日期一致（新→舊則號碼大→小）。
+ * 非字軌號碼整批放最後。
+ */
+export function compareInvoiceRowsByDateThenNumber(
+  a: InvoiceRow,
+  b: InvoiceRow,
+  direction: "asc" | "desc"
+): number {
+  const aClassic = isClassicEInvoiceNo(String(a.發票號碼 ?? ""));
+  const bClassic = isClassicEInvoiceNo(String(b.發票號碼 ?? ""));
+  if (aClassic !== bClassic) return aClassic ? -1 : 1;
+
+  const da = normalizeInvoiceDateForSort(a.發票日期);
+  const db = normalizeInvoiceDateForSort(b.發票日期);
+  const aEmpty = !da;
+  const bEmpty = !db;
+  if (aEmpty && bEmpty) return compareInvoiceNumber(a, b, direction);
+  if (aEmpty) return 1;
+  if (bEmpty) return -1;
+  const cmp = da.localeCompare(db);
+  if (cmp !== 0) return direction === "desc" ? -cmp : cmp;
+  return compareInvoiceNumber(a, b, direction);
+}
+
+export function sortInvoicesForLedger(
+  rows: InvoiceRow[],
+  direction: "asc" | "desc" = "desc"
+): InvoiceRow[] {
+  return [...rows].sort((a, b) => compareInvoiceRowsByDateThenNumber(a, b, direction));
+}
+
+/** @deprecated 名稱沿用；實際為日期→同日號碼，勿再用字軌當第一鍵 */
 export function sortInvoicesByInvoiceNumber(rows: InvoiceRow[]): InvoiceRow[] {
-  return [...rows].sort((a, b) => {
-    const na = String(a.發票號碼 ?? "").trim();
-    const nb = String(b.發票號碼 ?? "").trim();
-    if (!na && !nb) return 0;
-    if (!na) return 1;
-    if (!nb) return -1;
-    return na.localeCompare(nb, "zh-Hant", { numeric: true, sensitivity: "base" });
-  });
+  return sortInvoicesForLedger(rows, "desc");
 }
 
 export async function getInvoices(): Promise<InvoiceRow[]> {
@@ -366,7 +445,7 @@ export async function getInvoices(): Promise<InvoiceRow[]> {
     throw error;
   }
   const rows = (data ?? []).map((r: Record<string, unknown>) => mapInvoiceRecord(r));
-  return sortInvoicesByInvoiceNumber(rows);
+  return sortInvoicesForLedger(rows, "desc");
 }
 
 function trimOrNull(v: string | null | undefined): string | null {

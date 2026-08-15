@@ -17,7 +17,7 @@ import { MasterEditHistory, type MasterEditLogItem } from "@/components/MasterEd
 import type { PaymentSubmissionWithProject } from "@/lib/db/payment-collection";
 import { formatTaipeiDateTime } from "@/lib/taiwan-date";
 import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, PaymentRecordRow } from "@/modules/finance";
-import { sortInvoicesByInvoiceNumber } from "@/modules/finance";
+import { sortInvoicesByInvoiceNumber, sortInvoicesForLedger } from "@/modules/finance";
 import type { FinanceUpdateFields } from "@/lib/db/finance";
 import type { PayoutRow } from "@/lib/db/payout";
 import {
@@ -1367,38 +1367,11 @@ function normalizeDateForInput(raw: string | null | undefined): string {
   return "";
 }
 
-/** 發票清冊表頭：發票日期排序模式（預設＝後端／狀態之發票號碼序） */
-type InvoiceListDateSortMode = "default" | "dateAsc" | "dateDesc";
-
-function compareInvoiceRowsByDateThenNumber(a: InvoiceRow, b: InvoiceRow, direction: "asc" | "desc"): number {
-  const da = normalizeDateForInput(String(a.發票日期 ?? ""));
-  const db = normalizeDateForInput(String(b.發票日期 ?? ""));
-  const aEmpty = !da;
-  const bEmpty = !db;
-  if (aEmpty && bEmpty) {
-    const na = String(a.發票號碼 ?? "").trim();
-    const nb = String(b.發票號碼 ?? "").trim();
-    if (!na && !nb) return 0;
-    if (!na) return 1;
-    if (!nb) return -1;
-    return na.localeCompare(nb, "zh-Hant", { numeric: true, sensitivity: "base" });
-  }
-  if (aEmpty) return 1;
-  if (bEmpty) return -1;
-  const cmp = da.localeCompare(db);
-  if (cmp !== 0) return direction === "desc" ? -cmp : cmp;
-  const na = String(a.發票號碼 ?? "").trim();
-  const nb = String(b.發票號碼 ?? "").trim();
-  if (!na && !nb) return 0;
-  if (!na) return 1;
-  if (!nb) return -1;
-  return na.localeCompare(nb, "zh-Hant", { numeric: true, sensitivity: "base" });
-}
+/** 發票清冊：依發票日期排；表頭不點，用獨立下拉 */
+type InvoiceListDateSortMode = "dateAsc" | "dateDesc";
 
 function applyInvoiceListSort(rows: InvoiceRow[], mode: InvoiceListDateSortMode): InvoiceRow[] {
-  if (mode === "default") return [...rows];
-  const direction = mode === "dateDesc" ? "desc" : "asc";
-  return [...rows].sort((a, b) => compareInvoiceRowsByDateThenNumber(a, b, direction));
+  return sortInvoicesForLedger(rows, mode === "dateDesc" ? "desc" : "asc");
 }
 
 function taskAssigneeIsUser(t: TaskRow, userName: string, userEmail: string): boolean {
@@ -1939,8 +1912,8 @@ export default function DashboardPage() {
   const [financePayoutEditError, setFinancePayoutEditError] = useState<string | null>(null);
   const [financeVendorResyncing, setFinanceVendorResyncing] = useState(false);
   const [financeVendorResyncMessage, setFinanceVendorResyncMessage] = useState<string | null>(null);
-  /** 發票清冊：點「發票日期」表頭循環：發票號碼序 → 日期新→舊 → 日期舊→新 */
-  const [invoiceListDateSortMode, setInvoiceListDateSortMode] = useState<InvoiceListDateSortMode>("default");
+  /** 發票清冊排序（獨立下拉，不點表頭） */
+  const [invoiceListDateSortMode, setInvoiceListDateSortMode] = useState<InvoiceListDateSortMode>("dateDesc");
   const [showInvoiceCreateModal, setShowInvoiceCreateModal] = useState(false);
   const [showInvoicePasteImportModal, setShowInvoicePasteImportModal] = useState(false);
   const [invoicePasteText, setInvoicePasteText] = useState("");
@@ -10333,13 +10306,28 @@ export default function DashboardPage() {
                     貼上匯入
                   </button>
                 </div>
-                <input
-                  type="text"
-                  value={invoicesSearch}
-                  onChange={(e) => setInvoicesSearch(e.target.value)}
-                  placeholder="搜尋專案ID、發票號碼…"
-                  className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
-                />
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-stone-400">
+                    排序
+                    <select
+                      value={invoiceListDateSortMode}
+                      onChange={(e) =>
+                        setInvoiceListDateSortMode(e.target.value === "dateAsc" ? "dateAsc" : "dateDesc")
+                      }
+                      className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-semibold normal-case tracking-normal text-stone-800 focus:border-amber-500/60 focus:outline-none"
+                    >
+                      <option value="dateDesc">新 → 舊（號碼大到小）</option>
+                      <option value="dateAsc">舊 → 新（號碼小到大）</option>
+                    </select>
+                  </label>
+                  <input
+                    type="text"
+                    value={invoicesSearch}
+                    onChange={(e) => setInvoicesSearch(e.target.value)}
+                    placeholder="搜尋專案ID、發票號碼…"
+                    className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
+                  />
+                </div>
               </div>
               <div className="mb-3 space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -10481,43 +10469,11 @@ export default function DashboardPage() {
                             aria-label="選取目前顯示發票"
                           />
                         </th>
-                        {invoicesVisibleCols.map((k) => {
-                          const thCls = invoiceListThClass(k);
-                          if (k === "發票日期") {
-                            const sort = invoiceListDateSortMode;
-                            const ariaSort = sort === "dateDesc" ? "descending" : sort === "dateAsc" ? "ascending" : "none";
-                            const hint =
-                              sort === "default" ? "目前：發票號碼序，點擊改為日期新→舊" : sort === "dateDesc" ? "目前：日期新→舊" : "目前：日期舊→新";
-                            const arrow = sort === "dateDesc" ? "↓" : sort === "dateAsc" ? "↑" : "⇅";
-                            return (
-                              <th key={k} className={thCls} aria-sort={ariaSort}>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setInvoiceListDateSortMode((m) =>
-                                      m === "default" ? "dateDesc" : m === "dateDesc" ? "dateAsc" : "default"
-                                    )
-                                  }
-                                  className="group inline-flex max-w-full items-center gap-0.5 rounded-md px-0.5 py-0.5 text-left uppercase tracking-wider transition hover:bg-stone-200/80 hover:text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-400/50"
-                                  title={`${hint}（再點切換；第三下還原發票號碼序）`}
-                                >
-                                  {tableColumnLabels.invoices?.[k] ?? k}
-                                  <span
-                                    className="text-[10px] font-normal normal-case text-amber-800 tabular-nums group-hover:text-amber-900"
-                                    aria-hidden
-                                  >
-                                    {arrow}
-                                  </span>
-                                </button>
-                              </th>
-                            );
-                          }
-                          return (
-                            <th key={k} className={thCls}>
-                              {tableColumnLabels.invoices?.[k] ?? k}
-                            </th>
-                          );
-                        })}
+                        {invoicesVisibleCols.map((k) => (
+                          <th key={k} className={invoiceListThClass(k)}>
+                            {tableColumnLabels.invoices?.[k] ?? k}
+                          </th>
+                        ))}
                         <th className="px-4 py-3.5 text-right text-xs font-bold uppercase tracking-wider text-stone-600">操作</th>
                       </tr>
                     </thead>

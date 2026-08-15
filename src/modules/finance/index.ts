@@ -7,6 +7,7 @@ export type { InvoiceInsertInput, PaymentRecordInput } from "./api";
 export {
   getInvoices,
   sortInvoicesByInvoiceNumber,
+  sortInvoicesForLedger,
   getFinance,
   getPaymentRecords,
   createInvoicesBatch,
