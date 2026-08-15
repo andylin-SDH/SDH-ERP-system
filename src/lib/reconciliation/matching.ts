@@ -3,6 +3,7 @@ import type {
   MatchingInvoice,
   MatchingSubmission,
   ReconciliationCandidate,
+  ReconciliationEvidence,
 } from "@/lib/reconciliation/types";
 
 type InvoiceTarget = {
@@ -17,6 +18,10 @@ const MAX_BANK_SHORTFALL = 30;
 
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function amountText(value: number): string {
+  return `$${value.toLocaleString("zh-TW", { maximumFractionDigits: 2 })}`;
 }
 
 function normalizeText(value: string): string {
@@ -77,22 +82,58 @@ export function buildInvoiceTargets(invoices: MatchingInvoice[]): InvoiceTarget[
 function scoreSubmission(
   transaction: MatchingBankTransaction,
   submission: MatchingSubmission
-): { score: number; reasons: string[] } {
+): { score: number; reasons: string[]; evidence: ReconciliationEvidence[] } {
   let score = 0;
   const reasons: string[] = [];
+  const evidence: ReconciliationEvidence[] = [];
 
-  if (submission.amount != null && Math.abs(submission.amount - transaction.amount) < 0.01) {
-    score += 5;
-    reasons.push("收款申報金額一致");
+  if (submission.amount == null) {
+    evidence.push({
+      key: "submission_amount",
+      label: "銀行金額 vs ERP 申報金額",
+      status: "missing",
+      detail: `銀行 ${amountText(transaction.amount)}；ERP 未填申報金額`,
+      score: 0,
+    });
+  } else {
+    const difference = roundMoney(submission.amount - transaction.amount);
+    const amountMatched = Math.abs(difference) < 0.01;
+    if (amountMatched) {
+      score += 5;
+      reasons.push("收款申報金額一致");
+    }
+    evidence.push({
+      key: "submission_amount",
+      label: "銀行金額 vs ERP 申報金額",
+      status: amountMatched ? "matched" : "mismatch",
+      detail: `銀行 ${amountText(transaction.amount)}；ERP ${amountText(submission.amount)}；差額 ${amountText(Math.abs(difference))}`,
+      score: amountMatched ? 5 : 0,
+    });
   }
-  if (
-    submission.last5 &&
-    transaction.counterpartyLast5 &&
-    submission.last5 === transaction.counterpartyLast5
-  ) {
-    score += 30;
-    reasons.push("匯款帳號末五碼一致");
+
+  if (!transaction.counterpartyLast5 || !submission.last5) {
+    evidence.push({
+      key: "last5",
+      label: "帳號末五碼",
+      status: "missing",
+      detail: `銀行 ${transaction.counterpartyLast5 || "未提供"}；ERP ${submission.last5 || "未填寫"}；無法核對`,
+      score: 0,
+    });
+  } else {
+    const last5Matched = submission.last5 === transaction.counterpartyLast5;
+    if (last5Matched) {
+      score += 30;
+      reasons.push("匯款帳號末五碼一致");
+    }
+    evidence.push({
+      key: "last5",
+      label: "帳號末五碼",
+      status: last5Matched ? "matched" : "mismatch",
+      detail: `銀行 ${transaction.counterpartyLast5}；ERP ${submission.last5}`,
+      score: last5Matched ? 30 : 0,
+    });
   }
+
   const days = dateDistanceDays(transaction.transactionDate, submission.remitDate);
   if (days === 0) {
     score += 15;
@@ -101,11 +142,31 @@ function scoreSubmission(
     score += 10;
     reasons.push(`匯款日期相差 ${days} 天`);
   }
-  if (namesLookRelated(transaction.counterpartyName, submission.remitter)) {
+  evidence.push({
+    key: "remit_date",
+    label: "銀行日期 vs ERP 申報日期",
+    status: days == null ? "missing" : days === 0 ? "matched" : days <= 2 ? "close" : "mismatch",
+    detail:
+      days == null
+        ? `銀行 ${transaction.transactionDate || "未提供"}；ERP ${submission.remitDate || "未填寫"}；無法核對`
+        : `銀行 ${transaction.transactionDate}；ERP ${submission.remitDate}；相差 ${days} 天`,
+    score: days === 0 ? 15 : days != null && days <= 2 ? 10 : 0,
+  });
+
+  const bankRemitter = transaction.counterpartyName || transaction.description;
+  const nameRelated = namesLookRelated(bankRemitter, submission.remitter);
+  if (nameRelated) {
     score += 5;
     reasons.push("匯款人名稱相近");
   }
-  return { score, reasons };
+  evidence.push({
+    key: "remitter",
+    label: "銀行匯款人 vs ERP 申報單位",
+    status: !bankRemitter || !submission.remitter ? "missing" : nameRelated ? "close" : "mismatch",
+    detail: `銀行 ${bankRemitter || "未提供"}；ERP ${submission.remitter || "未填寫"}`,
+    score: nameRelated ? 5 : 0,
+  });
+  return { score, reasons, evidence };
 }
 
 export function findReconciliationCandidates(
@@ -134,9 +195,21 @@ export function findReconciliationCandidates(
             maximumFractionDigits: 2,
           })} 元（容許差額）`,
     ];
-    let bestSubmission: MatchingSubmission | null = null;
-    let bestExtra = { score: 0, reasons: [] as string[] };
-    for (const submission of submissionsByProject.get(target.projectId) ?? []) {
+    const evidence: ReconciliationEvidence[] = [
+      {
+        key: "invoice_amount",
+        label: "銀行金額 vs 未入帳發票合計",
+        status: bankShortfall === 0 ? "matched" : "close",
+        detail: `銀行 ${amountText(transaction.amount)}；發票 ${amountText(target.amount)}；差額 ${amountText(bankShortfall)}`,
+        score: 50,
+      },
+    ];
+    const projectSubmissions = submissionsByProject.get(target.projectId) ?? [];
+    let bestSubmission: MatchingSubmission | null = projectSubmissions[0] ?? null;
+    let bestExtra = bestSubmission
+      ? scoreSubmission(transaction, bestSubmission)
+      : { score: 0, reasons: [] as string[], evidence: [] as ReconciliationEvidence[] };
+    for (const submission of projectSubmissions.slice(1)) {
       const extra = scoreSubmission(transaction, submission);
       if (extra.score > bestExtra.score) {
         bestSubmission = submission;
@@ -145,10 +218,28 @@ export function findReconciliationCandidates(
     }
     score += bestExtra.score;
     reasons.push(...bestExtra.reasons);
+    evidence.push(...bestExtra.evidence);
 
-    if (!bestSubmission && target.recipients.some((name) => namesLookRelated(name, transaction.counterpartyName))) {
-      score += 5;
-      reasons.push("匯款人與發票收款對象名稱相近");
+    if (!bestSubmission) {
+      evidence.push({
+        key: "payment_submission",
+        label: "ERP 收款申報",
+        status: "missing",
+        detail: "此專案沒有收款申報，無法核對申報金額、末五碼、日期與匯款單位",
+        score: 0,
+      });
+      const relatedRecipient = target.recipients.find((name) => namesLookRelated(name, transaction.counterpartyName));
+      if (relatedRecipient) {
+        score += 5;
+        reasons.push("匯款人與發票收款對象名稱相近");
+      }
+      evidence.push({
+        key: "invoice_recipient",
+        label: "銀行匯款人 vs 發票收款對象",
+        status: !transaction.counterpartyName || target.recipients.length === 0 ? "missing" : relatedRecipient ? "close" : "mismatch",
+        detail: `銀行 ${transaction.counterpartyName || "未提供"}；發票 ${target.recipients.join("、") || "未填寫"}`,
+        score: relatedRecipient ? 5 : 0,
+      });
     }
 
     const candidateKey = targetKey(target.projectId, target.invoiceIds);
@@ -161,6 +252,7 @@ export function findReconciliationCandidates(
       candidateAmount: target.amount,
       score: Math.min(score, 100),
       reasons,
+      evidence,
       submissionId: bestSubmission?.id ?? null,
     });
   }

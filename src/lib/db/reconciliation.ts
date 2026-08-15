@@ -9,6 +9,7 @@ import type {
   MatchingBankTransaction,
   MatchingInvoice,
   MatchingSubmission,
+  ReconciliationEvidence,
   ReconciliationDashboardRun,
   ReconciliationDashboardTransaction,
 } from "@/lib/reconciliation/types";
@@ -49,6 +50,33 @@ function moneyOrNull(value: unknown): number | null {
 function last5(value: unknown): string | null {
   const digits = String(value ?? "").replace(/\D/g, "");
   return digits.length >= 5 ? digits.slice(-5) : null;
+}
+
+function reconciliationEvidence(value: unknown): ReconciliationEvidence[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item, index) => {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const row = item as Record<string, unknown>;
+      const status = String(row.status ?? "missing");
+      return {
+        key: String(row.key ?? `evidence-${index}`),
+        label: String(row.label ?? "判斷條件"),
+        status: ["matched", "close", "missing", "mismatch"].includes(status)
+          ? (status as ReconciliationEvidence["status"])
+          : "missing",
+        detail: String(row.detail ?? ""),
+        score: Number(row.score ?? 0),
+      };
+    }
+    const reason = String(item ?? "").trim();
+    return {
+      key: `legacy-${index}`,
+      label: "既有匹配依據",
+      status: reason.includes("相差") || reason.includes("相近") || reason.includes("容許差額") ? "close" : "matched",
+      detail: reason,
+      score: 0,
+    };
+  });
 }
 
 function transactionFingerprint(row: {
@@ -260,7 +288,7 @@ export async function runReconciliationMatching(): Promise<{
         候選識別碼: candidate.candidateKey,
         候選金額: candidate.candidateAmount,
         分數: candidate.score,
-        匹配原因: candidate.reasons,
+        匹配原因: candidate.evidence,
         狀態: "suggested",
       }))
     );
@@ -416,6 +444,7 @@ export async function getReconciliationDashboard(): Promise<{
       const matchedInvoices = invoiceIds
         .map((id) => invoiceById.get(id))
         .filter((invoice): invoice is NonNullable<typeof invoice> => invoice != null);
+      const evidence = reconciliationEvidence(match.匹配原因);
       return {
         id: String(match.id),
         projectId,
@@ -425,7 +454,8 @@ export async function getReconciliationDashboard(): Promise<{
         invoices: matchedInvoices,
         candidateAmount: moneyOrNull(match.候選金額) ?? 0,
         score: Number(match.分數 ?? 0),
-        reasons: Array.isArray(match.匹配原因) ? match.匹配原因.map(String) : [],
+        reasons: evidence.map((item) => item.detail),
+        evidence,
         status: String(match.狀態 ?? "suggested") as "suggested" | "confirmed" | "rejected",
         confirmedBy: String(match.確認人 ?? ""),
         confirmedAt: String(match.確認時間 ?? ""),

@@ -44,6 +44,16 @@ export interface MatchingSubmission {
   remitter: string;
 }
 
+export type ReconciliationEvidenceStatus = "matched" | "close" | "missing" | "mismatch";
+
+export interface ReconciliationEvidence {
+  key: string;
+  label: string;
+  status: ReconciliationEvidenceStatus;
+  detail: string;
+  score: number;
+}
+
 export interface ReconciliationCandidate {
   candidateKey: string;
   transactionId: string;
@@ -53,6 +63,7 @@ export interface ReconciliationCandidate {
   candidateAmount: number;
   score: number;
   reasons: string[];
+  evidence: ReconciliationEvidence[];
   submissionId: string | null;
 }
 
@@ -70,6 +81,7 @@ export interface ReconciliationDashboardMatch {
   candidateAmount: number;
   score: number;
   reasons: string[];
+  evidence: ReconciliationEvidence[];
   status: ReconciliationMatchStatus;
   confirmedBy: string;
   confirmedAt: string;

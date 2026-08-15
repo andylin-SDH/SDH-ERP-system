@@ -6,6 +6,7 @@ import { ErpLoginPanel, fetchSessionWithRetry } from "@/components/ErpLoginPanel
 import { parseBankCsv, type ParsedBankCsv } from "@/lib/reconciliation/csv";
 import type {
   BankImportRow,
+  ReconciliationEvidence,
   ReconciliationDashboardRun,
   ReconciliationDashboardTransaction,
 } from "@/lib/reconciliation/types";
@@ -54,41 +55,17 @@ function scoreClass(score: number): string {
   return "bg-stone-100 text-stone-700";
 }
 
-function reasonDisplay(reason: string): { label: string; symbol: string; className: string } {
-  const approximateClass = "border-amber-300 bg-amber-100 text-amber-950";
-  const exactClass = "border-emerald-300 bg-emerald-100 text-emerald-900";
-
-  const shortfall = reason.match(/少 ([\d,.]+) 元/);
-  if (shortfall) {
-    return {
-      label: `金額少 ${shortfall[1]} 元，在容許範圍`,
-      symbol: "≈",
-      className: approximateClass,
-    };
-  }
-  const dateDistance = reason.match(/匯款日期相差 (\d+) 天/);
-  if (dateDistance) {
-    return {
-      label: `日期相差 ${dateDistance[1]} 天`,
-      symbol: "≈",
-      className: approximateClass,
-    };
-  }
-  if (reason.includes("名稱相近")) {
-    return { label: "匯款人名稱相近", symbol: "≈", className: approximateClass };
-  }
-
-  const exactLabels: Record<string, string> = {
-    銀行入帳金額與未入帳發票一致: "金額完全吻合",
-    收款申報金額一致: "申報金額吻合",
-    匯款帳號末五碼一致: "帳號末五碼吻合",
-    匯款日期一致: "匯款日期吻合",
-  };
+function evidenceDisplay(status: ReconciliationEvidence["status"]): {
+  label: string;
+  symbol: string;
+  className: string;
+} {
   return {
-    label: exactLabels[reason] ?? reason,
-    symbol: "✓",
-    className: exactClass,
-  };
+    matched: { label: "吻合", symbol: "✓", className: "border-emerald-300 bg-emerald-100 text-emerald-900" },
+    close: { label: "接近", symbol: "≈", className: "border-amber-300 bg-amber-100 text-amber-950" },
+    missing: { label: "資料不足", symbol: "?", className: "border-slate-300 bg-slate-100 text-slate-800" },
+    mismatch: { label: "不一致", symbol: "!", className: "border-rose-300 bg-rose-100 text-rose-900" },
+  }[status];
 }
 
 export default function ReconciliationPage() {
@@ -400,19 +377,27 @@ export default function ReconciliationPage() {
                         </div>
                         <p className="mt-2 text-sm font-bold tabular-nums">候選金額 {money(match.candidateAmount, transaction.currency)}</p>
                         <div className="mt-3">
-                          <p className="text-xs font-bold text-stone-500">系統判斷依據</p>
-                          <ul className="mt-2 flex flex-wrap gap-2">
-                            {match.reasons.map((reason) => {
-                              const display = reasonDisplay(reason);
+                          <p className="text-sm font-bold text-stone-800">完整判斷明細</p>
+                          <p className="mt-0.5 text-xs text-stone-500">逐項列出銀行與 ERP 實際資料，以及本項加分。</p>
+                          <ul className="mt-2 space-y-2">
+                            {match.evidence.map((evidence) => {
+                              const display = evidenceDisplay(evidence.status);
                               return (
                                 <li
-                                  key={reason}
-                                  className={`inline-flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-sm font-bold leading-5 shadow-sm ${display.className}`}
+                                  key={`${evidence.key}-${evidence.detail}`}
+                                  className="grid gap-2 rounded-xl border border-stone-200 bg-white px-3 py-3 shadow-sm sm:grid-cols-[7rem_1fr_auto] sm:items-center"
                                 >
-                                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/80 text-sm font-black" aria-hidden="true">
-                                    {display.symbol}
+                                  <span className={`inline-flex w-fit items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-black ${display.className}`}>
+                                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/80" aria-hidden="true">{display.symbol}</span>
+                                    {display.label}
                                   </span>
-                                  {display.label}
+                                  <span>
+                                    <span className="block text-sm font-bold text-stone-900">{evidence.label}</span>
+                                    <span className="mt-0.5 block break-words text-xs leading-5 text-stone-600">{evidence.detail}</span>
+                                  </span>
+                                  <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-black tabular-nums ${evidence.score > 0 ? "bg-emerald-50 text-emerald-800" : "bg-stone-100 text-stone-500"}`}>
+                                    +{evidence.score} 分
+                                  </span>
                                 </li>
                               );
                             })}
