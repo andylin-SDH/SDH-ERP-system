@@ -26,7 +26,7 @@ import {
   isExtraBonusPayoutType,
 } from "@/lib/payout-dedupe";
 import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
-import { PROJECT_TYPES, costFromTotalByProjectType } from "@/config/project-types";
+import { PROJECT_TYPES, calc專案盈餘, projectSurplusFormulaHint } from "@/config/project-types";
 import { DEFAULT_PROJECT_STATUS_OPTIONS } from "@/config/project-status-defaults";
 import { DEFAULT_PROJECT_EXPENSE_TYPE_OPTIONS } from "@/config/project-expense-type-defaults";
 import { DEFAULT_TASK_TYPE_OPTIONS } from "@/config/task-type-defaults";
@@ -99,13 +99,7 @@ function kolScopeButtonLabel(scopeStored: string, options: string[]): string {
   return hit ?? id;
 }
 
-/** 專案營收 = 專案總金額未稅 - 專案成本 - KOL費用未稅 */
-function calc專案營收(總金額: string, 成本: string, kol費用: string): string {
-  const a = Number(總金額) || 0;
-  const b = Number(成本) || 0;
-  const c = Number(kol費用) || 0;
-  return normalizeDecimalString(a - b - c, 2) ?? "0";
-}
+/** 專案盈餘：公式見 calc專案盈餘（DB 欄位仍為「專案營收」） */
 
 /** 分潤表欄位顯示順序（所有人一致）：分潤金額 → 分潤成數、專案名稱 → 其餘 */
 const PAYOUT_DISPLAY_ORDER = [
@@ -861,8 +855,8 @@ function TaskProjectInfoButton({
     ...(showAmounts
       ? ([
           ["專案總金額未稅", formatAmount(project.專案總金額未稅)],
-          ["專案成本", formatAmount(project.專案成本)],
-          ["專案營收", formatAmount(project.專案營收)],
+          ["專案額外成本注記(與KOL共攤)", formatAmount(project.專案成本)],
+          ["專案盈餘", formatAmount(project.專案營收)],
         ] as const)
       : ([] as const)),
     ["專案狀態", project.專案狀態 || "—"],
@@ -1105,7 +1099,8 @@ function masterRowUntaxedTotal(row: MasterRow): number {
 }
 
 function masterRowCostSum(row: MasterRow): number {
-  return parseNumericField(row.專案成本) + parseNumericField(row.KOL費用未稅);
+  /** 總覽成本僅計 KOL 費用；「專案額外成本注記」不列入計算 */
+  return parseNumericField(row.KOL費用未稅);
 }
 
 /** 產生專案ID：SDH-YYYYMMDD-HHmmss-XX（XX 為 2 碼隨機，避免同秒多筆衝突） */
@@ -3834,11 +3829,7 @@ export default function DashboardPage() {
           專案總金額未稅: row.專案總金額未稅 ?? "",
           專案成本: row.專案成本 ?? "",
           KOL費用未稅: row.KOL費用未稅 ?? "",
-          專案營收: calc專案營收(
-            row.專案總金額未稅 ?? "",
-            row.專案成本 ?? "",
-            row.KOL費用未稅 ?? ""
-          ),
+          專案營收: calc專案盈餘(row.專案類型, row.專案總金額未稅 ?? "", row.KOL費用未稅 ?? ""),
           專案費用類型: row.專案費用類型 ?? "",
           KOL名稱: row.KOL名稱 ?? "",
           經紀人: row.經紀人 ?? "",
@@ -4065,9 +4056,9 @@ export default function DashboardPage() {
       專案總金額未稅: selectedMaster.專案總金額未稅 ?? "",
       專案成本: selectedMaster.專案成本 ?? "",
       KOL費用未稅: selectedMaster.KOL費用未稅 ?? "",
-      專案營收: calc專案營收(
+      專案營收: calc專案盈餘(
+        selectedMaster.專案類型,
         selectedMaster.專案總金額未稅 ?? "",
-        selectedMaster.專案成本 ?? "",
         selectedMaster.KOL費用未稅 ?? ""
       ),
       專案費用類型: selectedMaster.專案費用類型 ?? "",
@@ -4425,7 +4416,7 @@ export default function DashboardPage() {
               const data = res as { list?: PayoutRow[]; payoutResyncQueued?: boolean };
               setPayoutList(data.list ?? []);
               if (data.payoutResyncQueued) {
-                setPayoutResyncNotice("分潤金額正在依「專案營收」背景重算，約十秒後會自動更新…");
+                setPayoutResyncNotice("分潤金額正在依「專案盈餘」背景重算，約十秒後會自動更新…");
                 window.setTimeout(() => {
                   void refreshDashboardData(["payout", "finance"]);
                   setPayoutResyncNotice(null);
@@ -4723,7 +4714,7 @@ export default function DashboardPage() {
     }
   }, [refreshDashboardData]);
 
-  /** 依大總表「專案營收」重算全部分潤金額（修復舊版依發票金額的殘留資料） */
+  /** 依大總表「專案盈餘」（DB：專案營收）重算全部分潤金額 */
   const resyncAllPayoutAmounts = useCallback(async () => {
     setPayoutResyncing(true);
     setPayoutResyncNotice(null);
@@ -4734,7 +4725,7 @@ export default function DashboardPage() {
         setPayoutResyncNotice(data.error ?? "重算失敗");
         return;
       }
-      setPayoutResyncNotice("已開始重算全部分潤金額（依專案營收 × 成數），約十秒後自動更新…");
+      setPayoutResyncNotice("已開始重算全部分潤金額（依專案盈餘 × 成數），約十秒後自動更新…");
       window.setTimeout(() => {
         void refreshDashboardData(["payout", "finance"]);
         setPayoutResyncNotice(null);
@@ -7498,7 +7489,7 @@ export default function DashboardPage() {
                 <p className="mt-2 text-sm text-stone-600">
                   同一專案內，若同一人擔任多個分潤角色，系統會自動只保留
                   <strong className="text-stone-800">分潤成數最高</strong>的那一筆（成數相同則取金額較大者）。
-                  分潤金額以<strong className="text-stone-800">專案營收</strong>（未填則用專案總金額未稅）× 分潤成數計算；與發票金額無關，請每個專案各開一張發票。
+                  分潤金額以<strong className="text-stone-800">專案盈餘</strong>（未填則用專案總金額未稅）× 分潤成數計算；與發票金額無關，請每個專案各開一張發票。
                 </p>
                 <p className="mt-2 text-xs text-stone-500">
                   調整上方「分潤預設成數」並儲存後，會在背景依目前大總表重算分潤表；若金額仍不對，請至「分潤表」按「重算分潤金額」。
@@ -9647,7 +9638,7 @@ export default function DashboardPage() {
                                   <p><span className="text-stone-500">專案ID</span> {String(r.專案ID ?? "—")}</p>
                                 )}
                                 {payoutVisibleCols.includes("專案營收") && (
-                                  <p><span className="text-stone-500">專案營收</span> {formatAmount(String(r.專案營收 ?? ""))}</p>
+                                  <p><span className="text-stone-500">專案盈餘</span> {formatAmount(String(r.專案營收 ?? ""))}</p>
                                 )}
                                 {payoutVisibleCols.includes("專案總金額未稅") && (
                                   <p><span className="text-stone-500">專案總金額未稅</span> {formatAmount(String(r.專案總金額未稅 ?? ""))}</p>
@@ -12186,7 +12177,7 @@ export default function DashboardPage() {
                     cache: "no-store",
                     body: JSON.stringify({
                     ...createForm,
-                    專案營收: calc專案營收(createForm.專案總金額未稅, createForm.專案成本, createForm.KOL費用未稅),
+                    專案營收: calc專案盈餘(createForm.專案類型, createForm.專案總金額未稅, createForm.KOL費用未稅),
                   }),
                   });
                   const data = (await safeResJson(res)) as { ok?: boolean; error?: string; master?: MasterRow };
@@ -12237,16 +12228,11 @@ export default function DashboardPage() {
                       label="專案類型"
                       value={createForm.專案類型}
                       onChange={(v) =>
-                        setCreateForm((f) => {
-                          const autoCost = costFromTotalByProjectType(v, f.專案總金額未稅);
-                          const nextCost = autoCost != null ? autoCost : f.專案成本;
-                          return {
-                            ...f,
-                            專案類型: v,
-                            專案成本: nextCost,
-                            專案營收: calc專案營收(f.專案總金額未稅, nextCost, f.KOL費用未稅),
-                          };
-                        })
+                        setCreateForm((f) => ({
+                          ...f,
+                          專案類型: v,
+                          專案營收: calc專案盈餘(v, f.專案總金額未稅, f.KOL費用未稅),
+                        }))
                       }
                       options={projectTypesOptions}
                     />
@@ -12299,40 +12285,19 @@ export default function DashboardPage() {
                       label="專案總金額未稅"
                       value={createForm.專案總金額未稅}
                       onChange={(v) =>
-                        setCreateForm((f) => {
-                          const autoCost = costFromTotalByProjectType(f.專案類型, v);
-                          const nextCost = autoCost != null ? autoCost : f.專案成本;
-                          return {
-                            ...f,
-                            專案總金額未稅: v,
-                            專案成本: nextCost,
-                            專案營收: calc專案營收(v, nextCost, f.KOL費用未稅),
-                          };
-                        })
+                        setCreateForm((f) => ({
+                          ...f,
+                          專案總金額未稅: v,
+                          專案營收: calc專案盈餘(f.專案類型, v, f.KOL費用未稅),
+                        }))
                       }
                     />
                     <div>
-                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">專案營收</label>
+                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">專案盈餘</label>
                       <div className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-600 tabular-nums">
                         {formatAmount(createForm.專案營收)}
                       </div>
-                      <p className="mt-1 text-xs text-stone-500">自動計算：專案總金額未稅 − 專案成本 − KOL費用未稅</p>
-                    </div>
-                    <div>
-                      <NumberField
-                        label="專案成本"
-                        value={createForm.專案成本}
-                        onChange={(v) =>
-                          setCreateForm((f) => ({
-                            ...f,
-                            專案成本: v,
-                            專案營收: calc專案營收(f.專案總金額未稅, v, f.KOL費用未稅),
-                          }))
-                        }
-                      />
-                      {costFromTotalByProjectType(createForm.專案類型, createForm.專案總金額未稅) != null ? (
-                        <p className="mt-1 text-xs text-stone-500">此專案類型：專案成本 = 專案總金額未稅 × 70%（可手動修改）</p>
-                      ) : null}
+                      <p className="mt-1 text-xs text-stone-500">{projectSurplusFormulaHint(createForm.專案類型)}</p>
                     </div>
                     <NumberField
                       label="KOL費用未稅"
@@ -12341,9 +12306,14 @@ export default function DashboardPage() {
                         setCreateForm((f) => ({
                           ...f,
                           KOL費用未稅: v,
-                          專案營收: calc專案營收(f.專案總金額未稅, f.專案成本, v),
+                          專案營收: calc專案盈餘(f.專案類型, f.專案總金額未稅, v),
                         }))
                       }
+                    />
+                    <NumberField
+                      label="專案額外成本注記(與KOL共攤)"
+                      value={createForm.專案成本}
+                      onChange={(v) => setCreateForm((f) => ({ ...f, 專案成本: v }))}
                     />
                     {isPayoutModeB(createForm.專案類型) && createForm.KOL名稱.trim() ? (
                       <>
@@ -12727,7 +12697,7 @@ export default function DashboardPage() {
               <>
               <div>
                 <h3 className="text-sm font-semibold text-amber-800">可見欄位</h3>
-                <p className="mt-1 text-sm text-stone-500">勾選此使用者可看到的 Table 與欄位。未勾選的欄位（如專案分潤、專案成本）將不顯示。未設定時依角色預設顯示。</p>
+                <p className="mt-1 text-sm text-stone-500">勾選此使用者可看到的 Table 與欄位。未勾選的欄位（如專案分潤、專案額外成本注記）將不顯示。未設定時依角色預設顯示。</p>
               </div>
               <div className="space-y-4">
                 {TABLE_KEYS.map((tableKey) => {
@@ -12911,9 +12881,9 @@ export default function DashboardPage() {
                       專案總金額未稅: selectedMaster.專案總金額未稅 ?? "",
                       專案成本: selectedMaster.專案成本 ?? "",
                       KOL費用未稅: selectedMaster.KOL費用未稅 ?? "",
-                      專案營收: calc專案營收(
+                      專案營收: calc專案盈餘(
+                        selectedMaster.專案類型,
                         selectedMaster.專案總金額未稅 ?? "",
-                        selectedMaster.專案成本 ?? "",
                         selectedMaster.KOL費用未稅 ?? ""
                       ),
                       專案費用類型: selectedMaster.專案費用類型 ?? "",
@@ -12980,9 +12950,9 @@ export default function DashboardPage() {
                               const { 專案BDPM分潤成數, 專案引薦人分潤成數, 專案開發人分潤成數, 專案管理員分潤成數, 執行管理員分潤成數, ...rest } = editMasterForm;
                               return {
                                 ...rest,
-                                專案營收: calc專案營收(
+                                專案營收: calc專案盈餘(
+                                  editMasterForm.專案類型,
                                   editMasterForm.專案總金額未稅,
-                                  editMasterForm.專案成本,
                                   editMasterForm.KOL費用未稅
                                 ),
                               };
@@ -13027,16 +12997,11 @@ export default function DashboardPage() {
                       label="專案類型"
                       value={editMasterForm.專案類型}
                       onChange={(v) =>
-                        setEditMasterForm((f) => {
-                          const autoCost = costFromTotalByProjectType(v, f.專案總金額未稅);
-                          const nextCost = autoCost != null ? autoCost : f.專案成本;
-                          return {
-                            ...f,
-                            專案類型: v,
-                            專案成本: nextCost,
-                            專案營收: calc專案營收(f.專案總金額未稅, nextCost, f.KOL費用未稅),
-                          };
-                        })
+                        setEditMasterForm((f) => ({
+                          ...f,
+                          專案類型: v,
+                          專案營收: calc專案盈餘(v, f.專案總金額未稅, f.KOL費用未稅),
+                        }))
                       }
                       options={[...new Set([...projectTypesOptions, editMasterForm.專案類型].filter(Boolean))]}
                     />
@@ -13361,16 +13326,11 @@ export default function DashboardPage() {
                       label="專案總金額未稅"
                       value={editMasterForm.專案總金額未稅}
                       onChange={(v) =>
-                        setEditMasterForm((f) => {
-                          const autoCost = costFromTotalByProjectType(f.專案類型, v);
-                          const nextCost = autoCost != null ? autoCost : f.專案成本;
-                          return {
-                            ...f,
-                            專案總金額未稅: v,
-                            專案成本: nextCost,
-                            專案營收: calc專案營收(v, nextCost, f.KOL費用未稅),
-                          };
-                        })
+                        setEditMasterForm((f) => ({
+                          ...f,
+                          專案總金額未稅: v,
+                          專案營收: calc專案盈餘(f.專案類型, v, f.KOL費用未稅),
+                        }))
                       }
                     />
                   ) : (
@@ -13379,33 +13339,12 @@ export default function DashboardPage() {
 
                   {isEditingMaster ? (
                     <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-500">專案營收</p>
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-500">專案盈餘</p>
                       <p className="text-sm font-medium text-stone-700 tabular-nums">{formatAmount(editMasterForm.專案營收)}</p>
-                      <p className="mt-1 text-xs text-stone-500">自動計算：專案總金額未稅 − 專案成本 − KOL費用未稅</p>
+                      <p className="mt-1 text-xs text-stone-500">{projectSurplusFormulaHint(editMasterForm.專案類型)}</p>
                     </div>
                   ) : (
-                    <Field label="專案營收" value={formatAmount(selectedMaster.專案營收)} />
-                  )}
-
-                  {isEditingMaster ? (
-                    <div>
-                      <NumberField
-                        label="專案成本"
-                        value={editMasterForm.專案成本}
-                        onChange={(v) =>
-                          setEditMasterForm((f) => ({
-                            ...f,
-                            專案成本: v,
-                            專案營收: calc專案營收(f.專案總金額未稅, v, f.KOL費用未稅),
-                          }))
-                        }
-                      />
-                      {costFromTotalByProjectType(editMasterForm.專案類型, editMasterForm.專案總金額未稅) != null ? (
-                        <p className="mt-1 text-xs text-stone-500">此專案類型：專案成本 = 專案總金額未稅 × 70%（可手動修改）</p>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <Field label="專案成本" value={formatAmount(selectedMaster.專案成本)} />
+                    <Field label="專案盈餘" value={formatAmount(selectedMaster.專案營收)} />
                   )}
 
                   {isEditingMaster ? (
@@ -13416,12 +13355,22 @@ export default function DashboardPage() {
                         setEditMasterForm((f) => ({
                           ...f,
                           KOL費用未稅: v,
-                          專案營收: calc專案營收(f.專案總金額未稅, f.專案成本, v),
+                          專案營收: calc專案盈餘(f.專案類型, f.專案總金額未稅, v),
                         }))
                       }
                     />
                   ) : (
                     <Field label="KOL費用未稅" value={formatAmount(selectedMaster.KOL費用未稅)} />
+                  )}
+
+                  {isEditingMaster ? (
+                    <NumberField
+                      label="專案額外成本注記(與KOL共攤)"
+                      value={editMasterForm.專案成本}
+                      onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案成本: v }))}
+                    />
+                  ) : (
+                    <Field label="專案額外成本注記(與KOL共攤)" value={formatAmount(selectedMaster.專案成本)} />
                   )}
 
                   {isPayoutModeB(isEditingMaster ? editMasterForm.專案類型 : selectedMaster.專案類型 ?? "") &&

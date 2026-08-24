@@ -6,6 +6,7 @@
 import { getSupabase } from "@/lib/supabase/server";
 import { log } from "@/lib/log";
 import { normalizeDecimalString } from "@/lib/number-normalize";
+import { calc專案盈餘 } from "@/config/project-types";
 
 export interface MasterRow {
   id: string;
@@ -170,7 +171,10 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     狀態確認日期: payload.狀態確認日期 ?? null,
     開案日期: payload.開案日期 ?? null,
     專案總金額未稅: normalizeMoneyOrNull(payload.專案總金額未稅),
-    專案營收: normalizeMoneyOrNull(payload.專案營收),
+    /** 專案盈餘：依類型自動計算，不接受前端手填 */
+    專案營收: normalizeMoneyOrNull(
+      calc專案盈餘(payload.專案類型, payload.專案總金額未稅, payload.KOL費用未稅)
+    ),
     專案成本: normalizeMoneyOrNull(payload.專案成本),
     KOL費用未稅: normalizeMoneyOrNull(payload.KOL費用未稅),
     KOL名稱: payload.KOL名稱 ?? null,
@@ -227,7 +231,10 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
     狀態確認日期: payload.狀態確認日期 ?? null,
     開案日期: payload.開案日期 ?? null,
     專案總金額未稅: normalizeMoneyOrNull(payload.專案總金額未稅),
-    專案營收: normalizeMoneyOrNull(payload.專案營收),
+    /** 專案盈餘：依類型自動計算，不接受前端手填 */
+    專案營收: normalizeMoneyOrNull(
+      calc專案盈餘(payload.專案類型, payload.專案總金額未稅, payload.KOL費用未稅)
+    ),
     專案成本: normalizeMoneyOrNull(payload.專案成本),
     KOL費用未稅: normalizeMoneyOrNull(payload.KOL費用未稅),
     KOL名稱: payload.KOL名稱 ?? null,
