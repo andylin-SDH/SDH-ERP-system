@@ -1581,6 +1581,10 @@ export default function DashboardPage() {
   /** GET /api/partners 回傳的 partnersError：精確欄位查詢失敗或 DB 結構不符 */
   const [partnersLoadError, setPartnersLoadError] = useState<string | null>(null);
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+  /** 大總表：哪些母案已展開子專案縮排列（預設收合） */
+  const [expandedMasterTreeIds, setExpandedMasterTreeIds] = useState<string[]>([]);
+  /** 大總表展開任務：預設只看進行中，避免母／子案任務一次全攤 */
+  const [expandedTasksShowCompleted, setExpandedTasksShowCompleted] = useState(false);
   const [addingTaskFor, setAddingTaskFor] = useState<string | null>(null);
   const [newTaskForm, setNewTaskForm] = useState({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
   const [addingTask, setAddingTask] = useState(false);
@@ -3239,8 +3243,8 @@ export default function DashboardPage() {
 
   /**
    * 大總表主列：只顯示「無母專案」或母專案不在目前清單內的列（孤兒子案）。
-   * 有母專案的子案改掛在母案展開區，避免與母案並列重複。
-   * 搜尋命中子案時，會把其母案一併帶進主列以便展開查看。
+   * 有母專案的子案以巢狀縮排列掛在母案下方，避免與母案並列重複。
+   * 搜尋命中子案時，會把其母案一併帶進主列以便看到巢狀結果。
    */
   const searchedMasterList = useMemo(() => {
     const q = deferredMasterSearch.trim();
@@ -3268,7 +3272,7 @@ export default function DashboardPage() {
     });
   }, [masterTabFilteredList, searchedMasterHits, deferredMasterSearch]);
 
-  /** 搜尋命中子專案時，自動展開其母案以便看到巢狀結果 */
+  /** 搜尋命中子專案時，自動展開其母案樹與任務，以便看到巢狀結果 */
   useEffect(() => {
     const q = deferredMasterSearch.trim();
     if (!q) return;
@@ -3276,6 +3280,7 @@ export default function DashboardPage() {
       const parentId = String(row.母專案ID ?? "").trim();
       if (parentId) {
         setExpandedProjectId(parentId);
+        setExpandedMasterTreeIds((prev) => (prev.includes(parentId) ? prev : [...prev, parentId]));
         return;
       }
     }
@@ -3785,6 +3790,22 @@ export default function DashboardPage() {
     () => searchedMasterList.slice(0, masterRenderCount),
     [searchedMasterList, masterRenderCount]
   );
+  /** 大總表巢狀列：僅在母案「展開子專案」時插入子列（預設收合） */
+  const visibleMasterDisplayItems = useMemo(() => {
+    type Item = { row: MasterRow; depth: number; rowIndex: number };
+    const items: Item[] = [];
+    let rowIndex = 0;
+    const treeOpen = new Set(expandedMasterTreeIds);
+    const walk = (row: MasterRow, depth: number) => {
+      items.push({ row, depth, rowIndex: rowIndex++ });
+      const pid = String(row.專案ID ?? "").trim();
+      if (!pid || !treeOpen.has(pid)) return;
+      const kids = masterChildrenByParentId.get(pid) ?? [];
+      for (const kid of kids) walk(kid, depth + 1);
+    };
+    for (const row of visibleMasterRows) walk(row, 0);
+    return items;
+  }, [visibleMasterRows, masterChildrenByParentId, expandedMasterTreeIds]);
   const visiblePayoutRows = useMemo(
     () => searchedPayout.slice(0, payoutRenderCount),
     [searchedPayout, payoutRenderCount]
@@ -6712,24 +6733,31 @@ export default function DashboardPage() {
                       </td>
                     </tr>
                   ) : (
-                    visibleMasterRows.map((row, rowIndex) => {
+                    visibleMasterDisplayItems.map(({ row, depth, rowIndex }) => {
                       const pid = row.專案ID ?? "";
                       const isExpanded = expandedProjectId === pid;
                       const lifecycleClosed = masterLifecycleTab === "closed";
                       const rowSurface = masterListRowSurface(rowIndex, lifecycleClosed);
+                      const nestIndentPx = Math.min(depth, 4) * 14;
                       // 大總表展開列：該專案任務全顯（不套用任務②可見規則）；側邊「任務」分頁仍為 filteredTasks
-                      const projectTasks = sortTaskRows(
+                      const projectTasksAll = sortTaskRows(
                         tasks.filter((t) => (t.專案ID ?? "").trim().toLowerCase() === pid.trim().toLowerCase()),
                         tasksSortMode
                       );
+                      const projectTasksOpen = projectTasksAll.filter((t) => !Boolean(t.任務完成));
+                      const projectTasksDone = projectTasksAll.filter((t) => Boolean(t.任務完成));
+                      const projectTasks = expandedTasksShowCompleted ? projectTasksAll : projectTasksOpen;
                       const projectChildren = masterChildrenByParentId.get(String(pid).trim()) ?? [];
+                      const treeOpen = expandedMasterTreeIds.includes(String(pid).trim());
                       const invoiceSummary = invoiceSummaryByProjectId.get(String(pid).trim());
                       const projectInvoices = invoiceSummary?.rows ?? [];
                       return (
-                        <Fragment key={row.id ?? pid}>
+                        <Fragment key={`${depth}-${row.id ?? pid}`}>
                           <tr
                             key={row.id ?? pid}
-                            className={`cursor-pointer transition ${rowSurface.row} ${rowSurface.base}`}
+                            className={`cursor-pointer transition ${rowSurface.row} ${rowSurface.base} ${
+                              depth > 0 ? "border-l-2 border-l-sky-300" : ""
+                            }`}
                             onClick={() => {
                               setSelectedMaster(row);
                               setIsEditingMaster(false);
@@ -6737,7 +6765,7 @@ export default function DashboardPage() {
                             }}
                           >
                             {masterColsForDisplay.map((k) => {
-                              const amountKeys = ["專案總金額未稅", "專案營收", "專案成本", "KOL費用未稅"];
+                              const amountKeys = ["專案總金額未稅", "專案營收", "專案盈餘", "專案成本", "KOL費用未稅", "額外成本"];
                               const isAmount = amountKeys.includes(k);
                               const val = (row as unknown as Record<string, unknown>)[k];
                               const modeBRow = isPayoutModeB(String(row.專案類型 ?? ""));
@@ -6758,12 +6786,13 @@ export default function DashboardPage() {
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         setExpandedProjectId((prev) => (prev === pid ? null : pid));
+                                        setExpandedTasksShowCompleted(false);
                                         setAddingTaskFor(null);
                                         setAddTaskError(null);
                                         setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
                                       }}
                                       className="mr-2 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-stone-50 text-stone-500 transition hover:bg-amber-100/90 hover:border-amber-300 hover:text-amber-800"
-                                      title={isExpanded ? "收合子專案／任務" : "展開子專案／任務"}
+                                      title={isExpanded ? "收合任務" : "展開任務／新增任務"}
                                     >
                                       <svg className={`h-4 w-4 transition-transform ${isExpanded ? "rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -6777,22 +6806,61 @@ export default function DashboardPage() {
                                 const projectName = String(val ?? "").trim() || "—";
                                 const kolName = String(row.KOL名稱 ?? "").trim();
                                 const childCount = projectChildren.length;
-                                const isOrphanChild = Boolean(String(row.母專案ID ?? "").trim());
+                                const isOrphanChild = depth === 0 && Boolean(String(row.母專案ID ?? "").trim());
                                 return (
                                   <td
                                     key={k}
                                     className={`sticky left-[4.5rem] z-20 w-[13rem] px-3 py-3 ${stickyBg}`}
                                     title={kolName ? `${projectName} · ${kolName}` : projectName}
+                                    style={depth > 0 ? { paddingLeft: `${12 + nestIndentPx}px` } : undefined}
                                   >
                                     <div className="flex min-w-0 items-start gap-1.5">
-                                      <p className="min-w-0 flex-1 truncate text-sm font-medium text-stone-900">{projectName}</p>
-                                      {childCount > 0 ? (
+                                      {depth > 0 ? (
                                         <span
                                           className="mt-0.5 shrink-0 rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-sky-800"
-                                          title={`${childCount} 個子專案`}
+                                          title="子專案"
                                         >
-                                          子 {childCount}
+                                          子
                                         </span>
+                                      ) : null}
+                                      <p className={`min-w-0 flex-1 truncate text-sm font-medium ${depth > 0 ? "text-stone-800" : "text-stone-900"}`}>
+                                        {projectName}
+                                      </p>
+                                      {childCount > 0 ? (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const id = String(pid).trim();
+                                            setExpandedMasterTreeIds((prev) => {
+                                              if (prev.includes(id)) {
+                                                const hideIds = new Set<string>();
+                                                const collect = (parentId: string) => {
+                                                  for (const kid of masterChildrenByParentId.get(parentId) ?? []) {
+                                                    const kidId = String(kid.專案ID ?? "").trim();
+                                                    if (!kidId || hideIds.has(kidId)) continue;
+                                                    hideIds.add(kidId);
+                                                    collect(kidId);
+                                                  }
+                                                };
+                                                collect(id);
+                                                setExpandedProjectId((cur) =>
+                                                  cur && hideIds.has(String(cur).trim()) ? null : cur
+                                                );
+                                                return prev.filter((x) => x !== id && !hideIds.has(x));
+                                              }
+                                              return [...prev, id];
+                                            });
+                                          }}
+                                          className={`mt-0.5 shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold tracking-wide transition ${
+                                            treeOpen
+                                              ? "border-sky-400 bg-sky-100 text-sky-900 ring-1 ring-sky-300/70"
+                                              : "border-sky-200 bg-sky-50 text-sky-800 hover:border-sky-300 hover:bg-sky-100"
+                                          }`}
+                                          title={treeOpen ? "收合子專案列" : `展開 ${childCount} 個子專案列`}
+                                        >
+                                          {treeOpen ? "收合" : "子"} {childCount}
+                                        </button>
                                       ) : null}
                                       {isOrphanChild ? (
                                         <span
@@ -6944,75 +7012,43 @@ export default function DashboardPage() {
                             <tr key={`${pid}-tasks`}>
                               <td colSpan={masterColsForDisplay.length || 15} className="border-t-0 bg-stone-50 px-4 py-4">
                                 <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
-                                  <div className="mb-5 rounded-xl border border-sky-200/90 bg-sky-50/50 p-3">
-                                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                      <h3 className="text-sm font-bold uppercase tracking-wider text-sky-900">
-                                        子專案
-                                        <span className="ml-2 rounded-full border border-sky-300 bg-white px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-sky-800">
-                                          {projectChildren.length} 筆
+                                  {depth > 0 ? (
+                                    <p className="mb-3 text-xs text-sky-800/90">
+                                      此為子專案任務。可在此新增／管理任務；點上方列可開啟專案詳情。
+                                    </p>
+                                  ) : projectChildren.length > 0 ? (
+                                    <p className="mb-3 text-xs text-sky-800/90">
+                                      本專案有 {projectChildren.length} 個子專案。
+                                      {treeOpen
+                                        ? "子專案已展開於上方列下方；"
+                                        : "點專案名稱旁的「子 N」可展開縮排列；"}
+                                      此區僅顯示本專案任務。
+                                    </p>
+                                  ) : null}
+                                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                                    <h3 className="text-sm font-bold uppercase tracking-wider text-amber-800">
+                                      此專案任務
+                                      <span className="ml-2 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-amber-900">
+                                        {expandedTasksShowCompleted
+                                          ? `${projectTasksAll.length} 筆`
+                                          : `進行中 ${projectTasksOpen.length}`}
+                                      </span>
+                                      {!expandedTasksShowCompleted && projectTasksDone.length > 0 ? (
+                                        <span className="ml-1 text-[10px] font-medium normal-case tracking-normal text-stone-500">
+                                          （已完成 {projectTasksDone.length} 筆已隱藏）
                                         </span>
-                                      </h3>
-                                      <p className="text-[11px] text-sky-800/80">與下方「任務」不同：此為獨立專案列，點擊開啟專案詳情</p>
-                                    </div>
-                                    <div className="max-w-full overflow-x-auto rounded-lg border border-sky-200/80 bg-white/95">
-                                      <table className="inline-table max-w-full align-top border-collapse divide-y divide-sky-100">
-                                        <thead className="bg-sky-100/80">
-                                          <tr>
-                                            <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-sky-900/70">專案名稱</th>
-                                            <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase text-sky-900/70">專案狀態</th>
-                                            <th className="whitespace-nowrap px-3 py-2 text-right text-xs font-semibold uppercase text-sky-900/70">專案總金額未稅</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-sky-100">
-                                          {projectChildren.length === 0 ? (
-                                            <tr>
-                                              <td colSpan={3} className="px-3 py-4 text-center text-sm text-stone-500">
-                                                尚無子專案（於子案詳情設定「母專案」即可掛在此）
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            projectChildren.map((child) => {
-                                              const childPid = String(child.專案ID ?? "").trim();
-                                              return (
-                                                <tr
-                                                  key={child.id ?? childPid}
-                                                  className="cursor-pointer hover:bg-sky-50/90"
-                                                  onClick={() => {
-                                                    setSelectedMaster(child);
-                                                    setIsEditingMaster(false);
-                                                    setSaveMasterError(null);
-                                                  }}
-                                                >
-                                                  <td className="max-w-[16rem] px-3 py-2.5">
-                                                    <p className="truncate text-sm font-semibold text-stone-900">
-                                                      {String(child.專案名稱 ?? "").trim() || "—"}
-                                                    </p>
-                                                    <p className="mt-0.5 truncate text-[10px] text-stone-400" title={childPid}>
-                                                      {childPid || "—"}
-                                                    </p>
-                                                  </td>
-                                                  <td className="whitespace-nowrap px-3 py-2.5 text-sm text-stone-600">
-                                                    {String(child.專案狀態 ?? "").trim() || "—"}
-                                                  </td>
-                                                  <td className="whitespace-nowrap px-3 py-2.5 text-right text-sm tabular-nums text-stone-800">
-                                                    {canViewMasterAmountsForRow(child)
-                                                      ? formatAmount(String(child.專案總金額未稅 ?? ""))
-                                                      : "—"}
-                                                  </td>
-                                                </tr>
-                                              );
-                                            })
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
+                                      ) : null}
+                                    </h3>
+                                    {projectTasksDone.length > 0 ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setExpandedTasksShowCompleted((v) => !v)}
+                                        className="rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-stone-600 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-900"
+                                      >
+                                        {expandedTasksShowCompleted ? "只看進行中" : "顯示已完成"}
+                                      </button>
+                                    ) : null}
                                   </div>
-                                  <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-amber-800">
-                                    此專案任務
-                                    <span className="ml-2 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-amber-900">
-                                      {projectTasks.length} 筆
-                                    </span>
-                                  </h3>
                                   <div className="mb-4 max-w-full overflow-x-auto rounded-lg border border-stone-200/90">
                                     {/*
                                       inline-table：避免在整欄寬的 td 內被撐成 100% 寬（與上方專案列無對齊需求）
@@ -7053,7 +7089,9 @@ export default function DashboardPage() {
                                         {projectTasks.length === 0 ? (
                                           <tr>
                                             <td colSpan={9} className="px-3 py-4 text-center text-sm text-stone-500">
-                                              尚無任務，請點「新增任務」新增
+                                              {projectTasksAll.length === 0
+                                                ? "尚無任務，請點「新增任務」新增"
+                                                : "目前沒有進行中任務（可點「顯示已完成」查看）"}
                                             </td>
                                           </tr>
                                         ) : (
