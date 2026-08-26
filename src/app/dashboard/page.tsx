@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { User } from "@/lib/types";
@@ -893,6 +893,95 @@ function TaskProjectInfoButton({
           </span>
         ) : null}
       </span>
+    </span>
+  );
+}
+
+/** 總覽列表：滑鼠懸停顯示摘要（fixed，避免被 overflow 裁切） */
+function OverviewHoverSummary({
+  title,
+  subtitle,
+  fields,
+  body,
+  children,
+  className = "",
+}: {
+  title: string;
+  subtitle?: string;
+  fields?: Array<{ label: string; value: string }>;
+  body?: Array<{ label: string; value: string }>;
+  children: ReactNode;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; placeAbove: boolean }>({
+    top: 0,
+    left: 0,
+    placeAbove: false,
+  });
+  const anchorRef = useRef<HTMLSpanElement>(null);
+
+  const updatePos = useCallback(() => {
+    const el = anchorRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const width = 288;
+    const margin = 8;
+    let left = r.left;
+    if (left + width > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - width - margin);
+    const placeAbove = r.bottom + 230 > window.innerHeight - margin;
+    setPos({
+      top: placeAbove ? r.top - 6 : r.bottom + 6,
+      left,
+      placeAbove,
+    });
+  }, []);
+
+  return (
+    <span
+      ref={anchorRef}
+      className={`relative inline-flex max-w-full min-w-0 ${className}`}
+      onMouseEnter={() => {
+        updatePos();
+        setOpen(true);
+      }}
+      onMouseLeave={() => setOpen(false)}
+    >
+      {children}
+      {open ? (
+        <span
+          className="pointer-events-none fixed z-[80] w-72 rounded-xl border border-amber-200 bg-white p-3 text-left text-xs shadow-2xl ring-1 ring-stone-200/70"
+          style={{
+            top: pos.top,
+            left: pos.left,
+            transform: pos.placeAbove ? "translateY(-100%)" : undefined,
+          }}
+          role="tooltip"
+        >
+          <span className="mb-2 block border-b border-stone-100 pb-2">
+            <span className="block text-sm font-bold leading-snug text-stone-900 whitespace-normal">{title || "—"}</span>
+            {subtitle ? <span className="mt-0.5 block truncate text-[11px] text-stone-500">{subtitle}</span> : null}
+          </span>
+          {fields && fields.length > 0 ? (
+            <span className="grid grid-cols-2 gap-x-3 gap-y-2">
+              {fields.map((f) => (
+                <span key={f.label} className="min-w-0">
+                  <span className="block text-[10px] font-semibold text-stone-400">{f.label}</span>
+                  <span className="mt-0.5 block truncate font-medium text-stone-700">{f.value || "—"}</span>
+                </span>
+              ))}
+            </span>
+          ) : null}
+          {body?.map((b) =>
+            b.value ? (
+              <span key={b.label} className="mt-2 block border-t border-stone-100 pt-2">
+                <span className="block text-[10px] font-semibold text-stone-400">{b.label}</span>
+                <span className="mt-0.5 block line-clamp-4 whitespace-normal text-stone-600">{b.value}</span>
+              </span>
+            ) : null
+          )}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -6393,7 +6482,12 @@ export default function DashboardPage() {
                 </h3>
                 {!overviewDirectorCompanyView && (
                   <p className="mb-3 text-[11px] leading-relaxed text-stone-500">
-                    專案需為進行中，且您在 BDPM／引薦人／管理員／執行管理員／KOL 名稱欄位之一與登入姓名或 Email 相符，或您有被指派的任務隸屬該專案。
+                    專案需為進行中，且您在 BDPM／引薦人／管理員／執行管理員／KOL 名稱欄位之一與登入姓名或 Email 相符，或您有被指派的任務隸屬該專案。滑鼠移到專案名稱可看摘要，點列可開啟詳情。
+                  </p>
+                )}
+                {overviewDirectorCompanyView && (
+                  <p className="mb-3 text-[11px] leading-relaxed text-stone-500">
+                    滑鼠移到專案名稱可看摘要，點列可開啟詳情。
                   </p>
                 )}
                 {overviewProjectRows.length === 0 ? (
@@ -6409,15 +6503,51 @@ export default function DashboardPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-200">
-                        {overviewProjectRows.map((row) => (
-                          <tr key={row.id || row.專案ID} className="bg-amber-50/40 hover:bg-amber-50/80">
-                            <td className="max-w-[10rem] truncate px-3 py-2 font-medium text-stone-900" title={row.專案名稱 ?? ""}>
-                              {row.專案名稱 ?? "—"}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 text-stone-600">{row.專案狀態 ?? "—"}</td>
-                            <td className="whitespace-nowrap px-3 py-2 text-stone-500">{row.專案ID}</td>
-                          </tr>
-                        ))}
+                        {overviewProjectRows.map((row) => {
+                          const name = String(row.專案名稱 ?? "").trim() || "—";
+                          const content = String(row.專案內容 ?? "").trim();
+                          const note = String(row.備註 ?? "").trim();
+                          return (
+                            <tr
+                              key={row.id || row.專案ID}
+                              className="cursor-pointer bg-amber-50/40 transition hover:bg-amber-50/80"
+                              onClick={() => {
+                                setSelectedMaster(row);
+                                setIsEditingMaster(false);
+                                setSaveMasterError(null);
+                              }}
+                            >
+                              <td className="max-w-[10rem] px-3 py-2 font-medium text-stone-900">
+                                <OverviewHoverSummary
+                                  title={name}
+                                  subtitle={String(row.專案ID ?? "")}
+                                  fields={[
+                                    { label: "狀態", value: String(row.專案狀態 ?? "").trim() || "—" },
+                                    { label: "KOL", value: String(row.KOL名稱 ?? "").trim() || "—" },
+                                    { label: "廠商", value: String(row.廠商名稱 ?? "").trim() || "—" },
+                                    {
+                                      label: "開案日",
+                                      value: String(row.開案日期 ?? "").trim().slice(0, 10) || "—",
+                                    },
+                                  ]}
+                                  body={[
+                                    { label: "專案內容", value: content },
+                                    { label: "備註", value: note },
+                                  ]}
+                                  className="w-full"
+                                >
+                                  <span className="block truncate underline decoration-amber-200/80 decoration-dotted underline-offset-2">
+                                    {name}
+                                  </span>
+                                </OverviewHoverSummary>
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2 text-stone-600">{row.專案狀態 ?? "—"}</td>
+                              <td className="whitespace-nowrap px-3 py-2 text-stone-500" title={row.專案ID ?? ""}>
+                                {row.專案ID ? "SDH-…" : "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -6428,7 +6558,9 @@ export default function DashboardPage() {
                 <h3 className="mb-1 text-sm font-bold text-amber-800">
                   {overviewDirectorCompanyView ? "未完成任務" : "指派給我的任務"}
                 </h3>
-                <p className="mb-3 text-[11px] text-stone-500">以「任務負責人」等於您的姓名或 Email 為準。</p>
+                <p className="mb-3 text-[11px] text-stone-500">
+                  以「任務負責人」等於您的姓名或 Email 為準。滑鼠移到任務名稱可看摘要，點列可開啟詳情。
+                </p>
                 {overviewTaskRows.length === 0 ? (
                   <p className="py-6 text-center text-sm text-stone-500">目前沒有符合條件的任務</p>
                 ) : (
@@ -6442,17 +6574,47 @@ export default function DashboardPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-200">
-                        {overviewTaskRows.map((t, i) => (
-                          <tr key={t.任務ID ?? `${t.專案ID}-${i}`} className="bg-amber-50/40 hover:bg-amber-50/80">
-                            <td className="max-w-[9rem] truncate px-3 py-2 font-medium text-stone-900" title={t.任務 ?? ""}>
-                              {t.任務 ?? "—"}
-                            </td>
-                            <td className="max-w-[7rem] truncate px-3 py-2 text-stone-500" title={t.專案名稱 ?? t.專案ID ?? ""}>
-                              {t.專案名稱 ?? t.專案ID ?? "—"}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 text-stone-600">{t.任務類型 ?? "—"}</td>
-                          </tr>
-                        ))}
+                        {overviewTaskRows.map((t, i) => {
+                          const taskTitle = String(t.任務 ?? "").trim() || "—";
+                          const projectLabel = String(t.專案名稱 ?? t.專案ID ?? "").trim() || "—";
+                          const note = String(t.備註 ?? "").trim();
+                          return (
+                            <tr
+                              key={t.任務ID ?? `${t.專案ID}-${i}`}
+                              className="cursor-pointer bg-amber-50/40 transition hover:bg-amber-50/80"
+                              onClick={() => setSelectedTask(t)}
+                            >
+                              <td className="max-w-[9rem] px-3 py-2 font-medium text-stone-900">
+                                <OverviewHoverSummary
+                                  title={taskTitle}
+                                  subtitle={projectLabel}
+                                  fields={[
+                                    { label: "任務類型", value: String(t.任務類型 ?? "").trim() || "—" },
+                                    { label: "負責人", value: String(t.任務負責人 ?? "").trim() || "—" },
+                                    {
+                                      label: "到期日",
+                                      value: formatTaskDueYmd(t.到期日),
+                                    },
+                                    {
+                                      label: "專案ID",
+                                      value: String(t.專案ID ?? "").trim() || "—",
+                                    },
+                                  ]}
+                                  body={[{ label: "備註", value: note }]}
+                                  className="w-full"
+                                >
+                                  <span className="block truncate underline decoration-amber-200/80 decoration-dotted underline-offset-2">
+                                    {taskTitle}
+                                  </span>
+                                </OverviewHoverSummary>
+                              </td>
+                              <td className="max-w-[7rem] truncate px-3 py-2 text-stone-500" title={projectLabel}>
+                                {projectLabel}
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2 text-stone-600">{t.任務類型 ?? "—"}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
