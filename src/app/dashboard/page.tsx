@@ -1887,6 +1887,8 @@ export default function DashboardPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [partnersSearch, setPartnersSearch] = useState("");
   const [tasksSearch, setTasksSearch] = useState("");
+  /** 董事長／管理者：任務分頁看全部或只看指派給自己 */
+  const [tasksAssigneeScope, setTasksAssigneeScope] = useState<"all" | "mine">("all");
   const [payoutSearch, setPayoutSearch] = useState("");
   const [payoutWorkflowTab, setPayoutWorkflowTab] = useState<PayoutWorkflowTabKey>("pending_vendor");
   const [financeSearch, setFinanceSearch] = useState("");
@@ -2911,21 +2913,34 @@ export default function DashboardPage() {
     [partners, filterRowsByVisibility]
   );
   const filteredTasks = visibilityFilteredTasks;
+  /** 董事長／管理者可在任務分頁切「只看指派給自己」 */
+  const canManageTaskWorkloadView = useMemo(
+    () => Boolean(me && ["董事長", "管理者"].includes(me.role)),
+    [me]
+  );
+  const tasksForSection = useMemo(() => {
+    if (!canManageTaskWorkloadView || tasksAssigneeScope !== "mine") return filteredTasks;
+    const subject = visibilitySubject ?? me;
+    if (!subject) return filteredTasks;
+    const uName = (subject.name ?? "").trim();
+    const uEmail = (subject.email ?? "").trim();
+    return filteredTasks.filter((t) => taskAssigneeIsUser(t, uName, uEmail));
+  }, [filteredTasks, canManageTaskWorkloadView, tasksAssigneeScope, visibilitySubject, me]);
   const tasksLifecycleCounts = useMemo(() => {
     let inProgress = 0;
     let completed = 0;
-    for (const t of filteredTasks) {
+    for (const t of tasksForSection) {
       if (t.任務完成) completed += 1;
       else inProgress += 1;
     }
     return { inProgress, completed };
-  }, [filteredTasks]);
+  }, [tasksForSection]);
   const tasksLifecycleFilteredList = useMemo(
     () =>
-      filteredTasks.filter((t) =>
+      tasksForSection.filter((t) =>
         tasksLifecycleTab === "completed" ? Boolean(t.任務完成) : !Boolean(t.任務完成)
       ),
-    [filteredTasks, tasksLifecycleTab]
+    [tasksForSection, tasksLifecycleTab]
   );
 
   const overviewDirectorCompanyView = Boolean(visibilitySubject?.role === "董事長" && overviewScope === "company");
@@ -3509,10 +3524,6 @@ export default function DashboardPage() {
     }
   }, [assignNextSourceTask, assignNextForm, patchTaskComplete]);
 
-  const canManageTaskWorkloadView = useMemo(
-    () => Boolean(me && ["董事長", "管理者"].includes(me.role)),
-    [me]
-  );
   const taskWorkloadByAssignee = useMemo(() => aggregateTasksByAssignee(searchedTasks), [searchedTasks]);
 
   const workloadDrillTasks = useMemo(() => {
@@ -8911,6 +8922,33 @@ export default function DashboardPage() {
                 </button>
               </div>
               {canManageTaskWorkloadView && (
+                <div className="flex shrink-0 rounded-lg border border-stone-200 bg-stone-50/90 p-0.5 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setTasksAssigneeScope("all")}
+                    className={`rounded-md px-3 py-1.5 transition ${
+                      tasksAssigneeScope === "all" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:text-stone-900"
+                    }`}
+                  >
+                    全部
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTasksAssigneeScope("mine");
+                      setTasksSectionViewMode("list");
+                      setWorkloadDrill(null);
+                    }}
+                    className={`rounded-md px-3 py-1.5 transition ${
+                      tasksAssigneeScope === "mine" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:text-stone-900"
+                    }`}
+                    title="只顯示任務負責人為您的姓名或 Email 的任務"
+                  >
+                    指派給我
+                  </button>
+                </div>
+              )}
+              {canManageTaskWorkloadView && (
                 <div className="flex shrink-0 rounded-lg border border-amber-200 bg-amber-50/90 p-0.5 text-xs font-semibold">
                   <button
                     type="button"
@@ -8921,9 +8959,12 @@ export default function DashboardPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setTasksSectionViewMode("byAssignee")}
+                    onClick={() => {
+                      setTasksAssigneeScope("all");
+                      setTasksSectionViewMode("byAssignee");
+                    }}
                     disabled={tasksLifecycleTab !== "in_progress"}
-                    className={`rounded-md px-3 py-1.5 transition ${tasksSectionViewMode === "byAssignee" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:text-stone-900"}`}
+                    className={`rounded-md px-3 py-1.5 transition ${tasksSectionViewMode === "byAssignee" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:text-stone-900"} disabled:cursor-not-allowed disabled:opacity-40`}
                   >
                     依員工
                   </button>
@@ -9140,9 +9181,19 @@ export default function DashboardPage() {
           <div className="space-y-3 md:hidden">
             {filteredTasks.length === 0 ? (
               <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">尚無任務資料（請在大總表展開專案後新增任務）</p>
+            ) : tasksForSection.length === 0 ? (
+              <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">
+                目前沒有指派給您的任務
+              </p>
             ) : tasksLifecycleFilteredList.length === 0 ? (
               <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">
-                {tasksLifecycleTab === "in_progress" ? "目前沒有進行中任務" : "目前沒有已完成任務"}
+                {tasksAssigneeScope === "mine"
+                  ? tasksLifecycleTab === "in_progress"
+                    ? "目前沒有指派給您的進行中任務"
+                    : "目前沒有指派給您的已完成任務"
+                  : tasksLifecycleTab === "in_progress"
+                    ? "目前沒有進行中任務"
+                    : "目前沒有已完成任務"}
               </p>
             ) : searchedTasks.length === 0 ? (
               <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">沒有符合搜尋結果</p>
@@ -9266,10 +9317,22 @@ export default function DashboardPage() {
                       尚無任務資料（請在大總表展開專案後新增任務）
                     </td>
                   </tr>
+                ) : tasksForSection.length === 0 ? (
+                  <tr>
+                    <td colSpan={(tasksVisibleCols.length || 6) + 1} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                      目前沒有指派給您的任務
+                    </td>
+                  </tr>
                 ) : tasksLifecycleFilteredList.length === 0 ? (
                   <tr>
                     <td colSpan={(tasksVisibleCols.length || 6) + 1} className="px-4 py-8 text-center text-base font-medium text-stone-500">
-                      {tasksLifecycleTab === "in_progress" ? "目前沒有進行中任務" : "目前沒有已完成任務"}
+                      {tasksAssigneeScope === "mine"
+                        ? tasksLifecycleTab === "in_progress"
+                          ? "目前沒有指派給您的進行中任務"
+                          : "目前沒有指派給您的已完成任務"
+                        : tasksLifecycleTab === "in_progress"
+                          ? "目前沒有進行中任務"
+                          : "目前沒有已完成任務"}
                     </td>
                   </tr>
                 ) : searchedTasks.length === 0 ? (
