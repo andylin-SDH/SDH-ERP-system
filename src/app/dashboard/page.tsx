@@ -856,7 +856,10 @@ function TaskProjectInfoButton({
       ? ([
           ["專案總金額未稅", formatAmount(project.專案總金額未稅)],
           ["專案額外成本", formatAmount(project.專案成本)],
-          ["專案營收", formatAmount(project.專案營收)],
+          [
+            "專案營收",
+            formatAmount(calc專案營收(project.專案總金額未稅, project.專案成本, project.KOL費用未稅)),
+          ],
         ] as const)
       : ([] as const)),
     ["專案狀態", project.專案狀態 || "—"],
@@ -1420,6 +1423,9 @@ function masterTableCellText(
   if (colKey === "專案開發人") {
     if (!modeB) return "";
     return String(row.專案開發人 ?? "").trim();
+  }
+  if (colKey === "專案營收") {
+    return calc專案營收(row.專案總金額未稅, row.專案成本, row.KOL費用未稅);
   }
   return String((row as unknown as Record<string, unknown>)[colKey] ?? "").trim();
 }
@@ -13613,7 +13619,19 @@ export default function DashboardPage() {
                       <p className="mt-1 text-xs text-stone-500">{projectRevenueFormulaHint()}</p>
                     </div>
                   ) : (
-                    <Field label="專案營收" value={formatAmount(selectedMaster.專案營收)} />
+                    <div>
+                      <Field
+                        label="專案營收"
+                        value={formatAmount(
+                          calc專案營收(
+                            selectedMaster.專案總金額未稅,
+                            selectedMaster.專案成本,
+                            selectedMaster.KOL費用未稅
+                          )
+                        )}
+                      />
+                      <p className="mt-1 text-xs text-stone-500">{projectRevenueFormulaHint()}</p>
+                    </div>
                   )}
 
                   {isEditingMaster ? (
