@@ -7,7 +7,7 @@ import { getSupabase } from "@/lib/supabase/server";
 import { log } from "@/lib/log";
 import { parsePayoutRate, parseAmount } from "@/lib/payout-utils";
 import { isPayoutModeB } from "@/config/master-payout-defaults";
-import { calc專案盈餘 } from "@/config/project-types";
+import { calc專案營收 } from "@/config/project-types";
 import type { MasterRow } from "@/lib/db/master";
 import { getMasterList } from "@/lib/db/master";
 import { getPartners } from "@/lib/db/partners";
@@ -433,9 +433,9 @@ async function buildPayoutRowsForMaster(
   const 專案ID = master.專案ID ?? "";
   const 專案名稱 = master.專案名稱 ?? null;
   const 專案總金額未稅 = master.專案總金額未稅 ?? null;
-  /** 分潤基準＝專案盈餘（依類型自動計算；寫入分潤表「專案營收」欄） */
+  /** 分潤基準＝專案營收（總金額 − 額外成本 − KOL費用；寫入分潤表「專案營收」欄） */
   const 專案營收 =
-    calc專案盈餘(master.專案類型, master.專案總金額未稅, master.KOL費用未稅) || null;
+    calc專案營收(master.專案總金額未稅, master.專案成本, master.KOL費用未稅) || null;
   const amount = parseAmount(專案營收 ?? 專案總金額未稅);
   const 專案類型 = (master.專案類型 ?? "").trim();
   const 廠商預計付款日 = master.廠商預計付款日?.trim() || null;
@@ -538,7 +538,7 @@ export type SyncPayoutForProjectOptions = {
 /**
  * 依大總表一筆專案與成數預設，產生分潤列並同步至分潤表
  * （刪除自動分潤列後再插入；「額外獎金」人工列會保留）
- * 分潤金額基準：專案盈餘（DB 欄位「專案營收」；未填則用專案總金額未稅）
+ * 分潤金額基準：專案營收（總金額 − 額外成本 − KOL費用；未填則用專案總金額未稅）
  */
 export async function syncPayoutForProject(
   master: MasterRow,
@@ -546,21 +546,21 @@ export async function syncPayoutForProject(
   options?: SyncPayoutForProjectOptions
 ): Promise<void> {
   const 專案ID = master.專案ID ?? "";
-  const computedSurplus = calc專案盈餘(master.專案類型, master.專案總金額未稅, master.KOL費用未稅);
-  const prevSurplus = String(master.專案營收 ?? "").trim();
-  if (master.id && computedSurplus !== prevSurplus) {
+  const computedRevenue = calc專案營收(master.專案總金額未稅, master.專案成本, master.KOL費用未稅);
+  const prevRevenue = String(master.專案營收 ?? "").trim();
+  if (master.id && computedRevenue !== prevRevenue) {
     const supabase = getSupabase();
-    const { error: surplusErr } = await supabase
+    const { error: revenueErr } = await supabase
       .from("大總表")
       .update({
-        專案營收: computedSurplus || null,
+        專案營收: computedRevenue || null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", master.id);
-    if (surplusErr) {
-      log("payout.sync", "回寫專案盈餘失敗", { 專案ID, error: String(surplusErr.message) });
+    if (revenueErr) {
+      log("payout.sync", "回寫專案營收失敗", { 專案ID, error: String(revenueErr.message) });
     } else {
-      master = { ...master, 專案營收: computedSurplus || null };
+      master = { ...master, 專案營收: computedRevenue || null };
     }
   }
 
