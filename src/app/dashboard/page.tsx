@@ -1986,7 +1986,7 @@ export default function DashboardPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [partnersSearch, setPartnersSearch] = useState("");
   const [tasksSearch, setTasksSearch] = useState("");
-  /** 董事長／管理者：任務分頁看全部或只看指派給自己 */
+  /** 任務分頁：看全部可見任務，或只看指派給自己（每位員工皆可用） */
   const [tasksAssigneeScope, setTasksAssigneeScope] = useState<"all" | "mine">("all");
   const [payoutSearch, setPayoutSearch] = useState("");
   const [payoutWorkflowTab, setPayoutWorkflowTab] = useState<PayoutWorkflowTabKey>("pending_vendor");
@@ -3012,19 +3012,20 @@ export default function DashboardPage() {
     [partners, filterRowsByVisibility]
   );
   const filteredTasks = visibilityFilteredTasks;
-  /** 董事長／管理者可在任務分頁切「只看指派給自己」 */
+  /** 董事長／管理者：任務「依員工」彙總視圖 */
   const canManageTaskWorkloadView = useMemo(
     () => Boolean(me && ["董事長", "管理者"].includes(me.role)),
     [me]
   );
+  /** 「指派給我」：所有員工皆可，依任務負責人是否為目前視角（含預覽） */
   const tasksForSection = useMemo(() => {
-    if (!canManageTaskWorkloadView || tasksAssigneeScope !== "mine") return filteredTasks;
+    if (tasksAssigneeScope !== "mine") return filteredTasks;
     const subject = visibilitySubject ?? me;
     if (!subject) return filteredTasks;
     const uName = (subject.name ?? "").trim();
     const uEmail = (subject.email ?? "").trim();
     return filteredTasks.filter((t) => taskAssigneeIsUser(t, uName, uEmail));
-  }, [filteredTasks, canManageTaskWorkloadView, tasksAssigneeScope, visibilitySubject, me]);
+  }, [filteredTasks, tasksAssigneeScope, visibilitySubject, me]);
   const tasksLifecycleCounts = useMemo(() => {
     let inProgress = 0;
     let completed = 0;
@@ -9127,33 +9128,31 @@ export default function DashboardPage() {
                   <span className="ml-1 tabular-nums text-[10px] opacity-80">({tasksLifecycleCounts.completed})</span>
                 </button>
               </div>
-              {canManageTaskWorkloadView && (
-                <div className="flex shrink-0 rounded-lg border border-stone-200 bg-stone-50/90 p-0.5 text-xs font-semibold">
-                  <button
-                    type="button"
-                    onClick={() => setTasksAssigneeScope("all")}
-                    className={`rounded-md px-3 py-1.5 transition ${
-                      tasksAssigneeScope === "all" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:text-stone-900"
-                    }`}
-                  >
-                    全部
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTasksAssigneeScope("mine");
-                      setTasksSectionViewMode("list");
-                      setWorkloadDrill(null);
-                    }}
-                    className={`rounded-md px-3 py-1.5 transition ${
-                      tasksAssigneeScope === "mine" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:text-stone-900"
-                    }`}
-                    title="只顯示任務負責人為您的姓名或 Email 的任務"
-                  >
-                    指派給我
-                  </button>
-                </div>
-              )}
+              <div className="flex shrink-0 rounded-lg border border-stone-200 bg-stone-50/90 p-0.5 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setTasksAssigneeScope("all")}
+                  className={`rounded-md px-3 py-1.5 transition ${
+                    tasksAssigneeScope === "all" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:text-stone-900"
+                  }`}
+                >
+                  全部
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTasksAssigneeScope("mine");
+                    setTasksSectionViewMode("list");
+                    setWorkloadDrill(null);
+                  }}
+                  className={`rounded-md px-3 py-1.5 transition ${
+                    tasksAssigneeScope === "mine" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:text-stone-900"
+                  }`}
+                  title="只顯示任務負責人為您的姓名或 Email 的任務"
+                >
+                  指派給我
+                </button>
+              </div>
               {canManageTaskWorkloadView && (
                 <div className="flex shrink-0 rounded-lg border border-amber-200 bg-amber-50/90 p-0.5 text-xs font-semibold">
                   <button
