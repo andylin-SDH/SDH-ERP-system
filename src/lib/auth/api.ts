@@ -110,6 +110,25 @@ export async function requireExtraBonusEditor(
   return result;
 }
 
+/** KOL 代墊已匯款（廠商未入帳例外）：董事長／會計 */
+export const KOL_ADVANCE_REMIT_ROLES = ["董事長", "會計"] as const;
+
+export function canRegisterKolAdvanceRemittance(role: string | undefined | null): boolean {
+  const r = String(role ?? "").trim();
+  return (KOL_ADVANCE_REMIT_ROLES as readonly string[]).includes(r);
+}
+
+export async function requireKolAdvanceRemittanceEditor(
+  request: NextRequest | Request
+): Promise<{ user: User } | NextResponse> {
+  const result = await requireEmployee(request);
+  if (result instanceof NextResponse) return result;
+  if (!canRegisterKolAdvanceRemittance(result.user.role)) {
+    return NextResponse.json({ ok: false, error: "僅董事長或會計可登記代墊匯款" }, { status: 403 });
+  }
+  return result;
+}
+
 /** 可預覽 KOL 老師入口的員工角色（董事長／管理者／會計） */
 export const KOL_PORTAL_PREVIEW_ROLES = ["董事長", "管理者", "會計"] as const;
 

@@ -1,11 +1,17 @@
 /**
- * GET — KOL 匯款清單（待匯款／已匯款）
+ * GET — KOL 匯款清單（待匯款／已匯款）；?candidates=advance 代墊候選
  * POST — 登記 KOL 匯款（單筆或批次；寫付款記錄 + 更新 KOL發票）
+ *        body.代墊=true 時僅董事長／會計，允許廠商未入帳
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireEmployee } from "@/lib/auth/api";
 import {
+  canRegisterKolAdvanceRemittance,
+  requireEmployee,
+  requireKolAdvanceRemittanceEditor,
+} from "@/lib/auth/api";
+import {
+  getKolAdvanceRemittanceCandidates,
   getKolRemittanceList,
   registerKolRemittance,
   registerKolRemittanceBatch,
@@ -21,6 +27,14 @@ export async function GET(request: NextRequest) {
   const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
   try {
+    const candidates = String(request.nextUrl.searchParams.get("candidates") ?? "").trim();
+    if (candidates === "advance") {
+      if (!canRegisterKolAdvanceRemittance(auth.user.role)) {
+        return NextResponse.json({ ok: false, error: "僅董事長或會計可查看代墊候選" }, { status: 403 });
+      }
+      const items = await getKolAdvanceRemittanceCandidates();
+      return NextResponse.json({ ok: true, items });
+    }
     const items = await getKolRemittanceList();
     return NextResponse.json({ ok: true, items });
   } catch (e) {
@@ -33,8 +47,6 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireEmployee(request);
-  if (auth instanceof NextResponse) return auth;
   try {
     const body = (await request.json()) as {
       專案ID?: string;
@@ -42,6 +54,7 @@ export async function POST(request: NextRequest) {
       匯款金額?: string | null;
       付款對象?: string | null;
       備註?: string | null;
+      代墊?: boolean;
       items?: Array<{
         專案ID?: string;
         匯款日期?: string;
@@ -51,10 +64,22 @@ export async function POST(request: NextRequest) {
       }>;
     } | null;
 
+    const isAdvance = Boolean(body?.代墊);
+    const auth = isAdvance
+      ? await requireKolAdvanceRemittanceEditor(request)
+      : await requireEmployee(request);
+    if (auth instanceof NextResponse) return auth;
+
     const 登記人 = fillerLabel(auth.user);
     const rawItems = Array.isArray(body?.items) ? body!.items! : null;
 
     if (rawItems && rawItems.length > 0) {
+      if (isAdvance) {
+        return NextResponse.json(
+          { ok: false, error: "批次登記不支援代墊，請逐筆使用代墊匯款" },
+          { status: 400 }
+        );
+      }
       const items = rawItems.map((it) => ({
         專案ID: String(it?.專案ID ?? "").trim(),
         匯款日期: String(it?.匯款日期 ?? body?.匯款日期 ?? "").trim(),
@@ -79,6 +104,7 @@ export async function POST(request: NextRequest) {
       付款對象: body?.付款對象,
       備註: body?.備註,
       登記人,
+      代墊: isAdvance,
     });
 
     return NextResponse.json({ ok: true, ...result });

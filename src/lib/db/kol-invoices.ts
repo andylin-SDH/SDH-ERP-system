@@ -143,6 +143,80 @@ export async function setKolRemittance(
   return rowToKolInvoice(data as Record<string, unknown>);
 }
 
+/**
+ * 代墊匯款：允許在無請款憑證／廠商未入帳時寫入匯款日。
+ * 若尚無 KOL發票列則建立內部 stub（不假填廠商付款日、不視為老師已請款）。
+ */
+export async function setKolRemittanceForAdvance(
+  專案ID: string,
+  input: { KOL匯款日期: string; KOL匯款金額?: string | null; 登記人: string }
+): Promise<KolInvoiceRow> {
+  const pid = String(專案ID ?? "").trim();
+  const date = String(input.KOL匯款日期 ?? "").trim().slice(0, 10);
+  const 登記人 = String(input.登記人 ?? "").trim() || "內部";
+  if (!pid) throw new Error("專案ID 為必填");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("請填寫有效的匯款日期");
+
+  const existing = await getKolInvoiceByProjectId(pid);
+  if (existing && String(existing.KOL匯款日期 ?? "").trim()) {
+    throw new Error("此專案已登記 KOL 匯款，不可重複登記");
+  }
+
+  const amtRaw = String(input.KOL匯款金額 ?? "").trim().replace(/,/g, "");
+  const now = new Date().toISOString();
+
+  if (!existing) {
+    const insertPayload: Record<string, unknown> = {
+      專案ID: pid,
+      請款方式: "發票",
+      填寫來源: "內部",
+      填寫人: 登記人,
+      填寫時間: now,
+      updated_at: now,
+      KOL發票備註: "代墊匯款（廠商尚未入帳；非老師提領）",
+      KOL匯款日期: date,
+      KOL匯款金額: amtRaw || null,
+    };
+    const { data, error } = await getSupabase().from("KOL發票").insert(insertPayload).select("*").maybeSingle();
+    if (error) {
+      if (isKolInvoiceTableMissing(error)) {
+        throw new Error("KOL發票表尚未建立，請先執行 migration");
+      }
+      throw error;
+    }
+    if (!data) throw new Error("建立代墊匯款紀錄失敗");
+    return rowToKolInvoice(data as Record<string, unknown>);
+  }
+
+  const payload: Record<string, unknown> = {
+    KOL匯款日期: date,
+    KOL匯款金額: amtRaw || null,
+    updated_at: now,
+  };
+  const note = String(existing.KOL發票備註 ?? "").trim();
+  if (!note.includes("代墊")) {
+    payload.KOL發票備註 = note
+      ? `${note}｜代墊匯款（廠商尚未入帳）`
+      : "代墊匯款（廠商尚未入帳；非老師提領）";
+  }
+
+  const { data, error } = await getSupabase()
+    .from("KOL發票")
+    .update(payload)
+    .eq("專案ID", pid)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    if (isKolInvoiceTableMissing(error)) {
+      throw new Error("KOL發票表尚未建立，請先執行 migration");
+    }
+    throw error;
+  }
+  if (!data) throw new Error("找不到該專案請款憑證或更新失敗");
+  return rowToKolInvoice(data as Record<string, unknown>);
+}
+
 /** 已登記匯款後，修正 KOL 匯款日期（例如由付款記錄「付款日期」連動） */
 export async function updateKolRemittanceDate(專案ID: string, 匯款日期: string): Promise<KolInvoiceRow> {
   const pid = String(專案ID ?? "").trim();

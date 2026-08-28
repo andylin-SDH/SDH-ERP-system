@@ -55,20 +55,22 @@ export function kolFinanceProgressShort(
   kol?: KolRequestCredential | null,
   KOL匯款日期?: string | null
 ): string {
-  const vendorPaid = kolClientHasCredited(廠商付款日期);
   const remitted = String(KOL匯款日期 ?? "").trim();
+  /** 已匯款優先：支援代墊（廠商尚未入帳但公司已匯出）顯示，不開請款閘 */
+  if (remitted) return "已匯款";
+  const vendorPaid = kolClientHasCredited(廠商付款日期);
   if (!vendorPaid) return "未入帳";
   if (!kolHasRequestCredential(kol)) return "可請款";
-  if (!remitted) return "待匯款";
-  return "已匯款";
+  return "待匯款";
 }
 
-/** KOL 是否可填寫／修改請款憑證（需客戶已入帳且尚未匯款） */
+/** KOL 是否可填寫／修改請款憑證（需客戶已入帳且尚未匯款；代墊已匯款亦不可再請） */
 export function kolCanEditRequestCredential(
   廠商付款日期?: string | null,
   kol?: KolRequestCredential | null,
   KOL匯款日期?: string | null
 ): boolean {
+  if (String(KOL匯款日期 ?? "").trim()) return false;
   if (!kolClientHasCredited(廠商付款日期)) return false;
   return kolFinanceProgressShort(廠商付款日期, kol, KOL匯款日期) !== "已匯款";
 }
