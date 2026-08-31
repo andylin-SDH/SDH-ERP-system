@@ -250,6 +250,38 @@ export async function updateKolRemittanceDate(專案ID: string, 匯款日期: st
   return rowToKolInvoice(data as Record<string, unknown>);
 }
 
+/** 撤回「登記匯款」：清空 KOL匯款日期／金額（憑證保留，回到待匯款或未入帳） */
+export async function clearKolRemittance(專案ID: string): Promise<KolInvoiceRow> {
+  const pid = String(專案ID ?? "").trim();
+  if (!pid) throw new Error("專案ID 為必填");
+
+  const existing = await getKolInvoiceByProjectId(pid);
+  if (!existing) throw new Error("此專案尚無 KOL 發票紀錄");
+  if (!String(existing.KOL匯款日期 ?? "").trim()) {
+    throw new Error("此專案尚未登記匯款，無需撤回");
+  }
+
+  const { data, error } = await getSupabase()
+    .from("KOL發票")
+    .update({
+      KOL匯款日期: null,
+      KOL匯款金額: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("專案ID", pid)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    if (isKolInvoiceTableMissing(error)) {
+      throw new Error("KOL發票表尚未建立，請先執行 migration");
+    }
+    throw error;
+  }
+  if (!data) throw new Error("找不到該專案請款憑證或更新失敗");
+  return rowToKolInvoice(data as Record<string, unknown>);
+}
+
 export async function getKolInvoiceByProjectId(專案ID: string): Promise<KolInvoiceRow | null> {
   const pid = String(專案ID ?? "").trim();
   if (!pid) return null;

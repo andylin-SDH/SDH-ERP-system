@@ -2,6 +2,7 @@
  * GET — KOL 匯款清單（待匯款／已匯款）；?candidates=advance 代墊候選
  * POST — 登記 KOL 匯款（單筆或批次；寫付款記錄 + 更新 KOL發票）
  *        body.代墊=true 時僅董事長／會計，允許廠商未入帳
+ * DELETE — 撤回已登記匯款（清空匯款日 + 刪除對應 KOL 付款記錄）
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -15,6 +16,7 @@ import {
   getKolRemittanceList,
   registerKolRemittance,
   registerKolRemittanceBatch,
+  revokeKolRemittance,
 } from "@/lib/db/kol-remittance";
 
 export const dynamic = "force-dynamic";
@@ -112,6 +114,31 @@ export async function POST(request: NextRequest) {
     console.error("POST /api/kol-remittance", e);
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "登記失敗" },
+      { status: 400 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  const auth = await requireEmployee(request);
+  if (auth instanceof NextResponse) return auth;
+  try {
+    const body = (await request.json()) as { 專案ID?: string } | null;
+    const 專案ID = String(body?.專案ID ?? "").trim();
+    if (!專案ID) {
+      return NextResponse.json({ ok: false, error: "專案ID 為必填" }, { status: 400 });
+    }
+    const result = await revokeKolRemittance(專案ID);
+    return NextResponse.json({
+      ok: true,
+      專案ID,
+      deletedPayments: result.deletedPayments,
+      invoice: result.invoice,
+    });
+  } catch (e) {
+    console.error("DELETE /api/kol-remittance", e);
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "撤回匯款失敗" },
       { status: 400 }
     );
   }

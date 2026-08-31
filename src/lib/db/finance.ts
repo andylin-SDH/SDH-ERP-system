@@ -598,7 +598,12 @@ export async function createPaymentRecordsBatch(
 function isKolPaymentRecord(row: { 匯款類型?: string | null; 備註?: string | null }): boolean {
   if (String(row.匯款類型 ?? "").trim() === "KOL") return true;
   const note = String(row.備註 ?? "");
-  return note.includes("KOL匯款") || note.includes("KOL勞報匯款");
+  return (
+    note.includes("KOL匯款") ||
+    note.includes("KOL勞報匯款") ||
+    note.includes("代墊：廠商尚未入帳") ||
+    note.includes("代墊匯款")
+  );
 }
 
 export async function updatePaymentRecordById(id: string, row: PaymentRecordInput): Promise<PaymentRecordRow> {
@@ -649,6 +654,34 @@ export async function deletePaymentRecordsByIds(ids: string[]): Promise<number> 
   const { error, count } = await getSupabase().from("付款記錄").delete({ count: "exact" }).in("id", cleanIds);
   if (error) throw error;
   return count ?? cleanIds.length;
+}
+
+/** 刪除某專案之 KOL 類型付款記錄（撤回誤登記匯款用；明確使用者操作） */
+export async function deleteKolPaymentRecordsForProject(專案ID: string): Promise<number> {
+  const pid = String(專案ID ?? "").trim();
+  if (!pid) throw new Error("專案ID 為必填");
+
+  const { data, error } = await getSupabase()
+    .from("付款記錄")
+    .select("id, 匯款類型, 備註")
+    .eq("付款專案", pid);
+  if (error) {
+    if (error.code === "42P01") return 0;
+    throw error;
+  }
+
+  const ids = (data ?? [])
+    .filter((r) =>
+      isKolPaymentRecord({
+        匯款類型: (r as { 匯款類型?: string | null }).匯款類型,
+        備註: (r as { 備註?: string | null }).備註,
+      })
+    )
+    .map((r) => String((r as { id?: string }).id ?? "").trim())
+    .filter(Boolean);
+
+  if (ids.length === 0) return 0;
+  return deletePaymentRecordsByIds(ids);
 }
 
 export async function getFinance(): Promise<FinanceRow[]> {

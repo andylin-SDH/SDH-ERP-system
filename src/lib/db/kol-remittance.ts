@@ -7,9 +7,10 @@ import {
   getAllKolInvoices,
   setKolRemittance,
   setKolRemittanceForAdvance,
+  clearKolRemittance,
 } from "@/lib/db/kol-invoices";
 import { getPartnersApprovedWithError } from "@/lib/db/partners";
-import { createPaymentRecordsBatch } from "@/lib/db/finance";
+import { createPaymentRecordsBatch, deleteKolPaymentRecordsForProject } from "@/lib/db/finance";
 import { getFinance } from "@/modules/finance";
 import {
   kolClientHasCredited,
@@ -312,4 +313,22 @@ export async function registerKolRemittanceBatch(
     throw new Error(failed.map((f) => `${f.專案ID}：${f.error}`).join("；"));
   }
   return { ok, failed };
+}
+
+/**
+ * 撤回誤點的「登記匯款」：
+ * - 清空 KOL發票 匯款日／金額（憑證保留）
+ * - 刪除該專案匯款類型為 KOL 的付款記錄
+ * 狀態回到待匯款（或代墊時的未入帳）。
+ */
+export async function revokeKolRemittance(專案ID: string): Promise<{
+  invoice: Awaited<ReturnType<typeof clearKolRemittance>>;
+  deletedPayments: number;
+}> {
+  const pid = String(專案ID ?? "").trim();
+  if (!pid) throw new Error("專案ID 為必填");
+
+  const invoice = await clearKolRemittance(pid);
+  const deletedPayments = await deleteKolPaymentRecordsForProject(pid);
+  return { invoice, deletedPayments };
 }

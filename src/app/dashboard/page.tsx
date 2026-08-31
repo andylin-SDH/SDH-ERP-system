@@ -5276,6 +5276,50 @@ export default function DashboardPage() {
     [kolRemitDrafts, loadKolRemittanceList, refreshDashboardData]
   );
 
+  const revokeKolRemittanceRegistration = useCallback(
+    async (row: (typeof kolRemittanceItems)[number]) => {
+      const pid = String(row.專案ID ?? "").trim();
+      if (!pid) return;
+      if (
+        !window.confirm(
+          `確定撤回「${row.專案名稱 || pid}」的匯款登記？\n會清除匯款日期，並刪除對應的 KOL 付款記錄；請款憑證會保留，狀態回到待匯款。`
+        )
+      ) {
+        return;
+      }
+      setKolRemittanceSavingPid(pid);
+      setKolRemittanceError(null);
+      try {
+        const res = await fetch("/api/kol-remittance", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 專案ID: pid }),
+        });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string };
+        if (!res.ok || !data.ok) {
+          setKolRemittanceError(data.error ?? "撤回匯款失敗");
+          return;
+        }
+        setFinanceKolRemittanceTab("pending");
+        await Promise.all([
+          loadKolRemittanceList(),
+          canRegisterKolAdvanceRemit ? loadKolAdvanceCandidates() : Promise.resolve(),
+          refreshDashboardData(["payments"]),
+        ]);
+      } catch (e) {
+        setKolRemittanceError(e instanceof Error ? e.message : "撤回匯款失敗");
+      } finally {
+        setKolRemittanceSavingPid(null);
+      }
+    },
+    [
+      loadKolRemittanceList,
+      loadKolAdvanceCandidates,
+      canRegisterKolAdvanceRemit,
+      refreshDashboardData,
+    ]
+  );
+
   const openKolRemitBatch = useCallback(() => {
     if (selectedKolRemitPids.length === 0) {
       setKolRemittanceError("請先勾選要登記匯款的專案");
@@ -10517,7 +10561,7 @@ export default function DashboardPage() {
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{kolRemittanceError}</p>
               )}
               <p className="mb-2 text-[11px] text-stone-500">
-                KOL 填寫請款憑證後會出現在「待匯款」。勾選多筆可看合計並批次登記匯款（匯款日期空白時，登記當下帶入今日）。登記會寫入付款記錄（類型 KOL）。
+                KOL 填寫請款憑證後會出現在「待匯款」。勾選多筆可看合計並批次登記匯款（匯款日期空白時，登記當下帶入今日）。登記會寫入付款記錄（類型 KOL）。誤點登記可在「已匯款」按「撤回匯款」。
                 {canPreviewKolPortalView ? " 可按「老師視角」以唯讀方式查看該 KOL 入口。" : ""}
               </p>
               {canRegisterKolAdvanceRemit ? (
@@ -10947,6 +10991,15 @@ export default function DashboardPage() {
                                 </td>
                                 <td className="whitespace-nowrap px-3 py-2 text-center">
                                   <div className="flex flex-col items-center gap-1">
+                                    <button
+                                      type="button"
+                                      disabled={saving}
+                                      onClick={() => void revokeKolRemittanceRegistration(row)}
+                                      className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-800 hover:bg-rose-100 disabled:opacity-60"
+                                      title="誤點登記匯款時可撤回；憑證保留，回到待匯款"
+                                    >
+                                      {saving && kolRemittanceSavingPid === pid ? "撤回中…" : "撤回匯款"}
+                                    </button>
                                     {row.請款方式 === "勞務報酬" ? (
                                       <button
                                         type="button"
@@ -10964,9 +11017,6 @@ export default function DashboardPage() {
                                       >
                                         老師視角
                                       </button>
-                                    ) : null}
-                                    {row.請款方式 !== "勞務報酬" && !canPreviewKolPortalView ? (
-                                      <span className="text-[11px] text-stone-400">—</span>
                                     ) : null}
                                   </div>
                                 </td>
