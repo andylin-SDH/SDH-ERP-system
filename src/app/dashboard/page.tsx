@@ -2250,7 +2250,7 @@ export default function DashboardPage() {
   const canMutate = Boolean(me) && !isPreviewMode;
   /** 董事長／管理者／會計：可預覽 KOL 老師入口 */
   const canPreviewKolPortalView = Boolean(me?.role && ["董事長", "管理者", "會計"].includes(me.role)) && !isPreviewMode;
-  /** 董事長／會計：KOL 代墊已匯款（廠商未入帳例外） */
+  /** 董事長／會計：代填憑證並直接已匯款（未入帳代墊／可請款待提領） */
   const canRegisterKolAdvanceRemit = Boolean(me?.role && ["董事長", "會計"].includes(me.role)) && canMutate;
   /** 董事長／會計：可編輯專案額外獎金 */
   const canEditExtraBonus = Boolean(me?.role && ["董事長", "會計"].includes(me.role)) && canMutate;
@@ -5144,13 +5144,14 @@ export default function DashboardPage() {
   const registerKolAdvanceRemittance = useCallback(async () => {
     const pid = kolAdvanceSelectedPid.trim();
     if (!pid) {
-      setKolRemittanceError("請先選擇要代墊的專案");
+      setKolRemittanceError("請先選擇要代填的專案");
       return;
     }
     const row = kolAdvanceCandidates.find((r) => r.專案ID === pid);
+    const isAdvanceUnpaid = row?.結帳狀態 === "未入帳";
     const 發票號碼 = kolAdvanceForm.KOL發票號碼.trim();
     if (!發票號碼) {
-      setKolRemittanceError("代墊前請先幫老師填入發票號碼（請款憑證）");
+      setKolRemittanceError("請先幫老師填入發票號碼（請款憑證）");
       return;
     }
     const 匯款日期 = kolAdvanceForm.匯款日期.trim() || new Date().toISOString().slice(0, 10);
@@ -5161,10 +5162,15 @@ export default function DashboardPage() {
       row?.KOL費用未稅 ||
       "";
     const 付款對象 = kolAdvanceForm.付款對象.trim() || row?.KOL名稱 || "";
-    const 備註 = kolAdvanceForm.備註.trim() || "代墊：廠商尚未入帳";
+    const defaultNote = isAdvanceUnpaid
+      ? "代墊：廠商尚未入帳"
+      : "內部代填憑證並登記匯款（跳過待提領）";
+    const 備註 = kolAdvanceForm.備註.trim() || defaultNote;
     if (
       !window.confirm(
-        `確定代填憑證並以「代墊」登記「${row?.專案名稱 || pid}」已匯款？\n發票：${發票號碼}\n不會填寫廠商付款日期。\n老師端會直接顯示「已匯款」，無法再提領請款。`
+        isAdvanceUnpaid
+          ? `確定代填憑證並以「代墊」登記「${row?.專案名稱 || pid}」已匯款？\n發票：${發票號碼}\n不會填寫廠商付款日期。\n老師端會直接顯示「已匯款」，無法再提領請款。`
+          : `確定代填憑證並直接登記「${row?.專案名稱 || pid}」已匯款？\n發票：${發票號碼}\n將跳過老師「可請款／待提領」，老師端直接顯示已匯款。`
       )
     ) {
       return;
@@ -5180,7 +5186,9 @@ export default function DashboardPage() {
           KOL發票號碼: 發票號碼,
           KOL發票日期: kolAdvanceForm.KOL發票日期.trim() || null,
           KOL發票金額: kolAdvanceForm.KOL發票金額.trim() || 匯款金額 || null,
-          KOL發票備註: "代墊代填憑證（廠商尚未入帳）",
+          KOL發票備註: isAdvanceUnpaid
+            ? "代墊代填憑證（廠商尚未入帳）"
+            : "內部代填憑證（跳過待提領）",
         }),
       });
       const credData = (await safeResJson(credRes)) as { ok?: boolean; error?: string };
@@ -5198,12 +5206,12 @@ export default function DashboardPage() {
           匯款金額,
           付款對象,
           備註,
-          代墊: true,
+          代墊: isAdvanceUnpaid,
         }),
       });
       const data = (await safeResJson(res)) as { ok?: boolean; error?: string };
       if (!res.ok || !data.ok) {
-        setKolRemittanceError(data.error ?? "代墊登記失敗（憑證已寫入，可再試登記匯款）");
+        setKolRemittanceError(data.error ?? "登記匯款失敗（憑證已寫入，可再試登記匯款）");
         return;
       }
       setKolAdvanceSelectedPid("");
@@ -5211,7 +5219,7 @@ export default function DashboardPage() {
         匯款日期: new Date().toISOString().slice(0, 10),
         匯款金額: "",
         付款對象: "",
-        備註: "代墊：廠商尚未入帳",
+        備註: "",
         KOL發票號碼: "",
         KOL發票日期: "",
         KOL發票金額: "",
@@ -5223,7 +5231,7 @@ export default function DashboardPage() {
         refreshDashboardData(["payments"]),
       ]);
     } catch (e) {
-      setKolRemittanceError(e instanceof Error ? e.message : "代墊登記失敗");
+      setKolRemittanceError(e instanceof Error ? e.message : "登記失敗");
     } finally {
       setKolAdvanceSaving(false);
     }
@@ -10568,9 +10576,9 @@ export default function DashboardPage() {
                 <div className="mb-4 rounded-xl border border-rose-200/80 bg-rose-50/40 p-4">
                   <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <h3 className="text-sm font-bold text-rose-900">代墊已匯款（例外）</h3>
+                      <h3 className="text-sm font-bold text-rose-900">代填憑證並登記已匯款</h3>
                       <p className="mt-0.5 text-[11px] leading-relaxed text-stone-600">
-                        廠商尚未入帳、但公司已先匯給 KOL 時使用。請先代填老師發票號碼，再登記匯款；不會填寫廠商付款日期。完成後老師端直接進「已匯款」，不能再提領。
+                        適用「未入帳代墊」或「可請款／待提領」：代填發票後直接登記已匯款，老師端不會再出現待提領。未入帳不會假填廠商付款日。
                       </p>
                     </div>
                     <span className="rounded-full border border-rose-200 bg-white px-2.5 py-0.5 text-[10px] font-bold text-rose-800">
@@ -10582,20 +10590,21 @@ export default function DashboardPage() {
                       type="search"
                       value={kolAdvanceSearch}
                       onChange={(e) => setKolAdvanceSearch(e.target.value)}
-                      placeholder="搜尋未入帳專案、KOL…"
+                      placeholder="搜尋專案、KOL（未入帳／可請款）…"
                       className="w-full max-w-md rounded-full border border-rose-200 bg-white px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-400 focus:border-rose-400 focus:outline-none"
                     />
                   </div>
                   {kolAdvanceCandidatesLoading ? (
                     <p className="text-xs text-stone-500">載入候選中…</p>
                   ) : searchedKolAdvanceCandidates.length === 0 ? (
-                    <p className="text-xs text-stone-500">目前沒有「未入帳」可代墊的 KOL 專案。</p>
+                    <p className="text-xs text-stone-500">目前沒有可代填的未入帳／可請款專案。</p>
                   ) : (
                     <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
                       <div className="max-h-48 overflow-auto rounded-lg border border-rose-200/70 bg-white">
                         <ul className="divide-y divide-rose-100 text-sm">
                           {searchedKolAdvanceCandidates.slice(0, 80).map((row) => {
                             const selected = kolAdvanceSelectedPid === row.專案ID;
+                            const isAdvanceUnpaid = row.結帳狀態 === "未入帳";
                             return (
                               <li key={row.專案ID}>
                                 <button
@@ -10606,7 +10615,9 @@ export default function DashboardPage() {
                                       匯款日期: new Date().toISOString().slice(0, 10),
                                       匯款金額: row.預設匯款金額 || row.KOL費用未稅 || "",
                                       付款對象: row.KOL名稱 || "",
-                                      備註: "代墊：廠商尚未入帳",
+                                      備註: isAdvanceUnpaid
+                                        ? "代墊：廠商尚未入帳"
+                                        : "內部代填憑證並登記匯款（跳過待提領）",
                                       KOL發票號碼: "",
                                       KOL發票日期: "",
                                       KOL發票金額: row.預設匯款金額 || row.KOL費用未稅 || "",
@@ -10644,8 +10655,19 @@ export default function DashboardPage() {
                                     selected ? "bg-rose-100/80" : "hover:bg-rose-50/80"
                                   }`}
                                 >
-                                  <span className="block truncate font-semibold text-stone-900">
-                                    {row.專案名稱}
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="min-w-0 flex-1 truncate font-semibold text-stone-900">
+                                      {row.專案名稱}
+                                    </span>
+                                    <span
+                                      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                                        isAdvanceUnpaid
+                                          ? "bg-stone-200 text-stone-700"
+                                          : "bg-sky-100 text-sky-900"
+                                      }`}
+                                    >
+                                      {isAdvanceUnpaid ? "未入帳／代墊" : "可請款／待提領"}
+                                    </span>
                                   </span>
                                   <span className="mt-0.5 block truncate text-[11px] text-stone-500">
                                     {row.KOL名稱} · {row.專案ID} · 費用 {formatAmount(row.KOL費用未稅)}
@@ -10699,7 +10721,7 @@ export default function DashboardPage() {
                                 />
                               </label>
                             </div>
-                            <p className="pt-1 text-[11px] font-bold text-rose-900">② 登記代墊匯款</p>
+                            <p className="pt-1 text-[11px] font-bold text-rose-900">② 登記匯款（直接已匯款）</p>
                             <label className="block text-[11px] font-semibold text-stone-600">
                               匯款日期
                               <input
@@ -10754,7 +10776,7 @@ export default function DashboardPage() {
                               onClick={() => void registerKolAdvanceRemittance()}
                               className="mt-1 w-full rounded-lg bg-rose-700 px-3 py-2 text-sm font-bold text-white hover:bg-rose-600 disabled:opacity-60"
                             >
-                              {kolAdvanceSaving ? "登記中…" : "代填憑證並確認代墊已匯款"}
+                              {kolAdvanceSaving ? "登記中…" : "代填憑證並確認已匯款"}
                             </button>
                           </div>
                         ) : (

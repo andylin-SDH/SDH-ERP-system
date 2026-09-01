@@ -141,7 +141,7 @@ export async function getKolRemittanceList(): Promise<KolRemittanceListItem[]> {
   return items;
 }
 
-/** 代墊候選：有 KOL、尚未匯款、廠商未入帳（未入帳） */
+/** 代填並登記已匯款候選：未入帳（代墊）或可請款（待提領，廠商已入帳） */
 export async function getKolAdvanceRemittanceCandidates(): Promise<KolAdvanceRemittanceCandidate[]> {
   const [masters, financeList, kolInvoices, { partners }] = await Promise.all([
     getMasterList(),
@@ -174,7 +174,7 @@ export async function getKolAdvanceRemittanceCandidates(): Promise<KolAdvanceRem
     const f = financeByPid.get(pid);
     const kolInv = kolInvByPid.get(pid);
     const 結帳狀態 = kolFinanceProgressShort(f?.廠商付款日期, kolInv, kolInv?.KOL匯款日期);
-    if (結帳狀態 !== "未入帳") continue;
+    if (結帳狀態 !== "未入帳" && 結帳狀態 !== "可請款") continue;
 
     const 預設匯款金額 =
       kolRequestMode(kolInv) === "勞務報酬"
@@ -193,7 +193,12 @@ export async function getKolAdvanceRemittanceCandidates(): Promise<KolAdvanceRem
     });
   }
 
-  items.sort((a, b) => a.專案ID.localeCompare(b.專案ID, "zh-Hant"));
+  items.sort((a, b) => {
+    const order = (s: string) => (s === "可請款" ? 0 : 1);
+    const d = order(a.結帳狀態) - order(b.結帳狀態);
+    if (d !== 0) return d;
+    return a.專案ID.localeCompare(b.專案ID, "zh-Hant");
+  });
   return items;
 }
 
