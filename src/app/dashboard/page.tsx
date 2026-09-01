@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { User } from "@/lib/types";
@@ -829,13 +829,13 @@ function ClickableProjectName({
   const label = name.trim() || "—";
   const pid = projectId.trim();
   if (!pid || label === "—") {
-    return <span className="truncate">{label}</span>;
+    return <span className="break-words whitespace-normal">{label}</span>;
   }
   return (
     <button
       type="button"
       onClick={() => onOpen(pid)}
-      className="max-w-full truncate text-left font-medium text-amber-900 underline decoration-amber-300/80 underline-offset-2 transition hover:text-amber-700 hover:decoration-amber-500"
+      className="max-w-full break-words whitespace-normal text-left font-medium leading-snug text-amber-900 underline decoration-amber-300/80 underline-offset-2 transition hover:text-amber-700 hover:decoration-amber-500"
       title={`查看專案內容：${label}`}
     >
       {label}
@@ -879,7 +879,7 @@ function TaskProjectInfoButton({
       </button>
       <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 hidden w-72 -translate-x-1/2 rounded-xl border border-amber-200 bg-white p-3 text-left text-xs shadow-2xl ring-1 ring-stone-200/70 group-hover:block group-focus-within:block">
         <span className="mb-2 block border-b border-stone-100 pb-2">
-          <span className="block truncate text-sm font-bold text-stone-900">{project.專案名稱 || project.專案ID}</span>
+          <span className="block break-words whitespace-normal text-sm font-bold leading-snug text-stone-900">{project.專案名稱 || project.專案ID}</span>
           <span className="mt-0.5 block truncate text-[11px] text-stone-500">{project.專案ID}</span>
         </span>
         <span className="grid grid-cols-2 gap-x-3 gap-y-2">
@@ -1250,7 +1250,19 @@ const MASTER_LIST_CONTENT_NOTES_KEY = "內容與備註";
  * sticky 欄必須與列同色（不可寫死 bg-white），否則橫向捲動時斑馬紋會被蓋掉。
  * hover 用琥珀色，不用灰，避免像「選中變灰」。
  */
-function masterListRowSurface(rowIndex: number, lifecycleClosed: boolean) {
+function masterListRowSurface(
+  rowIndex: number,
+  lifecycleClosed: boolean,
+  opts?: { nested?: boolean }
+) {
+  if (opts?.nested) {
+    return {
+      row: "group",
+      base: "bg-sky-50/80",
+      sticky: "bg-[#e8f3fa]",
+      hover: "group-hover:bg-sky-100/90",
+    };
+  }
   const odd = rowIndex % 2 === 1;
   if (lifecycleClosed) {
     return odd
@@ -6787,7 +6799,7 @@ export default function DashboardPage() {
                                 setSaveMasterError(null);
                               }}
                             >
-                              <td className="max-w-[10rem] px-3 py-2 font-medium text-stone-900">
+                              <td className="min-w-[12rem] max-w-[20rem] px-3 py-2 font-medium text-stone-900">
                                 <OverviewHoverSummary
                                   title={name}
                                   subtitle={String(row.專案ID ?? "")}
@@ -6806,7 +6818,7 @@ export default function DashboardPage() {
                                   ]}
                                   className="w-full"
                                 >
-                                  <span className="block truncate underline decoration-amber-200/80 decoration-dotted underline-offset-2">
+                                  <span className="block break-words whitespace-normal leading-snug underline decoration-amber-200/80 decoration-dotted underline-offset-2">
                                     {name}
                                   </span>
                                 </OverviewHoverSummary>
@@ -6878,7 +6890,7 @@ export default function DashboardPage() {
                                   </span>
                                 </OverviewHoverSummary>
                               </td>
-                              <td className="max-w-[7rem] truncate px-3 py-2 text-stone-500" title={projectLabel}>
+                              <td className="min-w-[10rem] max-w-[18rem] break-words whitespace-normal px-3 py-2 leading-snug text-stone-500" title={projectLabel}>
                                 {projectLabel}
                               </td>
                               <td className="whitespace-nowrap px-3 py-2 text-stone-600">{t.任務類型 ?? "—"}</td>
@@ -7087,21 +7099,20 @@ export default function DashboardPage() {
               <table className="w-full table-fixed divide-y divide-stone-200">
                 <colgroup>
                   {masterColsForDisplay.map((k) => {
-                    if (k === MASTER_LIST_CONTENT_NOTES_KEY) {
-                      return <col key={k} />;
-                    }
                     const width =
                       k === "專案ID"
                         ? "4.5rem"
                         : k === "專案名稱"
-                          ? "13rem"
+                          ? "24rem"
                           : k === "發票摘要"
                             ? "9.5rem"
                             : k === "開案日期"
                               ? "6.5rem"
                               : k === "款項進度"
                                 ? "5.5rem"
-                                : "6rem";
+                                : k === MASTER_LIST_CONTENT_NOTES_KEY
+                                  ? "11rem"
+                                  : "6rem";
                     return <col key={k} style={{ width }} />;
                   })}
                 </colgroup>
@@ -7114,7 +7125,7 @@ export default function DashboardPage() {
                           k === "專案ID"
                             ? "sticky left-0 z-30 w-[4.5rem] bg-stone-100 px-2 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
                             : k === "專案名稱"
-                              ? "sticky left-[4.5rem] z-30 w-[13rem] bg-stone-100 px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
+                              ? "sticky left-[4.5rem] z-30 w-[24rem] min-w-[18rem] bg-stone-100 px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800"
                               : k === "發票摘要"
                                 ? "px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
                                 : k === "開案日期"
@@ -7169,8 +7180,10 @@ export default function DashboardPage() {
                       const pid = row.專案ID ?? "";
                       const isExpanded = expandedProjectId === pid;
                       const lifecycleClosed = masterLifecycleTab === "closed";
-                      const rowSurface = masterListRowSurface(rowIndex, lifecycleClosed);
-                      const nestIndentPx = Math.min(depth, 4) * 14;
+                      const rowSurface = masterListRowSurface(rowIndex, lifecycleClosed, {
+                        nested: depth > 0,
+                      });
+                      const nestIndentPx = 20 + Math.min(depth, 4) * 28;
                       // 大總表展開列：該專案任務全顯（不套用任務②可見規則）；側邊「任務」分頁仍為 filteredTasks
                       const projectTasksAll = sortTaskRows(
                         tasks.filter((t) => (t.專案ID ?? "").trim().toLowerCase() === pid.trim().toLowerCase()),
@@ -7183,12 +7196,36 @@ export default function DashboardPage() {
                       const treeOpen = expandedMasterTreeIds.includes(String(pid).trim());
                       const invoiceSummary = invoiceSummaryByProjectId.get(String(pid).trim());
                       const projectInvoices = invoiceSummary?.rows ?? [];
+                      const toggleMasterTree = (e: MouseEvent) => {
+                        e.stopPropagation();
+                        const id = String(pid).trim();
+                        if (!id) return;
+                        setExpandedMasterTreeIds((prev) => {
+                          if (prev.includes(id)) {
+                            const hideIds = new Set<string>();
+                            const collect = (parentId: string) => {
+                              for (const kid of masterChildrenByParentId.get(parentId) ?? []) {
+                                const kidId = String(kid.專案ID ?? "").trim();
+                                if (!kidId || hideIds.has(kidId)) continue;
+                                hideIds.add(kidId);
+                                collect(kidId);
+                              }
+                            };
+                            collect(id);
+                            setExpandedProjectId((cur) =>
+                              cur && hideIds.has(String(cur).trim()) ? null : cur
+                            );
+                            return prev.filter((x) => x !== id && !hideIds.has(x));
+                          }
+                          return [...prev, id];
+                        });
+                      };
                       return (
                         <Fragment key={`${depth}-${row.id ?? pid}`}>
                           <tr
                             key={row.id ?? pid}
                             className={`cursor-pointer transition ${rowSurface.row} ${rowSurface.base} ${
-                              depth > 0 ? "border-l-2 border-l-sky-300" : ""
+                              depth > 0 ? "border-l-4 border-l-sky-400" : ""
                             }`}
                             onClick={() => {
                               setSelectedMaster(row);
@@ -7242,72 +7279,81 @@ export default function DashboardPage() {
                                 return (
                                   <td
                                     key={k}
-                                    className={`sticky left-[4.5rem] z-20 w-[13rem] px-3 py-3 ${stickyBg}`}
+                                    className={`sticky left-[4.5rem] z-20 w-[24rem] min-w-[18rem] px-3 py-3 ${stickyBg}`}
                                     title={kolName ? `${projectName} · ${kolName}` : projectName}
-                                    style={depth > 0 ? { paddingLeft: `${12 + nestIndentPx}px` } : undefined}
+                                    style={depth > 0 ? { paddingLeft: `${nestIndentPx}px` } : undefined}
                                   >
-                                    <div className="flex min-w-0 items-start gap-1.5">
-                                      {depth > 0 ? (
-                                        <span
-                                          className="mt-0.5 shrink-0 rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-sky-800"
-                                          title="子專案"
-                                        >
-                                          子
-                                        </span>
-                                      ) : null}
-                                      <p className={`min-w-0 flex-1 truncate text-sm font-medium ${depth > 0 ? "text-stone-800" : "text-stone-900"}`}>
-                                        {projectName}
-                                      </p>
+                                    <div className="flex min-w-0 flex-col gap-1.5">
                                       {childCount > 0 ? (
                                         <button
                                           type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            const id = String(pid).trim();
-                                            setExpandedMasterTreeIds((prev) => {
-                                              if (prev.includes(id)) {
-                                                const hideIds = new Set<string>();
-                                                const collect = (parentId: string) => {
-                                                  for (const kid of masterChildrenByParentId.get(parentId) ?? []) {
-                                                    const kidId = String(kid.專案ID ?? "").trim();
-                                                    if (!kidId || hideIds.has(kidId)) continue;
-                                                    hideIds.add(kidId);
-                                                    collect(kidId);
-                                                  }
-                                                };
-                                                collect(id);
-                                                setExpandedProjectId((cur) =>
-                                                  cur && hideIds.has(String(cur).trim()) ? null : cur
-                                                );
-                                                return prev.filter((x) => x !== id && !hideIds.has(x));
-                                              }
-                                              return [...prev, id];
-                                            });
-                                          }}
-                                          className={`mt-0.5 shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold tracking-wide transition ${
+                                          onClick={toggleMasterTree}
+                                          className={`inline-flex w-fit max-w-full items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-bold shadow-sm transition ${
                                             treeOpen
-                                              ? "border-sky-400 bg-sky-100 text-sky-900 ring-1 ring-sky-300/70"
-                                              : "border-sky-200 bg-sky-50 text-sky-800 hover:border-sky-300 hover:bg-sky-100"
+                                              ? "border-sky-500 bg-sky-600 text-white hover:bg-sky-500"
+                                              : "border-sky-300 bg-sky-50 text-sky-900 ring-1 ring-sky-200 hover:border-sky-400 hover:bg-sky-100"
                                           }`}
                                           title={treeOpen ? "收合子專案列" : `展開 ${childCount} 個子專案列`}
                                         >
-                                          {treeOpen ? "收合" : "子"} {childCount}
+                                          <svg
+                                            className={`h-3.5 w-3.5 shrink-0 transition-transform ${treeOpen ? "rotate-90" : ""}`}
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                            aria-hidden
+                                          >
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                                          </svg>
+                                          <span className="whitespace-nowrap">
+                                            {treeOpen ? "收合子專案" : "展開子專案"}
+                                          </span>
+                                          <span
+                                            className={`rounded-md px-1.5 py-0.5 text-[10px] tabular-nums ${
+                                              treeOpen ? "bg-white/20 text-white" : "bg-sky-200/80 text-sky-950"
+                                            }`}
+                                          >
+                                            {childCount}
+                                          </span>
                                         </button>
                                       ) : null}
-                                      {isOrphanChild ? (
-                                        <span
-                                          className="mt-0.5 shrink-0 rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-sky-800"
-                                          title="此為子專案；母專案不在目前篩選列表中"
-                                        >
-                                          子案
-                                        </span>
-                                      ) : null}
+                                      <div className="flex min-w-0 items-start gap-1.5">
+                                        {depth > 0 ? (
+                                          <span
+                                            className="mt-0.5 flex shrink-0 items-center gap-1 text-sky-600"
+                                            title="子專案"
+                                          >
+                                            <span className="select-none font-mono text-[11px] leading-none text-sky-400" aria-hidden>
+                                              └
+                                            </span>
+                                            <span className="rounded border border-sky-300 bg-white px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-sky-800">
+                                              子
+                                            </span>
+                                          </span>
+                                        ) : null}
+                                        {isOrphanChild ? (
+                                          <span
+                                            className="mt-0.5 shrink-0 rounded border border-sky-300 bg-white px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-sky-800"
+                                            title="此為子專案；母專案不在目前篩選列表中"
+                                          >
+                                            子案
+                                          </span>
+                                        ) : null}
+                                        <div className="min-w-0 flex-1">
+                                          <p
+                                            className={`break-words whitespace-normal text-sm font-medium leading-snug ${
+                                              depth > 0 ? "text-sky-950" : "text-stone-900"
+                                            }`}
+                                          >
+                                            {projectName}
+                                          </p>
+                                          {kolName ? (
+                                            <p className="mt-0.5 break-words text-[11px] font-semibold tracking-wide text-amber-900/85">
+                                              {kolName}
+                                            </p>
+                                          ) : null}
+                                        </div>
+                                      </div>
                                     </div>
-                                    {kolName ? (
-                                      <p className="mt-0.5 truncate text-[11px] font-semibold tracking-wide text-amber-900/85">
-                                        {kolName}
-                                      </p>
-                                    ) : null}
                                   </td>
                                 );
                               }
@@ -7374,12 +7420,12 @@ export default function DashboardPage() {
                                 return (
                                   <td
                                     key={k}
-                                    className={`px-3 py-2.5 align-top ${cellBg}`}
+                                    className={`max-w-[11rem] px-3 py-2.5 align-top ${cellBg}`}
                                     title={titleBits || undefined}
                                   >
-                                    <div className="rounded-lg border border-stone-200/70 bg-white/70 px-3 py-2">
+                                    <div className="min-w-0 rounded-lg border border-stone-200/70 bg-white/70 px-2.5 py-2">
                                       {content ? (
-                                        <p className="line-clamp-3 text-sm leading-relaxed text-stone-800">
+                                        <p className="line-clamp-2 break-words text-sm leading-relaxed text-stone-800">
                                           {content}
                                         </p>
                                       ) : (
@@ -7387,7 +7433,7 @@ export default function DashboardPage() {
                                       )}
                                       {note ? (
                                         <div className="mt-1.5 border-t border-dashed border-amber-200/90 pt-1.5">
-                                          <p className="line-clamp-2 text-xs leading-relaxed text-stone-600">
+                                          <p className="line-clamp-1 break-words text-xs leading-relaxed text-stone-600">
                                             <span className="mr-1.5 inline-block rounded bg-amber-100/90 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-amber-900/90">
                                               備註
                                             </span>
@@ -7453,7 +7499,7 @@ export default function DashboardPage() {
                                       本專案有 {projectChildren.length} 個子專案。
                                       {treeOpen
                                         ? "子專案已展開於上方列下方；"
-                                        : "點專案名稱旁的「子 N」可展開縮排列；"}
+                                        : "點母案名稱上方的「展開子專案」可展開縮排列；"}
                                       此區僅顯示本專案任務。
                                     </p>
                                   ) : null}
@@ -9613,8 +9659,8 @@ export default function DashboardPage() {
                               <td className="max-w-[200px] px-3 py-2.5 font-medium text-stone-900">
                                 <span className="line-clamp-2">{t.任務 ?? "—"}</span>
                               </td>
-                              <td className="max-w-[160px] px-3 py-2.5 text-stone-600">
-                                <span className="line-clamp-2">{t.專案名稱 ?? "—"}</span>
+                              <td className="min-w-[12rem] max-w-[20rem] px-3 py-2.5 text-stone-600">
+                                <span className="break-words whitespace-normal leading-snug">{t.專案名稱 ?? "—"}</span>
                               </td>
                               <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs tabular-nums">
                                 <span
@@ -9675,8 +9721,8 @@ export default function DashboardPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-stone-900">{t.任務 ?? "—"}</p>
-                      <p className="mt-0.5 flex items-center gap-1.5 text-xs text-stone-500" onClick={(e) => e.stopPropagation()}>
-                        <span className="min-w-0 truncate">{t.專案名稱 ?? "—"}</span>
+                      <p className="mt-0.5 flex items-start gap-1.5 text-xs text-stone-500" onClick={(e) => e.stopPropagation()}>
+                        <span className="min-w-0 break-words whitespace-normal leading-snug">{t.專案名稱 ?? "—"}</span>
                         <TaskProjectInfoButton
                           project={masterByProjectId.get(String(t.專案ID ?? "").trim())}
                           showAmounts={canViewMasterAmountsForRow(masterByProjectId.get(String(t.專案ID ?? "").trim()))}
@@ -9957,9 +10003,9 @@ export default function DashboardPage() {
                         const str = String(val ?? "—");
                         if (k === "專案名稱") {
                           return (
-                            <td key={k} className="max-w-[220px] px-4 py-3.5 text-sm font-medium text-stone-600" title={str}>
-                              <span className="flex min-w-0 items-center gap-1.5">
-                                <span className="min-w-0 truncate">{str}</span>
+                            <td key={k} className="min-w-[12rem] max-w-[22rem] px-4 py-3.5 text-sm font-medium text-stone-600" title={str}>
+                              <span className="flex min-w-0 items-start gap-1.5">
+                                <span className="min-w-0 break-words whitespace-normal leading-snug">{str}</span>
                                 <TaskProjectInfoButton
                                   project={masterByProjectId.get(String(t.專案ID ?? "").trim())}
                                   showAmounts={canViewMasterAmountsForRow(
@@ -10240,7 +10286,7 @@ export default function DashboardPage() {
                             const str = k === "分潤金額" ? formatAmount(String(val ?? "")) : String(val ?? "—");
                             if (k === "專案名稱") {
                               return (
-                                <td key={k} className="max-w-[220px] px-4 py-3.5 text-sm">
+                                <td key={k} className="min-w-[12rem] max-w-[22rem] px-4 py-3.5 text-sm">
                                   <ClickableProjectName
                                     name={String(val ?? "")}
                                     projectId={String(r.專案ID ?? "")}
@@ -11334,7 +11380,7 @@ export default function DashboardPage() {
                                   return (
                                     <td
                                       key={k}
-                                      className="max-w-[200px] truncate px-4 py-3.5 text-sm text-stone-700"
+                                      className="min-w-[12rem] max-w-[22rem] break-words whitespace-normal px-4 py-3.5 text-sm leading-snug text-stone-700"
                                       title={str !== "—" ? str : undefined}
                                     >
                                       {str}
