@@ -16,6 +16,7 @@ import { PaymentCollectionLinkIcon } from "@/components/PaymentCollectionLinkIco
 import { MasterEditHistory, type MasterEditLogItem } from "@/components/MasterEditHistory";
 import type { PaymentSubmissionWithProject } from "@/lib/db/payment-collection";
 import { formatTaipeiDateTime } from "@/lib/taiwan-date";
+import { downloadTableAsExcelCsv } from "@/lib/export/download-table-excel";
 import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, PaymentRecordRow } from "@/modules/finance";
 import { sortInvoicesByInvoiceNumber, sortInvoicesForLedger } from "@/modules/finance";
 import type { FinanceUpdateFields } from "@/lib/db/finance";
@@ -4941,6 +4942,57 @@ export default function DashboardPage() {
     },
     [refreshDashboardData]
   );
+
+  /** 發票清冊：勾選列匯出 Excel（UTF-8 CSV） */
+  const exportSelectedInvoicesExcel = useCallback(() => {
+    if (selectedInvoiceIds.length === 0) return;
+    const selected = invoicesSortedForDisplay.filter(
+      (inv) => typeof inv.id === "string" && inv.id.trim() !== "" && selectedInvoiceIdSet.has(inv.id)
+    );
+    if (selected.length === 0) {
+      setInvoiceEditError("目前勾選的發票不在此篩選結果中，請重新勾選後再匯出");
+      return;
+    }
+    setInvoiceEditError(null);
+    const headers = [
+      "專案ID",
+      "專案名稱",
+      "發票號碼",
+      "發票日期",
+      "收款對象",
+      "發票金額含稅",
+      "廠商預計付款日",
+      "廠商實際付款日（入帳）",
+      "備註",
+    ];
+    const rows = selected.map((inv) => {
+      const pid = String(inv.專案ID ?? "").trim();
+      const projectName = pid
+        ? String(masterByProjectId.get(pid)?.專案名稱 ?? "").trim()
+        : "";
+      return [
+        pid,
+        projectName,
+        String(inv.發票號碼 ?? "").trim(),
+        String(inv.發票日期 ?? "").trim(),
+        String(inv.收款對象 ?? "").trim(),
+        String(inv.發票金額含稅 ?? "").trim(),
+        String(inv.廠商預計付款日 ?? "").trim(),
+        String(inv.廠商付款日期 ?? "").trim(),
+        String(inv.備註 ?? "").trim(),
+      ];
+    });
+    downloadTableAsExcelCsv({
+      filenameBase: `發票清冊_${selected.length}筆`,
+      headers,
+      rows,
+    });
+  }, [
+    selectedInvoiceIds.length,
+    invoicesSortedForDisplay,
+    selectedInvoiceIdSet,
+    masterByProjectId,
+  ]);
 
   useLayoutEffect(() => {
     paymentRecordsRef.current = paymentRecords;
@@ -11431,14 +11483,23 @@ export default function DashboardPage() {
                     </div>
                   </div>
                   {selectedInvoiceIds.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => void deleteInvoicesByIdList(selectedInvoiceIds)}
-                      disabled={deletingInvoiceIds.length > 0}
-                      className="rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 transition hover:bg-red-100 disabled:opacity-60"
-                    >
-                      刪除已選 {selectedInvoiceIds.length} 筆
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => exportSelectedInvoicesExcel()}
+                        className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100"
+                      >
+                        匯出 Excel {selectedInvoiceIds.length} 筆
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteInvoicesByIdList(selectedInvoiceIds)}
+                        disabled={deletingInvoiceIds.length > 0}
+                        className="rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 transition hover:bg-red-100 disabled:opacity-60"
+                      >
+                        刪除已選 {selectedInvoiceIds.length} 筆
+                      </button>
+                    </div>
                   )}
                 </div>
                 <div className="flex min-w-0 items-center gap-2">
@@ -12184,7 +12245,7 @@ export default function DashboardPage() {
             aria-live="polite"
             aria-label="已勾選發票金額加總"
           >
-            <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs sm:text-sm">
+            <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-end gap-x-3 gap-y-2 text-xs sm:text-sm">
               <span className="text-stone-600">
                 已選 <strong className="tabular-nums text-stone-900">{selectedInvoiceIds.length}</strong> 筆
               </span>
@@ -12195,6 +12256,13 @@ export default function DashboardPage() {
               <span className="text-base font-bold tabular-nums tracking-tight text-amber-950 sm:text-lg">
                 {formatAmount(String(Math.round(selectedInvoicesTaxedAmountSum)))}
               </span>
+              <button
+                type="button"
+                onClick={() => exportSelectedInvoicesExcel()}
+                className="rounded-lg border border-emerald-300 bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-500 sm:text-sm"
+              >
+                匯出 Excel
+              </button>
             </div>
           </div>
         )}
