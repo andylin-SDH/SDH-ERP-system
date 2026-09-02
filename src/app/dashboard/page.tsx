@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { User } from "@/lib/types";
@@ -7196,7 +7196,7 @@ export default function DashboardPage() {
                       const treeOpen = expandedMasterTreeIds.includes(String(pid).trim());
                       const invoiceSummary = invoiceSummaryByProjectId.get(String(pid).trim());
                       const projectInvoices = invoiceSummary?.rows ?? [];
-                      const toggleMasterTree = (e: MouseEvent) => {
+                      const toggleMasterTree = (e: ReactMouseEvent) => {
                         e.stopPropagation();
                         const id = String(pid).trim();
                         if (!id) return;
