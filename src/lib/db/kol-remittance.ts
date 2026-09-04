@@ -37,6 +37,7 @@ export interface KolRemittanceListItem {
   勞務期間迄: string;
   給付總額: string;
   實領金額: string;
+  勞報下載時間: string;
   KOL匯款日期: string;
   KOL匯款金額: string;
   結帳狀態: string;
@@ -124,6 +125,7 @@ export async function getKolRemittanceList(): Promise<KolRemittanceListItem[]> {
       勞務期間迄: String(kolInv?.勞務期間迄 ?? "").trim().slice(0, 10) || "",
       給付總額: formatMoney(kolInv?.給付總額 || row.KOL費用未稅),
       實領金額: formatMoney(kolInv?.實領金額),
+      勞報下載時間: String(kolInv?.勞報下載時間 ?? "").trim(),
       KOL匯款日期: String(kolInv?.KOL匯款日期 ?? "").trim().slice(0, 10) || "",
       KOL匯款金額: formatMoney(kolInv?.KOL匯款金額),
       結帳狀態,

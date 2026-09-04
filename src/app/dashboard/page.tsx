@@ -2052,6 +2052,7 @@ export default function DashboardPage() {
       勞務期間迄: string;
       給付總額: string;
       實領金額: string;
+      勞報下載時間?: string;
       KOL匯款日期: string;
       KOL匯款金額: string;
       結帳狀態: string;
@@ -3792,6 +3793,10 @@ export default function DashboardPage() {
     const set = new Set(selectedKolRemitPids);
     return kolRemittancePendingItems.filter((r) => set.has(r.專案ID));
   }, [kolRemittancePendingItems, selectedKolRemitPids]);
+  const selectedKolRemitLaborRows = useMemo(
+    () => selectedKolRemitRows.filter((r) => r.請款方式 === "勞務報酬"),
+    [selectedKolRemitRows]
+  );
   const selectedKolRemitTotal = useMemo(
     () =>
       selectedKolRemitRows.reduce((sum, r) => {
@@ -5142,7 +5147,7 @@ export default function DashboardPage() {
     [me?.role, refreshDashboardData]
   );
 
-  const loadKolRemittanceList = useCallback(async () => {
+  const loadKolRemittanceList = useCallback(async (opts?: { preserveSelection?: boolean }) => {
     setKolRemittanceLoading(true);
     setKolRemittanceError(null);
     try {
@@ -5158,21 +5163,37 @@ export default function DashboardPage() {
       }
       const items = Array.isArray(data.items) ? data.items : [];
       setKolRemittanceItems(items);
-      const nextDrafts: typeof kolRemitDrafts = {};
-      for (const row of items) {
-        if (row.結帳狀態 !== "待匯款") continue;
-        nextDrafts[row.專案ID] = {
-          匯款日期: "",
-          匯款金額:
-            row.請款方式 === "勞務報酬"
-              ? row.實領金額 || row.給付總額 || row.KOL費用未稅 || ""
-              : row.KOL費用未稅 || "",
-          付款對象: row.KOL名稱 || "",
-          備註: "",
-        };
+      setKolRemitDrafts((prev) => {
+        const next: typeof kolRemitDrafts = opts?.preserveSelection ? { ...prev } : {};
+        const pendingIds = new Set<string>();
+        for (const row of items) {
+          if (row.結帳狀態 !== "待匯款") continue;
+          pendingIds.add(row.專案ID);
+          if (!next[row.專案ID]) {
+            next[row.專案ID] = {
+              匯款日期: "",
+              匯款金額:
+                row.請款方式 === "勞務報酬"
+                  ? row.實領金額 || row.給付總額 || row.KOL費用未稅 || ""
+                  : row.KOL費用未稅 || "",
+              付款對象: row.KOL名稱 || "",
+              備註: "",
+            };
+          }
+        }
+        for (const pid of Object.keys(next)) {
+          if (!pendingIds.has(pid)) delete next[pid];
+        }
+        return next;
+      });
+      if (!opts?.preserveSelection) {
+        setSelectedKolRemitPids([]);
+      } else {
+        const pendingSet = new Set(
+          items.filter((r) => r.結帳狀態 === "待匯款").map((r) => r.專案ID)
+        );
+        setSelectedKolRemitPids((prev) => prev.filter((id) => pendingSet.has(id)));
       }
-      setKolRemitDrafts(nextDrafts);
-      setSelectedKolRemitPids([]);
     } catch (e) {
       setKolRemittanceError(e instanceof Error ? e.message : "讀取失敗");
     } finally {
@@ -5531,6 +5552,17 @@ export default function DashboardPage() {
     if (canRegisterKolAdvanceRemit) void loadKolAdvanceCandidates();
   }, [activeSection, loadKolRemittanceList, loadKolAdvanceCandidates, canRegisterKolAdvanceRemit]);
 
+  /** 從勞報下載分頁返回時，刷新「已下載」注記 */
+  useEffect(() => {
+    if (activeSection !== "finance" || financeSubTab !== "kolRemittance") return;
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      void loadKolRemittanceList({ preserveSelection: true });
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [activeSection, financeSubTab, loadKolRemittanceList]);
+
   useEffect(() => {
     if (financeKolRemittanceTab !== "pending") {
       setSelectedKolRemitPids([]);
@@ -5586,6 +5618,23 @@ export default function DashboardPage() {
     if (!pid) return;
     window.open(`/kol-labor-receipts?專案ID=${encodeURIComponent(pid)}`, "_blank", "noopener,noreferrer");
   }, []);
+
+  const openKolLaborReceiptBatch = useCallback((projectIds: string[]) => {
+    const ids = [...new Set(projectIds.map((p) => String(p ?? "").trim()).filter(Boolean))];
+    if (ids.length === 0) {
+      window.alert("請先勾選勞務報酬請款的專案");
+      return;
+    }
+    if (ids.length === 1) {
+      openKolLaborReceipt(ids[0]!);
+      return;
+    }
+    window.open(
+      `/kol-labor-receipts?專案IDs=${encodeURIComponent(ids.join(","))}`,
+      "_blank",
+      "noopener,noreferrer"
+    );
+  }, [openKolLaborReceipt]);
 
   const searchedKolPortalPreviewOptions = useMemo(() => {
     const q = kolPortalPreviewSearch.trim().toLowerCase();
@@ -10667,7 +10716,7 @@ export default function DashboardPage() {
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{kolRemittanceError}</p>
               )}
               <p className="mb-2 text-[11px] text-stone-500">
-                KOL 填寫請款憑證後會出現在「待匯款」。勾選多筆可看合計並批次登記匯款（匯款日期空白時，登記當下帶入今日）。登記會寫入付款記錄（類型 KOL）。誤點登記可在「已匯款」按「撤回匯款」。
+                KOL 填寫請款憑證後會出現在「待匯款」。勾選多筆可看合計並批次登記匯款；若為勞務報酬也可「批次下載勞報」。下載過的列會注記「已下載」。匯款日期空白時，登記當下帶入今日。登記會寫入付款記錄（類型 KOL）。誤點登記可在「已匯款」按「撤回匯款」。
                 {canPreviewKolPortalView ? " 可按「老師視角」以唯讀方式查看該 KOL 入口。" : ""}
               </p>
               {canRegisterKolAdvanceRemit ? (
@@ -11013,6 +11062,14 @@ export default function DashboardPage() {
                               ) : row.KOL發票日期 ? (
                                 <div className="text-[11px] text-stone-500">{row.KOL發票日期}</div>
                               ) : null}
+                              {row.請款方式 === "勞務報酬" && row.勞報下載時間 ? (
+                                <span
+                                  className="mt-1 inline-flex rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-emerald-900"
+                                  title={`最後下載：${formatTaipeiDateTime(row.勞報下載時間)}`}
+                                >
+                                  已下載 {formatTaipeiDateTime(row.勞報下載時間).slice(0, 16)}
+                                </span>
+                              ) : null}
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-stone-600">
                               {row.廠商付款日期 || "—"}
@@ -11084,9 +11141,13 @@ export default function DashboardPage() {
                                       <button
                                         type="button"
                                         onClick={() => openKolLaborReceipt(pid)}
-                                        className="text-[11px] font-semibold text-amber-800 underline-offset-2 hover:underline"
+                                        className={`text-[11px] font-semibold underline-offset-2 hover:underline ${
+                                          row.勞報下載時間
+                                            ? "text-emerald-800"
+                                            : "text-amber-800"
+                                        }`}
                                       >
-                                        下載勞報
+                                        {row.勞報下載時間 ? "再下載勞報" : "下載勞報"}
                                       </button>
                                     ) : null}
                                     {canPreviewKolPortalView ? (
@@ -11124,9 +11185,13 @@ export default function DashboardPage() {
                                       <button
                                         type="button"
                                         onClick={() => openKolLaborReceipt(pid)}
-                                        className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-950 hover:bg-amber-100"
+                                        className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold ${
+                                          row.勞報下載時間
+                                            ? "border-emerald-200 bg-emerald-50 text-emerald-950 hover:bg-emerald-100"
+                                            : "border-amber-200 bg-amber-50 text-amber-950 hover:bg-amber-100"
+                                        }`}
                                       >
-                                        下載勞報
+                                        {row.勞報下載時間 ? "再下載勞報" : "下載勞報"}
                                       </button>
                                     ) : null}
                                     {canPreviewKolPortalView ? (
@@ -11158,15 +11223,36 @@ export default function DashboardPage() {
                       <span className="ml-2 tabular-nums text-stone-600">
                         合計 NT$ {selectedKolRemitTotal.toLocaleString("zh-TW")}
                       </span>
+                      {selectedKolRemitLaborRows.length > 0 ? (
+                        <span className="ml-2 text-xs text-amber-800">
+                          勞報 {selectedKolRemitLaborRows.length} 筆
+                        </span>
+                      ) : null}
                     </div>
-                    <button
-                      type="button"
-                      disabled={kolRemitBatchSaving}
-                      onClick={openKolRemitBatch}
-                      className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow transition hover:bg-emerald-500 disabled:opacity-60"
-                    >
-                      登記匯款
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {selectedKolRemitLaborRows.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openKolLaborReceiptBatch(selectedKolRemitLaborRows.map((r) => r.專案ID))
+                          }
+                          className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-950 shadow-sm transition hover:bg-amber-100"
+                        >
+                          批次下載勞報
+                          {selectedKolRemitLaborRows.length > 1
+                            ? `（${selectedKolRemitLaborRows.length}）`
+                            : ""}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        disabled={kolRemitBatchSaving}
+                        onClick={openKolRemitBatch}
+                        className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow transition hover:bg-emerald-500 disabled:opacity-60"
+                      >
+                        登記匯款
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : null}

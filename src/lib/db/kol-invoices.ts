@@ -15,6 +15,8 @@ export interface KolInvoiceRow extends KolRequestCredential {
   KOL發票備註?: string | null;
   勞報身分證正面?: string | null;
   勞報身分證反面?: string | null;
+  /** 員工後台最後下載勞報 PDF 時間（ISO） */
+  勞報下載時間?: string | null;
   KOL匯款日期?: string | null;
   KOL匯款金額?: string | null;
   請款批次ID?: string | null;
@@ -59,6 +61,7 @@ function rowToKolInvoice(r: Record<string, unknown>): KolInvoiceRow {
     勞報簽名: (r.勞報簽名 ?? null) as string | null,
     勞報身分證正面: (r.勞報身分證正面 ?? null) as string | null,
     勞報身分證反面: (r.勞報身分證反面 ?? null) as string | null,
+    勞報下載時間: (r.勞報下載時間 ?? null) as string | null,
     KOL匯款日期: sliceDate(r.KOL匯款日期 ?? r.kol_remittance_date),
     KOL匯款金額: (r.KOL匯款金額 ?? r.kol_remittance_amount ?? null) as string | null,
     請款批次ID: (r.請款批次ID ?? null) as string | null,
@@ -280,6 +283,58 @@ export async function clearKolRemittance(專案ID: string): Promise<KolInvoiceRo
   }
   if (!data) throw new Error("找不到該專案請款憑證或更新失敗");
   return rowToKolInvoice(data as Record<string, unknown>);
+}
+
+/** 注記勞報已下載（覆寫為最新下載時間；不改其他憑證欄位） */
+export async function markKolLaborReceiptDownloaded(
+  專案IDs: string | string[]
+): Promise<{ ok: string[]; failed: Array<{ 專案ID: string; error: string }> }> {
+  const pids = [
+    ...new Set(
+      (Array.isArray(專案IDs) ? 專案IDs : [專案IDs]).map((p) => String(p ?? "").trim()).filter(Boolean)
+    ),
+  ];
+  const ok: string[] = [];
+  const failed: Array<{ 專案ID: string; error: string }> = [];
+  if (pids.length === 0) return { ok, failed };
+
+  const now = new Date().toISOString();
+  for (const pid of pids) {
+    try {
+      const existing = await getKolInvoiceByProjectId(pid);
+      if (!existing) {
+        failed.push({ 專案ID: pid, error: "尚無請款憑證" });
+        continue;
+      }
+      if (kolRequestMode(existing) !== "勞務報酬") {
+        failed.push({ 專案ID: pid, error: "非勞務報酬請款" });
+        continue;
+      }
+      const { data, error } = await getSupabase()
+        .from("KOL發票")
+        .update({ 勞報下載時間: now, updated_at: now })
+        .eq("專案ID", pid)
+        .select("專案ID")
+        .maybeSingle();
+      if (error) {
+        if (/勞報下載時間|schema cache|column/i.test(String(error.message ?? ""))) {
+          throw new Error("勞報下載時間欄位尚未建立，請先執行 migration 067");
+        }
+        if (isKolInvoiceTableMissing(error)) {
+          throw new Error("KOL發票表尚未建立");
+        }
+        throw error;
+      }
+      if (!data) {
+        failed.push({ 專案ID: pid, error: "更新失敗" });
+        continue;
+      }
+      ok.push(pid);
+    } catch (e) {
+      failed.push({ 專案ID: pid, error: e instanceof Error ? e.message : "注記失敗" });
+    }
+  }
+  return { ok, failed };
 }
 
 export async function getKolInvoiceByProjectId(專案ID: string): Promise<KolInvoiceRow | null> {
