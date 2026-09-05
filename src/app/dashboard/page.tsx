@@ -15,7 +15,7 @@ import { PaymentCollectionLink } from "@/components/PaymentCollectionLink";
 import { PaymentCollectionLinkIcon } from "@/components/PaymentCollectionLinkIcon";
 import { MasterEditHistory, type MasterEditLogItem } from "@/components/MasterEditHistory";
 import type { PaymentSubmissionWithProject } from "@/lib/db/payment-collection";
-import { formatTaipeiDateTime } from "@/lib/taiwan-date";
+import { formatTaipeiDateTime, getTaipeiDateString } from "@/lib/taiwan-date";
 import { downloadTableAsExcelCsv } from "@/lib/export/download-table-excel";
 import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, PaymentRecordRow } from "@/modules/finance";
 import { sortInvoicesByInvoiceNumber, sortInvoicesForLedger } from "@/modules/finance";
@@ -237,14 +237,13 @@ function formatTaskDueShortHint(t: TaskRow): string {
   return "";
 }
 
-/** 新增／批次發票表單欄位順序（與 TABLE_COLUMNS.invoices 一致） */
+/** 新增／批次發票表單欄位順序（不含廠商預計付款日；清冊列表仍可顯示／編輯既有資料） */
 const INVOICE_DRAFT_KEYS = [
   "專案ID",
   "發票號碼",
   "發票日期",
   "收款對象",
   "發票金額含稅",
-  "廠商預計付款日",
   "廠商付款日期",
   "備註",
 ] as const;
@@ -274,7 +273,9 @@ const INVOICE_AMOUNT_INPUT_CLS =
   "w-full min-w-[7.5rem] max-w-[13rem] rounded-lg border-2 border-amber-400/75 bg-amber-50/90 px-2.5 py-1.5 text-right text-sm font-semibold tabular-nums tracking-tight text-stone-900 shadow-sm shadow-amber-200/20 placeholder:text-stone-400 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-400/35 disabled:opacity-60 [color-scheme:light]";
 
 function emptyInvoiceDraftRow(): Record<string, string> {
-  return Object.fromEntries(INVOICE_DRAFT_KEYS.map((k) => [k, ""])) as Record<string, string>;
+  const row = Object.fromEntries(INVOICE_DRAFT_KEYS.map((k) => [k, ""])) as Record<string, string>;
+  row.發票日期 = getTaipeiDateString();
+  return row;
 }
 
 type InvoiceDraftKey = (typeof INVOICE_DRAFT_KEYS)[number];
@@ -300,9 +301,6 @@ const INVOICE_IMPORT_HEADER_ALIASES: Record<string, InvoiceDraftKey> = {
   含稅金額: "發票金額含稅",
   收款金額: "發票金額含稅",
   金額: "發票金額含稅",
-  廠商預計付款日: "廠商預計付款日",
-  預計付款日: "廠商預計付款日",
-  預計收款日: "廠商預計付款日",
   廠商付款日期: "廠商付款日期",
   收款日期: "廠商付款日期",
   實際收款日: "廠商付款日期",
@@ -364,6 +362,9 @@ function parseInvoiceImportText(text: string): {
       if (!key) return;
       row[key] = cells[idx] ?? "";
     });
+    if (!String(row.發票日期 ?? "").trim()) {
+      row.發票日期 = getTaipeiDateString();
+    }
     return row;
   }).filter((row) => INVOICE_DRAFT_KEYS.some((key) => String(row[key] ?? "").trim() !== ""));
 
@@ -12627,15 +12628,6 @@ export default function DashboardPage() {
                             value={row.發票金額含稅 ?? ""}
                             onChange={(e) => patchDraft("發票金額含稅", e.target.value)}
                             className={`${INVOICE_AMOUNT_INPUT_CLS} max-w-none rounded-lg px-2.5 py-2 text-sm`}
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-[11px] font-semibold text-stone-500">廠商預計付款日</label>
-                          <input
-                            type="date"
-                            value={normalizeDateForInput(row.廠商預計付款日 ?? "")}
-                            onChange={(e) => patchDraft("廠商預計付款日", e.target.value)}
-                            className={`${draftInputCls} [color-scheme:light]`}
                           />
                         </div>
                         <div>
