@@ -84,6 +84,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "課程製作夥伴", label: "課程製作夥伴" },
     { key: "Email", label: "Email" },
     { key: "分級", label: "分級" },
+    { key: "報價", label: "報價（後台）" },
   ],
   tasks: [
     { key: "專案ID", label: "專案ID" },

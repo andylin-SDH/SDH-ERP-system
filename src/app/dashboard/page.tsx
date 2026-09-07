@@ -1804,6 +1804,7 @@ export default function DashboardPage() {
     課程製作夥伴: boolean;
     Email: string;
     分級: string;
+    報價: string;
   }>({
     PartnerID: "",
     類別一: "",
@@ -1825,6 +1826,7 @@ export default function DashboardPage() {
     課程製作夥伴: false,
     Email: "",
     分級: "",
+    報價: "",
   });
   const [creatingPartner, setCreatingPartner] = useState(false);
   const [createPartnerError, setCreatePartnerError] = useState<string | null>(null);
@@ -1860,6 +1862,7 @@ export default function DashboardPage() {
     課程製作夥伴: boolean;
     Email: string;
     分級: string;
+    報價: string;
   }>({
     PartnerID: "",
     類別一: "",
@@ -1881,6 +1884,7 @@ export default function DashboardPage() {
     課程製作夥伴: false,
     Email: "",
     分級: "",
+    報價: "",
   });
   const [savingPartner, setSavingPartner] = useState(false);
   const [partnerEditError, setPartnerEditError] = useState<string | null>(null);
@@ -2680,6 +2684,7 @@ export default function DashboardPage() {
       課程製作夥伴: normalizePartnerBoolean(pt.課程製作夥伴),
       Email: String(pt.Email ?? ""),
       分級: String(pt.分級 ?? ""),
+      報價: String(pt.報價 ?? ""),
     });
     setPartnerEditError(null);
     setShowEditPartner(true);
@@ -8837,6 +8842,19 @@ export default function DashboardPage() {
                       className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
+                  <div className="md:col-span-2">
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">
+                      報價
+                      <span className="ml-1.5 font-normal text-stone-400">僅後台紀錄，不顯示於前台</span>
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={createPartnerForm.報價}
+                      onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 報價: e.target.value }))}
+                      placeholder="例：YT 置入 5 萬／短影音 3 萬"
+                      className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
+                    />
+                  </div>
                 </div>
                 <div className="mt-2 grid gap-3 md:grid-cols-2">
                   <label className="inline-flex items-center gap-2 text-xs text-stone-700">
@@ -9185,6 +9203,25 @@ export default function DashboardPage() {
                       <p className="rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">{editPartnerForm.分級 || "—"}</p>
                     )}
                   </div>
+                  <div className="md:col-span-2">
+                    <label className="mb-1 block text-xs font-semibold text-stone-500">
+                      報價
+                      <span className="ml-1.5 font-normal text-stone-400">僅後台紀錄，不顯示於前台</span>
+                    </label>
+                    {partnerFieldEditable("報價") ? (
+                      <textarea
+                        rows={2}
+                        value={editPartnerForm.報價}
+                        onChange={(e) => setEditPartnerForm((f) => ({ ...f, 報價: e.target.value }))}
+                        placeholder="例：YT 置入 5 萬／短影音 3 萬"
+                        className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
+                      />
+                    ) : (
+                      <p className="whitespace-pre-wrap rounded-lg border border-stone-200/90 bg-stone-50 px-3 py-1.5 text-sm text-stone-700">
+                        {editPartnerForm.報價 || "—"}
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <div className="mt-2 grid gap-3 md:grid-cols-2">
                   <label className="inline-flex items-center gap-2 text-xs text-stone-700">
@@ -9287,6 +9324,7 @@ export default function DashboardPage() {
                             課程製作夥伴: editPartnerForm.課程製作夥伴,
                             Email: editPartnerForm.Email || undefined,
                             分級: editPartnerForm.分級 || undefined,
+                            報價: editPartnerForm.報價 || undefined,
                         };
                         // 非管理者不可改 KOL開發者：不送該欄位，API 亦會過濾
                         const patchBody = { ...fullBody } as Record<string, unknown>;
@@ -9401,6 +9439,7 @@ export default function DashboardPage() {
                         課程製作夥伴: false,
                         Email: "",
                         分級: "",
+                        報價: "",
                       });
                       setCreatePartnerError(null);
                       setShowCreatePartner(true);

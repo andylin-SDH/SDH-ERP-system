@@ -98,6 +98,7 @@ export async function POST(request: NextRequest) {
         課程製作夥伴: normalizePartnerBoolean(body?.課程製作夥伴),
         Email: body?.Email,
         分級: body?.分級,
+        報價: body?.報價,
       },
       { 建立者: editor }
     );

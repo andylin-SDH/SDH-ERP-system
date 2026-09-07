@@ -31,6 +31,8 @@ export interface PartnerRow {
   課程製作夥伴?: boolean;
   Email?: string;
   分級?: string;
+  /** 後台內部報價紀錄（不對外前台顯示） */
+  報價?: string;
   /** 正方形形象照公開 URL */
   形象照?: string;
   /** 建立此 KOL 的使用者（姓名或 email） */

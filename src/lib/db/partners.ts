@@ -15,7 +15,7 @@ import {
 
 /** 與目前 DB 中文欄位一致；若任一名稱不符 PostgREST 會整段失敗 */
 const PARTNER_SELECT =
-  '"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "KOL開發者", "主管", "經銷約開始日", "自來件分潤", "SDH開發分件分潤", "經銷約結束日", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級", "形象照", "建立者", "最後更新者", "最後更新時間"';
+  '"PartnerID", "類別一", "類別二", "類別三", "合作夥伴名稱", "社群網站", "粉絲數", "頻道｜節目名稱", "是否有經營 私域群", "資料夾", "KOL開發者", "主管", "經銷約開始日", "自來件分潤", "SDH開發分件分潤", "經銷約結束日", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴", "Email", "分級", "報價", "形象照", "建立者", "最後更新者", "最後更新時間"';
 
 function rowToPartner(r: Record<string, unknown>): PartnerRow {
   const PartnerID =
@@ -46,6 +46,7 @@ function rowToPartner(r: Record<string, unknown>): PartnerRow {
     課程製作夥伴: normalizePartnerBoolean(r["課程製作夥伴"]),
     Email: (r.Email as string) || undefined,
     分級: (r["分級"] as string) || undefined,
+    報價: (r["報價"] as string) || undefined,
     形象照: (r["形象照"] as string) || undefined,
     建立者: (r["建立者"] as string) || undefined,
     最後更新者: (r["最後更新者"] as string) || undefined,
@@ -78,6 +79,7 @@ export interface NewPartnerInput {
   課程製作夥伴?: boolean;
   Email?: string;
   分級?: string;
+  報價?: string;
 }
 
 export interface CreatePartnerOptions {
@@ -144,6 +146,7 @@ export async function createPartner(
     課程製作夥伴: normalizePartnerBoolean(payload.課程製作夥伴),
     Email: payload.Email ?? null,
     分級: payload.分級 ?? null,
+    報價: payload.報價 ?? null,
     建立者: editor,
     最後更新者: editor,
     最後更新時間: now,
@@ -192,6 +195,7 @@ export interface UpdatePartnerInput {
   課程製作夥伴?: boolean;
   Email?: string;
   分級?: string;
+  報價?: string;
   形象照?: string | null;
   最後更新者?: string | null;
   最後更新時間?: string | null;
@@ -221,6 +225,7 @@ export async function updatePartner(PartnerID: string, payload: UpdatePartnerInp
   if (payload.課程製作夥伴 !== undefined) update["課程製作夥伴"] = normalizePartnerBoolean(payload.課程製作夥伴);
   if (payload.Email !== undefined) update["Email"] = payload.Email ?? null;
   if (payload.分級 !== undefined) update["分級"] = payload.分級 ?? null;
+  if (payload.報價 !== undefined) update["報價"] = payload.報價 ?? null;
   if (payload.形象照 !== undefined) update["形象照"] = payload.形象照 ?? null;
   if (payload.最後更新者 !== undefined) update["最後更新者"] = payload.最後更新者 ?? null;
   if (payload.最後更新時間 !== undefined) update["最後更新時間"] = payload.最後更新時間 ?? null;
