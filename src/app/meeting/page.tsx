@@ -5,7 +5,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { fetchSessionWithRetry } from "@/components/ErpLoginPanel";
 import { MeetingProjectDetail } from "@/components/meeting/MeetingProjectDetail";
 import { financeProgressBadgeClass } from "@/lib/meeting/ui";
-import type { MeetingProjectItem, MeetingSnapshot, PersonWorkloadGroup } from "@/lib/meeting/types";
+import type { MeetingProjectItem, MeetingSnapshot, MeetingTaskItem, PersonWorkloadGroup } from "@/lib/meeting/types";
 
 const UNASSIGNED_KEY = "（未指定主責）";
 
@@ -195,29 +195,93 @@ function countOverdueProjects(snapshot: MeetingSnapshot): number {
   return all.filter((p) => p.逾期警示.length > 0).length;
 }
 
-/** 逾期案件置頂；付款日逾期的越早（越久）越往上 */
-function sortMeetingProjects(projects: MeetingProjectItem[]): MeetingProjectItem[] {
-  const payYmd = (p: MeetingProjectItem) => (p.廠商預計付款日 === "—" ? "" : p.廠商預計付款日);
+type MeetingProjectSortMode = "time" | "name";
+
+function projectPayYmd(p: MeetingProjectItem): string {
+  return p.廠商預計付款日 === "—" ? "" : p.廠商預計付款日;
+}
+
+function projectOpenYmd(p: MeetingProjectItem): string {
+  return p.開案日期 === "—" ? "" : p.開案日期;
+}
+
+/** 該案待辦中最早的到期日（無則空字串） */
+function earliestTaskDueYmd(p: MeetingProjectItem): string {
+  let earliest = "";
+  for (const t of p.待辦任務) {
+    const d = t.到期日 === "—" ? "" : t.到期日;
+    if (!d) continue;
+    if (!earliest || d < earliest) earliest = d;
+  }
+  return earliest;
+}
+
+/** 時間錨點：最早任務到期 → 預計付款日 → 開案日（皆無則排後） */
+function projectTimeAnchor(p: MeetingProjectItem): string {
+  return earliestTaskDueYmd(p) || projectPayYmd(p) || projectOpenYmd(p);
+}
+
+/**
+ * 逾期案件置頂；其餘依時間順序（早→晚）。
+ * 逾期內：付款日逾期越早越上，再比任務逾期數。
+ */
+function sortMeetingProjects(
+  projects: MeetingProjectItem[],
+  mode: MeetingProjectSortMode = "time"
+): MeetingProjectItem[] {
   const hasPayOverdue = (p: MeetingProjectItem) => p.逾期警示.some((t) => t.includes("預計付款日"));
 
   return [...projects].sort((a, b) => {
     const aOver = a.逾期警示.length > 0;
     const bOver = b.逾期警示.length > 0;
     if (aOver !== bOver) return aOver ? -1 : 1;
-    if (!aOver) return a.專案名稱.localeCompare(b.專案名稱, "zh-Hant");
 
-    const aPay = payYmd(a);
-    const bPay = payYmd(b);
-    const aPayOver = hasPayOverdue(a);
-    const bPayOver = hasPayOverdue(b);
-    if (aPayOver && bPayOver && aPay && bPay && aPay !== bPay) {
-      return aPay.localeCompare(bPay);
+    if (aOver) {
+      const aPay = projectPayYmd(a);
+      const bPay = projectPayYmd(b);
+      const aPayOver = hasPayOverdue(a);
+      const bPayOver = hasPayOverdue(b);
+      if (aPayOver && bPayOver && aPay && bPay && aPay !== bPay) {
+        return aPay.localeCompare(bPay);
+      }
+      if (aPayOver !== bPayOver) return aPayOver ? -1 : 1;
+      if (a.逾期任務數 !== b.逾期任務數) return b.逾期任務數 - a.逾期任務數;
+      const aDue = earliestTaskDueYmd(a);
+      const bDue = earliestTaskDueYmd(b);
+      if (aDue && bDue && aDue !== bDue) return aDue.localeCompare(bDue);
+      if (aDue !== bDue) return aDue ? -1 : 1;
     }
-    if (aPayOver !== bPayOver) return aPayOver ? -1 : 1;
-    if (aPay && bPay && aPay !== bPay) return aPay.localeCompare(bPay);
 
-    if (a.逾期任務數 !== b.逾期任務數) return b.逾期任務數 - a.逾期任務數;
+    if (mode === "name") {
+      return a.專案名稱.localeCompare(b.專案名稱, "zh-Hant");
+    }
+
+    const aAnchor = projectTimeAnchor(a);
+    const bAnchor = projectTimeAnchor(b);
+    if (aAnchor && bAnchor && aAnchor !== bAnchor) return aAnchor.localeCompare(bAnchor);
+    if (aAnchor !== bAnchor) return aAnchor ? -1 : 1;
     return a.專案名稱.localeCompare(b.專案名稱, "zh-Hant");
+  });
+}
+
+/** 某人底下所有待辦，扁平化後依到期日排序（早→晚；無到期日最後；逾期優先） */
+function flattenPersonTodosChronological(
+  projects: MeetingProjectItem[]
+): Array<MeetingTaskItem & { 專案ID: string; 專案名稱: string }> {
+  const rows: Array<MeetingTaskItem & { 專案ID: string; 專案名稱: string }> = [];
+  for (const p of projects) {
+    for (const t of p.待辦任務) {
+      rows.push({ ...t, 專案ID: p.專案ID, 專案名稱: p.專案名稱 });
+    }
+  }
+  return rows.sort((a, b) => {
+    if (a.逾期 !== b.逾期) return a.逾期 ? -1 : 1;
+    if (a.到期日 !== "—" && b.到期日 !== "—" && a.到期日 !== b.到期日) {
+      return a.到期日.localeCompare(b.到期日);
+    }
+    if (a.到期日 === "—" && b.到期日 !== "—") return 1;
+    if (a.到期日 !== "—" && b.到期日 === "—") return -1;
+    return a.任務.localeCompare(b.任務, "zh-Hant");
   });
 }
 
@@ -228,6 +292,8 @@ export default function MeetingPage() {
   const [snapshot, setSnapshot] = useState<MeetingSnapshot | null>(null);
   const [selectedKey, setSelectedKey] = useState("");
   const [onlyOverdue, setOnlyOverdue] = useState(false);
+  const [projectSortMode, setProjectSortMode] = useState<MeetingProjectSortMode>("time");
+  const [showTodoTimeline, setShowTodoTimeline] = useState(true);
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -271,8 +337,13 @@ export default function MeetingPage() {
   const visibleProjects = useMemo(() => {
     if (!activeTab) return [];
     const list = onlyOverdue ? activeTab.projects.filter((p) => p.逾期警示.length > 0) : activeTab.projects;
-    return sortMeetingProjects(list);
-  }, [activeTab, onlyOverdue]);
+    return sortMeetingProjects(list, projectSortMode);
+  }, [activeTab, onlyOverdue, projectSortMode]);
+
+  const chronologicalTodos = useMemo(
+    () => flattenPersonTodosChronological(visibleProjects),
+    [visibleProjects]
+  );
 
   const toggleExpand = useCallback((projectId: string) => {
     setExpandedProjectId((prev) => (prev === projectId ? null : projectId));
@@ -323,9 +394,29 @@ export default function MeetingPage() {
               ← 回 Dashboard
             </Link>
             <h1 className="text-xl font-bold tracking-tight text-stone-900 sm:text-2xl">週一晨會 · 專案量能</h1>
-            <p className="text-xs text-stone-500">點選人員切換；點 ▶ 展開任務、專案內容與備註</p>
+            <p className="text-xs text-stone-500">點選人員切換；可切「時間順序」看待辦；點 ▶ 展開專案詳情</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-full border border-stone-200 bg-white p-0.5 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setProjectSortMode("time")}
+                className={`rounded-full px-3 py-1.5 transition ${
+                  projectSortMode === "time" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:bg-stone-50"
+                }`}
+              >
+                時間順序
+              </button>
+              <button
+                type="button"
+                onClick={() => setProjectSortMode("name")}
+                className={`rounded-full px-3 py-1.5 transition ${
+                  projectSortMode === "name" ? "bg-amber-500 text-slate-900 shadow-sm" : "text-stone-600 hover:bg-stone-50"
+                }`}
+              >
+                專案名稱
+              </button>
+            </div>
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700">
               <input type="checkbox" checked={onlyOverdue} onChange={(e) => setOnlyOverdue(e.target.checked)} className="rounded" />
               只看有逾期
@@ -409,7 +500,69 @@ export default function MeetingPage() {
                   ) : null}
                 </p>
               </div>
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700">
+                <input
+                  type="checkbox"
+                  checked={showTodoTimeline}
+                  onChange={(e) => setShowTodoTimeline(e.target.checked)}
+                  className="rounded"
+                />
+                顯示待辦時間序
+              </label>
             </div>
+            {showTodoTimeline && chronologicalTodos.length > 0 ? (
+              <div className="overflow-x-auto rounded-xl border border-amber-200/80 bg-amber-50/40">
+                <div className="border-b border-amber-200/70 px-3 py-2">
+                  <p className="text-xs font-bold uppercase tracking-wide text-amber-900/80">
+                    待辦時間序
+                    <span className="ml-2 font-normal normal-case tracking-normal text-stone-500">
+                      依到期日早→晚 · 共 {chronologicalTodos.length} 件
+                    </span>
+                  </p>
+                </div>
+                <table className="min-w-full text-left text-sm">
+                  <thead className="border-b border-amber-100 bg-white/70 text-xs font-bold text-stone-600">
+                    <tr>
+                      <th className="px-3 py-2">到期日</th>
+                      <th className="px-3 py-2">任務</th>
+                      <th className="px-3 py-2">負責人</th>
+                      <th className="px-3 py-2">專案</th>
+                      <th className="px-3 py-2">類型</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-amber-100/80 bg-white/50">
+                    {chronologicalTodos.map((t) => (
+                      <tr
+                        key={t.任務ID || `${t.專案ID}-${t.任務}-${t.到期日}`}
+                        className={t.逾期 ? "bg-red-50/70" : undefined}
+                      >
+                        <td className="whitespace-nowrap px-3 py-2 tabular-nums font-medium text-stone-800">
+                          {t.到期日}
+                          {t.逾期 ? (
+                            <span className="ml-1.5 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                              逾期
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2 font-medium text-stone-900">{t.任務}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-stone-700">{t.任務負責人}</td>
+                        <td className="max-w-[160px] px-3 py-2">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedProjectId(t.專案ID)}
+                            className="truncate text-left font-medium text-amber-900 underline decoration-amber-300/70 underline-offset-2 hover:text-amber-700"
+                            title={`展開專案 ${t.專案名稱}`}
+                          >
+                            {t.專案名稱}
+                          </button>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-stone-600">{t.任務類型}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
             {visibleProjects.length === 0 ? (
               <p className="rounded-xl border border-dashed border-stone-300 bg-white/60 py-12 text-center text-sm text-stone-500">
                 {onlyOverdue ? "此人目前沒有逾期項目" : "此人目前沒有進行中專案"}
@@ -426,6 +579,7 @@ export default function MeetingPage() {
 
         <p className="text-center text-[11px] text-stone-400">
           資料更新：{new Date(snapshot.generatedAt).toLocaleString("zh-TW")} · 逾期含任務到期、預計付款日已過
+          {projectSortMode === "time" ? " · 專案預設依時間順序（最早待辦／付款／開案）" : " · 專案依名稱排序"}
         </p>
       </main>
     </>
