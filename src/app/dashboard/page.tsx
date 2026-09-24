@@ -1210,6 +1210,132 @@ function generateProjectId(): string {
   return `SDH-${Y}${M}${D}-${h}${m}${s}-${rand}`;
 }
 
+type MasterCreateFormState = {
+  專案ID: string;
+  專案名稱: string;
+  專案類型: string;
+  專案狀態: string;
+  長期案: boolean;
+  母專案ID: string;
+  合約連結: string;
+  狀態確認日期: string;
+  開案日期: string;
+  廠商預計付款日: string;
+  專案總金額未稅: string;
+  專案營收: string;
+  專案成本: string;
+  KOL費用未稅: string;
+  KOL名稱: string;
+  經紀人: string;
+  主管: string;
+  KOL開發者: string;
+  專案費用類型: string;
+  廠商名稱: string;
+  專案資料夾: string;
+  專案BDPM: string;
+  專案BDPM分潤成數: string;
+  專案引薦人: string;
+  專案引薦人分潤成數: string;
+  專案開發人: string;
+  專案開發人分潤成數: string;
+  專案管理員: string;
+  專案管理員分潤成數: string;
+  執行管理員: string;
+  執行管理員分潤成數: string;
+  專案內容: string;
+  備註: string;
+};
+
+/** 空白新增表單（開案日預設今天；分潤成數帶系統預設） */
+function emptyMasterCreateForm(payoutDefaults: Record<string, string>, 專案類型 = ""): MasterCreateFormState {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    專案ID: generateProjectId(),
+    專案名稱: "",
+    專案類型,
+    專案狀態: "",
+    長期案: false,
+    母專案ID: "",
+    合約連結: "",
+    狀態確認日期: "",
+    開案日期: today,
+    廠商預計付款日: "",
+    專案總金額未稅: "",
+    專案營收: "",
+    專案成本: "",
+    KOL費用未稅: "",
+    KOL名稱: "",
+    經紀人: "",
+    主管: "",
+    KOL開發者: "",
+    專案費用類型: "",
+    廠商名稱: "",
+    專案資料夾: "",
+    專案BDPM: "",
+    專案BDPM分潤成數: payoutDefaults.專案BDPM分潤成數 ?? "",
+    專案引薦人: "",
+    專案引薦人分潤成數: payoutDefaults.專案引薦人分潤成數 ?? "",
+    專案開發人: "",
+    專案開發人分潤成數: payoutDefaults.專案開發人分潤成數 ?? "",
+    專案管理員: "",
+    專案管理員分潤成數: payoutDefaults.專案管理員分潤成數 ?? "",
+    執行管理員: "",
+    執行管理員分潤成數: payoutDefaults.執行管理員分潤成數 ?? "",
+    專案內容: "",
+    備註: "",
+  };
+}
+
+/**
+ * 從既有專案複製成「新增草稿」：新專案ID、金額全空、母專案清空、開案日今天、狀態重設。
+ * 不連動任務／財務／發票／分潤。
+ */
+function buildMasterCreateFormFromCopy(
+  source: MasterRow,
+  payoutDefaults: Record<string, string>
+): MasterCreateFormState {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    專案ID: generateProjectId(),
+    專案名稱: String(source.專案名稱 ?? "").trim(),
+    專案類型: String(source.專案類型 ?? "").trim(),
+    專案狀態: "",
+    長期案: Boolean(source.長期案),
+    母專案ID: "",
+    合約連結: String(source.合約連結 ?? "").trim(),
+    狀態確認日期: "",
+    開案日期: today,
+    廠商預計付款日: "",
+    專案總金額未稅: "",
+    專案營收: "",
+    專案成本: "",
+    KOL費用未稅: "",
+    KOL名稱: String(source.KOL名稱 ?? "").trim(),
+    經紀人: String(source.經紀人 ?? "").trim(),
+    主管: String(source.主管 ?? "").trim(),
+    KOL開發者: String(source.KOL開發者 ?? "").trim(),
+    專案費用類型: String(source.專案費用類型 ?? "").trim(),
+    廠商名稱: String(source.廠商名稱 ?? "").trim(),
+    專案資料夾: String(source.專案資料夾 ?? "").trim(),
+    專案BDPM: String(source.專案BDPM ?? "").trim(),
+    專案BDPM分潤成數: String(source.專案BDPM分潤成數 ?? "").trim() || (payoutDefaults.專案BDPM分潤成數 ?? ""),
+    專案引薦人: String(source.專案引薦人 ?? "").trim(),
+    專案引薦人分潤成數:
+      String(source.專案引薦人分潤成數 ?? "").trim() || (payoutDefaults.專案引薦人分潤成數 ?? ""),
+    專案開發人: String(source.專案開發人 ?? "").trim(),
+    專案開發人分潤成數:
+      String(source.專案開發人分潤成數 ?? "").trim() || (payoutDefaults.專案開發人分潤成數 ?? ""),
+    專案管理員: String(source.專案管理員 ?? "").trim(),
+    專案管理員分潤成數:
+      String(source.專案管理員分潤成數 ?? "").trim() || (payoutDefaults.專案管理員分潤成數 ?? ""),
+    執行管理員: String(source.執行管理員 ?? "").trim(),
+    執行管理員分潤成數:
+      String(source.執行管理員分潤成數 ?? "").trim() || (payoutDefaults.執行管理員分潤成數 ?? ""),
+    專案內容: String(source.專案內容 ?? "").trim(),
+    備註: String(source.備註 ?? "").trim(),
+  };
+}
+
 const OVERVIEW_SCOPE_STORAGE_KEY = "sdh-dashboard-overview-scope";
 
 /** 大總表上與「這個人與專案有關」可能對得上的欄位（姓名／Email 需與 Users 一致） */
@@ -1589,41 +1715,17 @@ export default function DashboardPage() {
   const [showCreateMaster, setShowCreateMaster] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [createForm, setCreateForm] = useState({
-    專案ID: "",
-    專案名稱: "",
-    專案類型: "",
-    專案狀態: "",
-    長期案: false,
-    母專案ID: "",
-    合約連結: "",
-    狀態確認日期: "",
-    開案日期: "",
-    廠商預計付款日: "",
-    專案總金額未稅: "",
-    專案營收: "",
-    專案成本: "",
-    KOL費用未稅: "",
-    KOL名稱: "",
-    經紀人: "",
-    主管: "",
-    KOL開發者: "",
-    專案費用類型: "",
-    廠商名稱: "",
-    專案資料夾: "",
-    專案BDPM: "",
-    專案BDPM分潤成數: "",
-    專案引薦人: "",
-    專案引薦人分潤成數: "",
-    專案開發人: "",
-    專案開發人分潤成數: "",
-    專案管理員: "",
-    專案管理員分潤成數: "",
-    執行管理員: "",
-    執行管理員分潤成數: "",
-    專案內容: "",
-    備註: "",
-  });
+  /** 複製來源提示（僅 UI；送出仍走一般新增） */
+  const [createMasterCopyFromLabel, setCreateMasterCopyFromLabel] = useState<string | null>(null);
+  const [createForm, setCreateForm] = useState<MasterCreateFormState>(() =>
+    emptyMasterCreateForm({
+      專案BDPM分潤成數: "",
+      專案引薦人分潤成數: "",
+      專案開發人分潤成數: "",
+      專案管理員分潤成數: "",
+      執行管理員分潤成數: "",
+    })
+  );
   const [selectedMaster, setSelectedMaster] = useState<MasterRow | null>(null);
   const [isEditingMaster, setIsEditingMaster] = useState(false);
   const [masterEditLogs, setMasterEditLogs] = useState<MasterEditLogItem[]>([]);
@@ -3326,6 +3428,39 @@ export default function DashboardPage() {
       }, 80);
     },
     [masterByProjectId]
+  );
+
+  const closeCreateMasterModal = useCallback(() => {
+    setShowCreateMaster(false);
+    setCreating(false);
+    setCreateError(null);
+    setCreateMasterCopyFromLabel(null);
+  }, []);
+
+  const openCreateMasterBlank = useCallback(() => {
+    setCreateForm(
+      emptyMasterCreateForm(
+        payoutDefaults as unknown as Record<string, string>,
+        masterSubTab !== "全部" ? masterSubTab : ""
+      )
+    );
+    setCreateMasterCopyFromLabel(null);
+    setCreateError(null);
+    setShowCreateMaster(true);
+  }, [payoutDefaults, masterSubTab]);
+
+  /** 複製專案 → 開啟新增草稿（金額空白；不連動任務／財務） */
+  const openCreateMasterFromCopy = useCallback(
+    (source: MasterRow) => {
+      if (!canMutate) return;
+      setCreateForm(buildMasterCreateFormFromCopy(source, payoutDefaults as unknown as Record<string, string>));
+      const srcName = String(source.專案名稱 ?? "").trim() || "—";
+      const srcId = String(source.專案ID ?? "").trim() || "—";
+      setCreateMasterCopyFromLabel(`${srcName}（${srcId}）`);
+      setCreateError(null);
+      setShowCreateMaster(true);
+    },
+    [canMutate, payoutDefaults]
   );
 
   /**
@@ -6991,46 +7126,7 @@ export default function DashboardPage() {
                 {canMutate && (
                 <button
                   type="button"
-                  onClick={() => {
-                    const today = new Date().toISOString().slice(0, 10);
-                    setCreateForm({
-                      專案ID: generateProjectId(),
-                      專案名稱: "",
-                      專案類型: masterSubTab !== "全部" ? masterSubTab : "",
-                      專案狀態: "",
-                      長期案: false,
-                      母專案ID: "",
-                      合約連結: "",
-                      狀態確認日期: "",
-                      開案日期: today,
-                      廠商預計付款日: "",
-                      專案總金額未稅: "",
-                      專案營收: "",
-                      專案成本: "",
-                      KOL費用未稅: "",
-                      KOL名稱: "",
-                      經紀人: "",
-                      主管: "",
-                      KOL開發者: "",
-                      專案費用類型: "",
-                      廠商名稱: "",
-                      專案資料夾: "",
-                      專案BDPM: "",
-                      專案BDPM分潤成數: payoutDefaults.專案BDPM分潤成數,
-                      專案引薦人: "",
-                      專案引薦人分潤成數: payoutDefaults.專案引薦人分潤成數,
-                      專案開發人: "",
-                      專案開發人分潤成數: payoutDefaults.專案開發人分潤成數,
-                      專案管理員: "",
-                      專案管理員分潤成數: payoutDefaults.專案管理員分潤成數,
-                      執行管理員: "",
-                      執行管理員分潤成數: payoutDefaults.執行管理員分潤成數,
-                      專案內容: "",
-                      備註: "",
-                    });
-                    setCreateError(null);
-                    setShowCreateMaster(true);
-                  }}
+                  onClick={() => openCreateMasterBlank()}
                   className="rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400"
                 >
                   新增專案
@@ -7407,6 +7503,19 @@ export default function DashboardPage() {
                                             </p>
                                           ) : null}
                                         </div>
+                                        {canMutate ? (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              openCreateMasterFromCopy(row);
+                                            }}
+                                            className="mt-0.5 shrink-0 rounded-md border border-amber-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-amber-900 transition hover:border-amber-400 hover:bg-amber-50"
+                                            title="複製為新專案草稿（金額不帶入）"
+                                          >
+                                            複製
+                                          </button>
+                                        ) : null}
                                       </div>
                                     </div>
                                   </td>
@@ -13129,6 +13238,7 @@ export default function DashboardPage() {
                   await refreshDashboardData(["master", "payout", "finance"]);
                   setCreating(false);
                   setShowCreateMaster(false);
+                  setCreateMasterCopyFromLabel(null);
                 } catch (err: unknown) {
                   setCreateError(err instanceof Error ? err.message : "新增失敗");
                   setCreating(false);
@@ -13136,14 +13246,12 @@ export default function DashboardPage() {
               }}
             >
               <header className="flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
-                <h2 className="text-xl font-bold tracking-tight text-stone-900">新增大總表專案</h2>
+                <h2 className="text-xl font-bold tracking-tight text-stone-900">
+                  {createMasterCopyFromLabel ? "複製專案（新增草稿）" : "新增大總表專案"}
+                </h2>
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowCreateMaster(false);
-                    setCreating(false);
-                    setCreateError(null);
-                  }}
+                  onClick={() => closeCreateMasterModal()}
                   className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
                 >
                   關閉
@@ -13151,6 +13259,12 @@ export default function DashboardPage() {
               </header>
               <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
                 {createError && <p className="rounded-lg bg-amber-100/90 px-3 py-2 text-sm font-medium text-amber-800">{createError}</p>}
+                {createMasterCopyFromLabel && (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-sm text-amber-950">
+                    已從 <strong className="font-semibold">{createMasterCopyFromLabel}</strong> 複製。
+                    金額欄位未帶入，請重新填寫後再儲存；不會複製任務、財務、發票或分潤。
+                  </p>
+                )}
 
                 <section>
                   <h3 className="mb-3 text-base font-bold text-amber-800">基本資料</h3>
@@ -13219,6 +13333,9 @@ export default function DashboardPage() {
 
                 <section>
                   <h3 className="mb-3 text-base font-bold text-amber-800">金額與成本</h3>
+                  {createMasterCopyFromLabel ? (
+                    <p className="mb-3 text-xs font-medium text-amber-800">複製時未帶入金額，請重新填寫。</p>
+                  ) : null}
                   <div className="grid grid-cols-2 gap-x-4 gap-y-4">
                     <NumberField
                       label="專案總金額未稅"
@@ -13372,11 +13489,7 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-semibold text-stone-600 transition hover:bg-stone-100"
-                  onClick={() => {
-                    setShowCreateMaster(false);
-                    setCreating(false);
-                    setCreateError(null);
-                  }}
+                  onClick={() => closeCreateMasterModal()}
                 >
                   取消
                 </button>
@@ -13385,7 +13498,7 @@ export default function DashboardPage() {
                   disabled={creating}
                   className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-60"
                 >
-                  {creating ? "儲存中..." : "儲存"}
+                  {creating ? "儲存中..." : createMasterCopyFromLabel ? "建立複製專案" : "儲存"}
                 </button>
               </footer>
             </form>
@@ -13798,6 +13911,16 @@ export default function DashboardPage() {
                     className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100"
                   >
                     刪除專案
+                  </button>
+                )}
+                {canMutate && (
+                  <button
+                    type="button"
+                    onClick={() => openCreateMasterFromCopy(selectedMaster)}
+                    className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
+                    title="複製為新專案草稿（金額不帶入）"
+                  >
+                    複製專案
                   </button>
                 )}
                 <button
