@@ -1253,7 +1253,7 @@ function emptyMasterCreateForm(payoutDefaults: Record<string, string>, 專案類
     專案ID: generateProjectId(),
     專案名稱: "",
     專案類型,
-    專案狀態: "",
+    專案狀態: "進行中",
     長期案: false,
     母專案ID: "",
     合約連結: "",
@@ -1287,7 +1287,7 @@ function emptyMasterCreateForm(payoutDefaults: Record<string, string>, 專案類
 }
 
 /**
- * 從既有專案複製成「新增草稿」：新專案ID、金額全空、母專案清空、開案日／狀態確認日今天、狀態重設。
+ * 從既有專案複製成「新增草稿」：新專案ID、金額全空、母專案清空、開案日／狀態確認日今天、狀態預設進行中。
  * 不連動任務／財務／發票／分潤。
  */
 function buildMasterCreateFormFromCopy(
@@ -1299,7 +1299,7 @@ function buildMasterCreateFormFromCopy(
     專案ID: generateProjectId(),
     專案名稱: String(source.專案名稱 ?? "").trim(),
     專案類型: String(source.專案類型 ?? "").trim(),
-    專案狀態: "",
+    專案狀態: "進行中",
     長期案: Boolean(source.長期案),
     母專案ID: "",
     合約連結: String(source.合約連結 ?? "").trim(),

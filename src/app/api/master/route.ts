@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
       專案ID,
       專案名稱: (body?.專案名稱 as string) ?? null,
       專案類型: (body?.專案類型 as string) ?? null,
-      專案狀態: (body?.專案狀態 as string) ?? null,
+      專案狀態: String(body?.專案狀態 ?? "").trim() || "進行中",
       長期案: Boolean(body?.長期案),
       母專案ID: (body?.母專案ID as string) ?? null,
       合約連結: (body?.合約連結 as string) ?? null,

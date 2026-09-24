@@ -174,7 +174,7 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     專案ID: payload.專案ID,
     專案名稱: payload.專案名稱 ?? null,
     專案類型: payload.專案類型 ?? null,
-    專案狀態: payload.專案狀態 ?? null,
+    專案狀態: String(payload.專案狀態 ?? "").trim() || "進行中",
     長期案: Boolean(payload.長期案),
     母專案ID: payload.母專案ID ? String(payload.母專案ID).trim() : null,
     合約連結: payload.合約連結 ?? null,
