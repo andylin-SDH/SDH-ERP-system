@@ -3449,7 +3449,7 @@ export default function DashboardPage() {
     setShowCreateMaster(true);
   }, [payoutDefaults, masterSubTab]);
 
-  /** 複製專案 → 開啟新增草稿（金額空白；不連動任務／財務） */
+  /** 複製專案 → 關閉原詳情並開啟新增草稿（金額空白；不連動任務／財務） */
   const openCreateMasterFromCopy = useCallback(
     (source: MasterRow) => {
       if (!canMutate) return;
@@ -3458,6 +3458,11 @@ export default function DashboardPage() {
       const srcId = String(source.專案ID ?? "").trim() || "—";
       setCreateMasterCopyFromLabel(`${srcName}（${srcId}）`);
       setCreateError(null);
+      setSelectedMaster(null);
+      setIsEditingMaster(false);
+      setSaveMasterError(null);
+      setShowDeleteMasterConfirm(false);
+      setPendingDeleteMasterTaskTemplate(null);
       setShowCreateMaster(true);
     },
     [canMutate, payoutDefaults]
