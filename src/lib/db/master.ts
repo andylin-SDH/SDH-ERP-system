@@ -111,6 +111,16 @@ function normalizeMoneyOrNull(v: string | null | undefined): string | null {
   return t === "" ? null : t;
 }
 
+/** 台灣當日 yyyy-MM-dd（狀態確認日期自動寫入用） */
+export function todayYmdTaipei(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 export async function getMasterList(): Promise<MasterRow[]> {
   const supabase = getSupabase();
   const withSoft = await supabase
@@ -168,7 +178,8 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     長期案: Boolean(payload.長期案),
     母專案ID: payload.母專案ID ? String(payload.母專案ID).trim() : null,
     合約連結: payload.合約連結 ?? null,
-    狀態確認日期: payload.狀態確認日期 ?? null,
+    /** 狀態確認日期：開案／任何寫入由系統自動帶入當日，不採前端手填 */
+    狀態確認日期: todayYmdTaipei(),
     開案日期: payload.開案日期 ?? null,
     專案總金額未稅: normalizeMoneyOrNull(payload.專案總金額未稅),
     /** 專案營收：總金額 − 額外成本 − KOL費用，不接受前端手填 */
@@ -228,7 +239,8 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
     專案類型: payload.專案類型 ?? null,
     專案狀態: payload.專案狀態 ?? null,
     長期案: Boolean(payload.長期案),
-    狀態確認日期: payload.狀態確認日期 ?? null,
+    /** 狀態確認日期：每次編輯／更新自動改為當日 */
+    狀態確認日期: todayYmdTaipei(),
     開案日期: payload.開案日期 ?? null,
     專案總金額未稅: normalizeMoneyOrNull(payload.專案總金額未稅),
     /** 專案營收：總金額 − 額外成本 − KOL費用，不接受前端手填 */

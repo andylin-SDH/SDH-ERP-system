@@ -1246,7 +1246,7 @@ type MasterCreateFormState = {
   備註: string;
 };
 
-/** 空白新增表單（開案日預設今天；分潤成數帶系統預設） */
+/** 空白新增表單（開案日／狀態確認日預設今天；分潤成數帶系統預設） */
 function emptyMasterCreateForm(payoutDefaults: Record<string, string>, 專案類型 = ""): MasterCreateFormState {
   const today = new Date().toISOString().slice(0, 10);
   return {
@@ -1257,7 +1257,7 @@ function emptyMasterCreateForm(payoutDefaults: Record<string, string>, 專案類
     長期案: false,
     母專案ID: "",
     合約連結: "",
-    狀態確認日期: "",
+    狀態確認日期: today,
     開案日期: today,
     廠商預計付款日: "",
     專案總金額未稅: "",
@@ -1287,7 +1287,7 @@ function emptyMasterCreateForm(payoutDefaults: Record<string, string>, 專案類
 }
 
 /**
- * 從既有專案複製成「新增草稿」：新專案ID、金額全空、母專案清空、開案日今天、狀態重設。
+ * 從既有專案複製成「新增草稿」：新專案ID、金額全空、母專案清空、開案日／狀態確認日今天、狀態重設。
  * 不連動任務／財務／發票／分潤。
  */
 function buildMasterCreateFormFromCopy(
@@ -1303,7 +1303,7 @@ function buildMasterCreateFormFromCopy(
     長期案: Boolean(source.長期案),
     母專案ID: "",
     合約連結: String(source.合約連結 ?? "").trim(),
-    狀態確認日期: "",
+    狀態確認日期: today,
     開案日期: today,
     廠商預計付款日: "",
     專案總金額未稅: "",
@@ -13312,7 +13312,13 @@ export default function DashboardPage() {
                       </label>
                     </div>
                     <DateField label="開案日期" value={createForm.開案日期} onChange={(v) => setCreateForm((f) => ({ ...f, 開案日期: v }))} />
-                    <DateField label="狀態確認日期" value={createForm.狀態確認日期} onChange={(v) => setCreateForm((f) => ({ ...f, 狀態確認日期: v }))} />
+                    <div>
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-500">狀態確認日期</p>
+                      <p className="text-sm font-medium text-stone-700">
+                        {createForm.狀態確認日期?.trim() ? createForm.狀態確認日期 : "—"}
+                      </p>
+                      <p className="mt-0.5 text-xs text-stone-400">開案／編輯時自動寫入當日</p>
+                    </div>
                     <DateField
                       label="廠商預計付款日"
                       value={createForm.廠商預計付款日}
@@ -14112,7 +14118,13 @@ export default function DashboardPage() {
                     <Field label="開案日期" value={selectedMaster.開案日期} />
                   )}
                   {isEditingMaster ? (
-                    <DateField label="狀態確認日期" value={editMasterForm.狀態確認日期} onChange={(v) => setEditMasterForm((f) => ({ ...f, 狀態確認日期: v }))} />
+                    <div>
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-500">狀態確認日期</p>
+                      <p className="text-sm font-medium text-stone-700">
+                        {new Date().toISOString().slice(0, 10)}
+                      </p>
+                      <p className="mt-0.5 text-xs text-stone-400">儲存時自動更新為今日</p>
+                    </div>
                   ) : (
                     <Field label="狀態確認日期" value={selectedMaster.狀態確認日期} />
                   )}

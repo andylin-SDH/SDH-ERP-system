@@ -15,6 +15,7 @@ import {
   createMaster,
   getMasterById,
   getMasterList,
+  todayYmdTaipei,
   updateMaster,
   type NewMasterInput,
   type UpdateMasterInput,
@@ -64,6 +65,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "您沒有建立專案的權限" }, { status: 403 });
     }
 
+    const today = todayYmdTaipei();
     const payload: NewMasterInput = {
       專案ID,
       專案名稱: (body?.專案名稱 as string) ?? null,
@@ -72,7 +74,7 @@ export async function POST(request: NextRequest) {
       長期案: Boolean(body?.長期案),
       母專案ID: (body?.母專案ID as string) ?? null,
       合約連結: (body?.合約連結 as string) ?? null,
-      狀態確認日期: (body?.狀態確認日期 as string) ?? null,
+      狀態確認日期: today,
       開案日期: (body?.開案日期 as string) ?? null,
       專案總金額未稅: (body?.專案總金額未稅 as string) ?? null,
       專案營收: (body?.專案營收 as string) ?? null,
@@ -142,6 +144,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "找不到該專案" }, { status: 404 });
     }
 
+    const today = todayYmdTaipei();
     const rawPayload: UpdateMasterInput = {
       id,
       專案名稱: (body?.專案名稱 as string) ?? null,
@@ -151,7 +154,7 @@ export async function PATCH(request: NextRequest) {
       // 僅在有傳入時帶入，讓 updateMaster 的守衞式判斷可略過未變動欄位
       ...(body?.母專案ID !== undefined ? { 母專案ID: (body.母專案ID as string) ?? null } : {}),
       ...(body?.合約連結 !== undefined ? { 合約連結: (body.合約連結 as string) ?? null } : {}),
-      狀態確認日期: (body?.狀態確認日期 as string) ?? null,
+      狀態確認日期: today,
       開案日期: (body?.開案日期 as string) ?? null,
       專案總金額未稅: (body?.專案總金額未稅 as string) ?? null,
       專案營收: (body?.專案營收 as string) ?? null,
