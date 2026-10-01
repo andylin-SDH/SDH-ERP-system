@@ -1492,11 +1492,25 @@ function financeProgressBadgeClass(short: string): string {
   return "bg-stone-100 text-stone-500";
 }
 
-/** 分潤表三態：對應列上「廠商付款日期」（廠商已付）與「分潤匯款日期」（公司已匯） */
+/** 分潤表三態：廠商是否已付以財務表為準；分潤匯款日期仍看每一列 */
 type PayoutWorkflowTabKey = "pending_vendor" | "pending_payout" | "settled";
 
-function payoutRowWorkflowStage(row: PayoutRow): PayoutWorkflowTabKey {
-  const vendorIn = String(row.廠商付款日期 ?? "").trim();
+function payoutVendorPaidDate(row: PayoutRow, financeByProjectId?: Map<string, FinanceRow>): string {
+  const pid = String(row.專案ID ?? "").trim();
+  const fromFinance = pid ? String(financeByProjectId?.get(pid)?.廠商付款日期 ?? "").trim() : "";
+  if (fromFinance) return fromFinance;
+  return String(row.廠商付款日期 ?? "").trim();
+}
+
+/** 畫面用：廠商付款日改讀財務表。財務沒有日期時才沿用分潤列上的副本。 */
+function payoutRowForDisplay(row: PayoutRow, financeByProjectId: Map<string, FinanceRow>): PayoutRow {
+  const vendorPaid = payoutVendorPaidDate(row, financeByProjectId);
+  if (vendorPaid === String(row.廠商付款日期 ?? "").trim()) return row;
+  return { ...row, 廠商付款日期: vendorPaid || undefined };
+}
+
+function payoutRowWorkflowStage(row: PayoutRow, financeByProjectId?: Map<string, FinanceRow>): PayoutWorkflowTabKey {
+  const vendorIn = payoutVendorPaidDate(row, financeByProjectId);
   const empOut = String(row.分潤匯款日期 ?? "").trim();
   if (empOut) return "settled";
   if (vendorIn) return "pending_payout";
@@ -3839,52 +3853,67 @@ export default function DashboardPage() {
 
   /** 財務付款作業：不依「領取人」列級過濾，與會計全公司口徑一致 */
   const dedupedPayoutForFinanceEmployee = useMemo(
-    () => dedupePayoutRows(payoutList),
-    [payoutList]
+    () => dedupePayoutRows(payoutList).map((r) => payoutRowForDisplay(r, financeByProjectId)),
+    [payoutList, financeByProjectId]
+  );
+
+  const payoutForWorkflow = useMemo(
+    () => dedupedPayoutForDisplay.map((r) => payoutRowForDisplay(r, financeByProjectId)),
+    [dedupedPayoutForDisplay, financeByProjectId]
   );
 
   const payoutWorkflowFiltered = useMemo(
-    () => dedupedPayoutForDisplay.filter((r) => payoutRowWorkflowStage(r) === payoutWorkflowTab),
-    [dedupedPayoutForDisplay, payoutWorkflowTab]
+    () => payoutForWorkflow.filter((r) => payoutRowWorkflowStage(r, financeByProjectId) === payoutWorkflowTab),
+    [payoutForWorkflow, payoutWorkflowTab, financeByProjectId]
   );
 
   const payoutWorkflowCounts = useMemo(() => {
     let pending_vendor = 0;
     let pending_payout = 0;
     let settled = 0;
-    for (const r of dedupedPayoutForDisplay) {
-      const s = payoutRowWorkflowStage(r);
+    for (const r of payoutForWorkflow) {
+      const s = payoutRowWorkflowStage(r, financeByProjectId);
       if (s === "pending_vendor") pending_vendor += 1;
       else if (s === "pending_payout") pending_payout += 1;
       else settled += 1;
     }
     return { pending_vendor, pending_payout, settled };
-  }, [dedupedPayoutForDisplay]);
+  }, [payoutForWorkflow, financeByProjectId]);
+
+  /** 分潤表頂部儀表：待結帳列的分潤金額加總（同列表②可見範圍與去重後） */
+  const payoutPendingVendorAmountSum = useMemo(() => {
+    let sum = 0;
+    for (const r of payoutForWorkflow) {
+      if (payoutRowWorkflowStage(r, financeByProjectId) !== "pending_vendor") continue;
+      sum += parseNumericField(r.分潤金額);
+    }
+    return sum;
+  }, [payoutForWorkflow, financeByProjectId]);
 
   /** 分潤表頂部儀表：待分潤列的分潤金額加總（同列表②可見範圍與去重後） */
   const payoutPendingPayoutAmountSum = useMemo(() => {
     let sum = 0;
-    for (const r of dedupedPayoutForDisplay) {
-      if (payoutRowWorkflowStage(r) !== "pending_payout") continue;
+    for (const r of payoutForWorkflow) {
+      if (payoutRowWorkflowStage(r, financeByProjectId) !== "pending_payout") continue;
       sum += parseNumericField(r.分潤金額);
     }
     return sum;
-  }, [dedupedPayoutForDisplay]);
+  }, [payoutForWorkflow, financeByProjectId]);
 
   /** 分潤表頂部儀表：已分潤列的分潤金額加總（同上口徑） */
   const payoutSettledAmountSum = useMemo(() => {
     let sum = 0;
-    for (const r of dedupedPayoutForDisplay) {
-      if (payoutRowWorkflowStage(r) !== "settled") continue;
+    for (const r of payoutForWorkflow) {
+      if (payoutRowWorkflowStage(r, financeByProjectId) !== "settled") continue;
       sum += parseNumericField(r.分潤金額);
     }
     return sum;
-  }, [dedupedPayoutForDisplay]);
+  }, [payoutForWorkflow, financeByProjectId]);
 
   /** 財務「員工分潤付款」：廠商已付、尚未匯款給員工 */
   const financeEmployeePayoutPendingRows = useMemo(
-    () => dedupedPayoutForFinanceEmployee.filter((r) => payoutRowWorkflowStage(r) === "pending_payout"),
-    [dedupedPayoutForFinanceEmployee]
+    () => dedupedPayoutForFinanceEmployee.filter((r) => payoutRowWorkflowStage(r, financeByProjectId) === "pending_payout"),
+    [dedupedPayoutForFinanceEmployee, financeByProjectId]
   );
   const financeEmployeePayoutPaidRows = useMemo(
     () => dedupedPayoutForFinanceEmployee.filter((r) => String(r.分潤匯款日期 ?? "").trim() !== ""),
@@ -3898,12 +3927,12 @@ export default function DashboardPage() {
     let pending_vendor = 0;
     let pending_payout = 0;
     for (const r of dedupedPayoutForFinanceEmployee) {
-      const s = payoutRowWorkflowStage(r);
+      const s = payoutRowWorkflowStage(r, financeByProjectId);
       if (s === "pending_vendor") pending_vendor += 1;
       else if (s === "pending_payout") pending_payout += 1;
     }
     return { pending_vendor, pending_payout };
-  }, [dedupedPayoutForFinanceEmployee]);
+  }, [dedupedPayoutForFinanceEmployee, financeByProjectId]);
 
   const financeEmployeePayoutCounts = useMemo(() => {
     let pending = 0;
@@ -3912,7 +3941,7 @@ export default function DashboardPage() {
     let paidAmount = 0;
     for (const r of dedupedPayoutForFinanceEmployee) {
       const amt = parseNumericField(r.分潤金額);
-      if (payoutRowWorkflowStage(r) === "pending_payout") {
+      if (payoutRowWorkflowStage(r, financeByProjectId) === "pending_payout") {
         pending += 1;
         pendingAmount += amt;
       }
@@ -3922,7 +3951,7 @@ export default function DashboardPage() {
       }
     }
     return { pending, pendingAmount, paid, paidAmount };
-  }, [dedupedPayoutForFinanceEmployee]);
+  }, [dedupedPayoutForFinanceEmployee, financeByProjectId]);
   const kolRemittancePendingItems = useMemo(
     () => kolRemittanceItems.filter((r) => r.結帳狀態 === "待匯款"),
     [kolRemittanceItems]
@@ -10253,7 +10282,7 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-xl font-bold tracking-tight text-stone-900">分潤表</h2>
               <p className="mt-1 max-w-2xl text-xs text-stone-500">
-                「廠商預計付款日」由大總表專案編輯；財務填寫「廠商付款日期」後，同專案分潤列會帶入並歸入「待分潤」；填寫「員工分潤日期」後帶入「分潤匯款日期」並歸入「已分潤」。
+                「廠商預計付款日」由大總表專案編輯。廠商是否已付款以財務表的「廠商付款日期」為準，分潤列上的同名欄位只是副本。有分潤匯款日則歸入「已分潤」。
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-stone-200 bg-amber-50/90 p-1">
@@ -10317,9 +10346,9 @@ export default function DashboardPage() {
                   <div className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-stone-300/25 blur-2xl transition duration-500 group-hover:bg-stone-400/30" />
                   <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-stone-400 via-stone-300 to-amber-200/80" />
                   <div className="relative">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-500">待結帳筆數</p>
-                    <p className="mt-2 bg-gradient-to-br from-stone-800 to-stone-600 bg-clip-text text-2xl font-extrabold tabular-nums tracking-tight text-transparent sm:text-3xl">{payoutWorkflowCounts.pending_vendor}</p>
-                    <p className="mt-1 text-[10px] font-medium text-stone-400">廠商未付款</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-500">待結帳金額合計</p>
+                    <p className="mt-2 bg-gradient-to-br from-stone-800 to-stone-600 bg-clip-text text-xl font-extrabold tabular-nums tracking-tight text-transparent sm:text-2xl">{formatAmount(String(Math.round(payoutPendingVendorAmountSum)))}</p>
+                    <p className="mt-1 text-[10px] font-medium text-stone-400">{payoutWorkflowCounts.pending_vendor} 筆 · 廠商未付款</p>
                   </div>
                 </div>
                 <div className="group relative overflow-hidden rounded-2xl border border-amber-200/70 bg-gradient-to-br from-amber-50/95 via-white to-orange-50/50 px-3 py-3.5 shadow-[0_12px_40px_-12px_rgba(245,158,11,0.35)] ring-1 ring-amber-200/60 transition duration-300 hover:-translate-y-1 hover:shadow-[0_20px_50px_-10px_rgba(245,158,11,0.45)] sm:px-4 sm:py-4">

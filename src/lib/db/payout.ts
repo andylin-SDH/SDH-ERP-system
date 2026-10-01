@@ -405,6 +405,54 @@ async function snapshotRemitDatesByRecipient(專案ID: string): Promise<Map<stri
   return out;
 }
 
+/**
+ * 重寫前保留廠商付款日。先看財務（廠商已付款的依據），財務沒有再沿用分潤列上已有的日期。
+ * 只用於寫進新列或補空白，不會把已有日期改成空。
+ */
+async function snapshotVendorPaidDate(專案ID: string): Promise<string | null> {
+  const pid = String(專案ID ?? "").trim();
+  if (!pid) return null;
+  const supabase = getSupabase();
+  const { data: fin, error: finErr } = await supabase
+    .from("財務")
+    .select("廠商付款日期")
+    .eq("專案ID", pid)
+    .maybeSingle();
+  if (finErr && finErr.code !== "42P01") throw finErr;
+  const fromFinance = String((fin as { 廠商付款日期?: unknown } | null)?.廠商付款日期 ?? "").trim();
+  if (fromFinance) return fromFinance;
+
+  const { data, error } = await supabase.from("分潤表").select("廠商付款日期").eq("專案ID", pid);
+  if (error) {
+    if (error.code === "42P01") return null;
+    throw error;
+  }
+  const dates = (data ?? [])
+    .map((r) => String((r as { 廠商付款日期?: unknown }).廠商付款日期 ?? "").trim())
+    .filter(Boolean)
+    .sort();
+  return dates.length ? dates[dates.length - 1]! : null;
+}
+
+/** 只補分潤列上還是空的廠商付款日，已有日期的列不改 */
+async function fillEmptyPayoutVendorDate(專案ID: string, vendorPaid: string): Promise<number> {
+  const pid = String(專案ID ?? "").trim();
+  const date = String(vendorPaid ?? "").trim();
+  if (!pid || !date) return 0;
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("分潤表")
+    .update({ 廠商付款日期: date })
+    .eq("專案ID", pid)
+    .is("廠商付款日期", null)
+    .select("id");
+  if (error) {
+    if (error.code === "42P01") return 0;
+    throw error;
+  }
+  return (data ?? []).length;
+}
+
 async function restoreRemitDatesByRecipient(專案ID: string, snapshots: Map<string, string>): Promise<void> {
   if (snapshots.size === 0) return;
   const supabase = getSupabase();
@@ -531,7 +579,7 @@ async function buildPayoutRowsForMaster(
 
 export type SyncPayoutForProjectOptions = {
   partners?: PartnerRow[];
-  /** 單專案同步時補回廠商付款日；全量重算由 syncAllPayoutsFromMaster 批次處理 */
+  /** 單專案同步後再對發票補一次付款日。重寫當下已從財務帶入，全量重算中途被切斷也不會把日期清成空。 */
   restoreVendorDates?: boolean;
 };
 
@@ -564,16 +612,21 @@ export async function syncPayoutForProject(
     }
   }
 
+  const vendorPaid = await snapshotVendorPaidDate(專案ID);
   const remitByRecipient = await snapshotRemitDatesByRecipient(專案ID);
 
   await deletePayoutBy專案ID(專案ID);
 
   const rows = await buildPayoutRowsForMaster(master, defaults, options?.partners);
-  const filteredRows = applyHighestRatePerRecipient(rows);
+  const filteredRows = applyHighestRatePerRecipient(rows).map((row) => ({
+    ...row,
+    廠商付款日期: vendorPaid,
+  }));
   if (filteredRows.length > 0) await insertPayoutRows(filteredRows);
 
   await refreshExtraBonusProjectFields(master);
   await restoreRemitDatesByRecipient(專案ID, remitByRecipient);
+  if (vendorPaid) await fillEmptyPayoutVendorDate(專案ID, vendorPaid);
 
   if (options?.restoreVendorDates !== false) {
     const { syncFinanceVendorDateFromInvoicesForProject } = await import("@/lib/db/finance");
