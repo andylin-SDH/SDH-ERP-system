@@ -11,8 +11,9 @@ import {
   formatPartnerDuplicateError,
 } from "@/lib/partners/duplicate";
 import type { MasterRow } from "@/lib/db/master";
-import { findSimilarProjectNames } from "@/lib/master/similar-name";
+import { buildPaidDuplicatePeers, findSimilarProjectNames, paidDuplicateAlertLines } from "@/lib/master/similar-name";
 import { SimilarProjectNotice } from "@/components/master/SimilarProjectNotice";
+import { PaidDuplicateAlert } from "@/components/master/PaidDuplicateNotice";
 import { PaymentCollectionLink } from "@/components/PaymentCollectionLink";
 import { PaymentCollectionLinkIcon } from "@/components/PaymentCollectionLinkIcon";
 import { MasterEditHistory, type MasterEditLogItem } from "@/components/MasterEditHistory";
@@ -2395,6 +2396,8 @@ export default function DashboardPage() {
   const canPreviewKolPortalView = Boolean(me?.role && ["董事長", "管理者", "會計"].includes(me.role)) && !isPreviewMode;
   /** 董事長／會計：代填憑證並直接已匯款（未入帳代墊／可請款待提領） */
   const canRegisterKolAdvanceRemit = Boolean(me?.role && ["董事長", "會計"].includes(me.role)) && canMutate;
+  /** 名稱相近的匯出示警：只給財務（會計）和董事長看 */
+  const canSeeOutgoingDuplicateAlert = me?.role === "董事長" || me?.role === "會計";
   /** 董事長／會計：可編輯專案額外獎金 */
   const canEditExtraBonus = Boolean(me?.role && ["董事長", "會計"].includes(me.role)) && canMutate;
   /** 董事長／會計：大總表「發票摘要」與展開發票明細（預覽時依對象角色） */
@@ -3402,6 +3405,7 @@ export default function DashboardPage() {
     return m;
   }, [finance]);
 
+
   const invoiceSummaryByProjectId = useMemo(() => {
     const grouped = new Map<string, InvoiceRow[]>();
     for (const invoice of invoices) {
@@ -4001,6 +4005,58 @@ export default function DashboardPage() {
     () => dedupedPayoutForFinanceEmployee.filter((r) => String(r.分潤匯款日期 ?? "").trim() !== ""),
     [dedupedPayoutForFinanceEmployee]
   );
+  /** 只比「公司要匯出去」的專案：KOL 待匯款／已匯款，或員工分潤待付／已付。廠商付進來不算。 */
+  const paidDuplicatePeers = useMemo(() => {
+    const outgoing = new Set<string>();
+    for (const row of kolRemittanceItems) {
+      const pid = String(row.專案ID ?? "").trim();
+      if (pid) outgoing.add(pid);
+    }
+    for (const row of financeEmployeePayoutPendingRows) {
+      const pid = String(row.專案ID ?? "").trim();
+      if (pid) outgoing.add(pid);
+    }
+    for (const row of financeEmployeePayoutPaidRows) {
+      const pid = String(row.專案ID ?? "").trim();
+      if (pid) outgoing.add(pid);
+    }
+    const peers = buildPaidDuplicatePeers(
+      masterList.map((row) => {
+        const pid = String(row.專案ID ?? "").trim();
+        return {
+          專案ID: pid,
+          專案名稱: row.專案名稱,
+          KOL名稱: row.KOL名稱,
+          專案狀態: row.專案狀態,
+          母專案ID: row.母專案ID,
+          paid: outgoing.has(pid),
+        };
+      })
+    );
+    const names = new Map<string, string>();
+    for (const row of masterList) {
+      const pid = String(row.專案ID ?? "").trim();
+      if (pid) names.set(pid, String(row.專案名稱 ?? "").trim() || pid);
+    }
+    const employeeIds = new Set<string>();
+    for (const row of financeEmployeePayoutPendingRows) {
+      const pid = String(row.專案ID ?? "").trim();
+      if (pid) employeeIds.add(pid);
+    }
+    for (const row of financeEmployeePayoutPaidRows) {
+      const pid = String(row.專案ID ?? "").trim();
+      if (pid) employeeIds.add(pid);
+    }
+    const kolIds = new Set<string>();
+    for (const row of kolRemittanceItems) {
+      const pid = String(row.專案ID ?? "").trim();
+      if (pid) kolIds.add(pid);
+    }
+    return {
+      employee: paidDuplicateAlertLines(peers, names, employeeIds),
+      kol: paidDuplicateAlertLines(peers, names, kolIds),
+    };
+  }, [masterList, kolRemittanceItems, financeEmployeePayoutPendingRows, financeEmployeePayoutPaidRows]);
   const financeEmployeePayoutBaseRows = useMemo(
     () => (financeEmployeePayoutTab === "pending" ? financeEmployeePayoutPendingRows : financeEmployeePayoutPaidRows),
     [financeEmployeePayoutTab, financeEmployeePayoutPendingRows, financeEmployeePayoutPaidRows]
@@ -10945,6 +11001,7 @@ export default function DashboardPage() {
                   </p>
                 </div>
               </div>
+              <PaidDuplicateAlert lines={canSeeOutgoingDuplicateAlert ? paidDuplicatePeers.employee : []} />
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex rounded-lg border border-stone-200 bg-white/90 p-0.5">
                   <button
@@ -11136,6 +11193,7 @@ export default function DashboardPage() {
                   </p>
                 </div>
               </div>
+              <PaidDuplicateAlert lines={canSeeOutgoingDuplicateAlert ? paidDuplicatePeers.kol : []} />
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex rounded-lg border border-stone-200 bg-white/90 p-0.5">
                   <button

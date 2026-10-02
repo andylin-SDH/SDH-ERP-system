@@ -95,3 +95,123 @@ export function findSimilarProjectNames(
   hits.sort((a, b) => b.score - a.score || a.專案名稱.localeCompare(b.專案名稱, "zh-Hant"));
   return hits.slice(0, 5).map(({ score: _score, ...rest }) => rest);
 }
+
+export type PaidDuplicatePeer = {
+  專案ID: string;
+  專案名稱: string;
+  KOL名稱: string;
+  專案狀態: string;
+  /** 在匯出清單：KOL 待匯款／已匯款，或員工分潤待付／已付 */
+  paid: boolean;
+  level: "same" | "similar";
+};
+
+type WatchRow = NameRow & {
+  母專案ID?: string | null;
+  paid?: boolean;
+};
+
+/**
+ * 公司要匯出去（或已經匯出）的專案，固定跟同一位老師的其他專案比名稱。
+ * 至少一筆在匯出清單才成組。直接母子專案不算重複。只讀，不改資料。
+ * 回傳：專案ID → 對方專案（最多 5 筆）。
+ */
+export function buildPaidDuplicatePeers(rows: WatchRow[]): Map<string, PaidDuplicatePeer[]> {
+  const byId = new Map<string, WatchRow>();
+  const byKol = new Map<string, WatchRow[]>();
+  for (const row of rows) {
+    const id = String(row.專案ID ?? "").trim();
+    const kol = String(row.KOL名稱 ?? "").trim();
+    if (!id || !kol) continue;
+    byId.set(id, row);
+    const list = byKol.get(kol) ?? [];
+    list.push(row);
+    byKol.set(kol, list);
+  }
+
+  const adj = new Map<string, Map<string, "same" | "similar">>();
+  const link = (a: string, b: string, level: "same" | "similar") => {
+    let peers = adj.get(a);
+    if (!peers) {
+      peers = new Map();
+      adj.set(a, peers);
+    }
+    const cur = peers.get(b);
+    if (!cur || level === "same") peers.set(b, level);
+  };
+
+  for (const group of byKol.values()) {
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const a = group[i];
+        const b = group[j];
+        const aId = String(a.專案ID ?? "").trim();
+        const bId = String(b.專案ID ?? "").trim();
+        const aParent = String(a.母專案ID ?? "").trim();
+        const bParent = String(b.母專案ID ?? "").trim();
+        if ((aParent && aParent === bId) || (bParent && bParent === aId)) continue;
+        if (!a.paid && !b.paid) continue;
+        const judged = nameScore(
+          normalizeProjectNameKey(String(a.專案名稱 ?? "")),
+          normalizeProjectNameKey(String(b.專案名稱 ?? ""))
+        );
+        if (!judged) continue;
+        link(aId, bId, judged.level);
+        link(bId, aId, judged.level);
+      }
+    }
+  }
+
+  const result = new Map<string, PaidDuplicatePeer[]>();
+  for (const [id, peers] of adj) {
+    const list: PaidDuplicatePeer[] = [];
+    for (const [peerId, level] of peers) {
+      const row = byId.get(peerId);
+      if (!row) continue;
+      list.push({
+        專案ID: peerId,
+        專案名稱: String(row.專案名稱 ?? "").trim() || peerId,
+        KOL名稱: String(row.KOL名稱 ?? "").trim(),
+        專案狀態: String(row.專案狀態 ?? "").trim(),
+        paid: Boolean(row.paid),
+        level,
+      });
+    }
+    list.sort(
+      (a, b) => Number(b.paid) - Number(a.paid) || a.專案名稱.localeCompare(b.專案名稱, "zh-Hant")
+    );
+    if (list.length > 0) result.set(id, list.slice(0, 5));
+  }
+  return result;
+}
+
+export type PaidDuplicateAlertLine = {
+  key: string;
+  text: string;
+};
+
+/** 同一組只列一次。只讀，沒有後續動作。 */
+export function paidDuplicateAlertLines(
+  peers: Map<string, PaidDuplicatePeer[]>,
+  names: Map<string, string>,
+  focusIds: Set<string>
+): PaidDuplicateAlertLine[] {
+  const seen = new Set<string>();
+  const lines: PaidDuplicateAlertLine[] = [];
+  for (const [id, peerList] of peers) {
+    if (!focusIds.has(id)) continue;
+    const left = names.get(id) || id;
+    for (const peer of peerList) {
+      const key = [id, peer.專案ID].sort().join("|");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const where = peer.paid ? "也在匯出清單" : "尚未進入匯出";
+      lines.push({
+        key,
+        text: `「${left}」和「${peer.專案名稱}」名稱相近，對方${where}。`,
+      });
+    }
+  }
+  lines.sort((a, b) => a.text.localeCompare(b.text, "zh-Hant"));
+  return lines;
+}
