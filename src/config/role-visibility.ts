@@ -35,8 +35,8 @@ export const ROLE_VISIBILITY: Record<string, RoleVisibilityConfig> = {
   },
   經紀人: {
     fullAccess: false,
-    sections: ["overview", "partners", "tasks"],
-    filterNote: "依 scope／email／姓名過濾；scope=主管/*/all 見全部",
+    sections: ["overview", "master", "partners", "tasks"],
+    filterNote: "可進大總表；列依姓名／Email 對到相關專案，不是全公司",
   },
   製作人: {
     fullAccess: false,
@@ -50,8 +50,8 @@ export const ROLE_VISIBILITY: Record<string, RoleVisibilityConfig> = {
   },
   行政: {
     fullAccess: false,
-    sections: ["overview", "partners", "tasks"],
-    filterNote: "合作夥伴與任務",
+    sections: ["overview", "master", "partners", "tasks"],
+    filterNote: "可進大總表；列依姓名／Email 對到相關專案，不是全公司",
   },
   /** 僅使用 /kol 訪客頁；不進員工 Dashboard 資料區塊 */
   KOL: {
@@ -81,6 +81,16 @@ const DEFAULT_VISIBILITY: RoleVisibilityConfig = {
 export function getSectionsForRole(role: string): string[] {
   const config = ROLE_VISIBILITY[role] ?? DEFAULT_VISIBILITY;
   return config.sections;
+}
+
+/** 經紀人、行政一定要進得了大總表。舊的角色區塊設定若沒勾這項，讀取時補上，不改資料庫。 */
+export function ensureMasterSectionForRole(role: string, sections: string[]): string[] {
+  if (role !== "經紀人" && role !== "行政") return sections;
+  if (sections.includes("master")) return sections;
+  const next = [...sections];
+  const overviewAt = next.indexOf("overview");
+  next.splice(overviewAt >= 0 ? overviewAt + 1 : 0, 0, "master");
+  return next;
 }
 
 /**

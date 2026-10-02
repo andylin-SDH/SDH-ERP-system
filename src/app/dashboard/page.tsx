@@ -11,6 +11,8 @@ import {
   formatPartnerDuplicateError,
 } from "@/lib/partners/duplicate";
 import type { MasterRow } from "@/lib/db/master";
+import { findSimilarProjectNames } from "@/lib/master/similar-name";
+import { SimilarProjectNotice } from "@/components/master/SimilarProjectNotice";
 import { PaymentCollectionLink } from "@/components/PaymentCollectionLink";
 import { PaymentCollectionLinkIcon } from "@/components/PaymentCollectionLinkIcon";
 import { MasterEditHistory, type MasterEditLogItem } from "@/components/MasterEditHistory";
@@ -26,7 +28,7 @@ import {
   displayPayoutTypeLabel,
   isExtraBonusPayoutType,
 } from "@/lib/payout-dedupe";
-import { getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
+import { ensureMasterSectionForRole, getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
 import { PROJECT_TYPES, calc專案營收, projectRevenueFormulaHint } from "@/config/project-types";
 import { DEFAULT_PROJECT_STATUS_OPTIONS } from "@/config/project-status-defaults";
 import { DEFAULT_PROJECT_EXPENSE_TYPE_OPTIONS } from "@/config/project-expense-type-defaults";
@@ -1729,6 +1731,8 @@ export default function DashboardPage() {
   const [showCreateMaster, setShowCreateMaster] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [createSimilarAckKey, setCreateSimilarAckKey] = useState("");
+  const [editSimilarAckKey, setEditSimilarAckKey] = useState("");
   /** 複製來源提示（僅 UI；送出仍走一般新增） */
   const [createMasterCopyFromLabel, setCreateMasterCopyFromLabel] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState<MasterCreateFormState>(() =>
@@ -2853,7 +2857,7 @@ export default function DashboardPage() {
     }
     /** 舊設定「發票」獨立區塊 → 整併為「財務」 */
     const merged = base.map((s) => (s === "invoices" ? "finance" : s));
-    return [...new Set(merged)];
+    return ensureMasterSectionForRole(visibilitySubject.role, [...new Set(merged)]);
   }, [visibilitySubject, effectiveVisibility, systemConfig]);
 
   /** Dashboard 分頁列表：一般使用者只有資料區塊；董事長/管理者多「可見性與權限」「帳號視角」；董事長另有「異動紀錄」 */
@@ -3448,11 +3452,37 @@ export default function DashboardPage() {
     [masterByProjectId]
   );
 
+  const createSimilarMatches = useMemo(
+    () =>
+      findSimilarProjectNames(masterList, {
+        專案名稱: createForm.專案名稱,
+        KOL名稱: createForm.KOL名稱,
+      }),
+    [masterList, createForm.專案名稱, createForm.KOL名稱]
+  );
+  const createSimilarKey = `${String(createForm.專案名稱 ?? "").trim()}||${String(createForm.KOL名稱 ?? "").trim()}`;
+  const createSimilarAck = createSimilarMatches.length > 0 && createSimilarAckKey === createSimilarKey;
+
+  const editSimilarMatches = useMemo(() => {
+    if (!isEditingMaster || !selectedMaster) return [];
+    const nameChanged = String(editMasterForm.專案名稱 ?? "").trim() !== String(selectedMaster.專案名稱 ?? "").trim();
+    const kolChanged = String(editMasterForm.KOL名稱 ?? "").trim() !== String(selectedMaster.KOL名稱 ?? "").trim();
+    if (!nameChanged && !kolChanged) return [];
+    return findSimilarProjectNames(masterList, {
+      專案名稱: editMasterForm.專案名稱,
+      KOL名稱: editMasterForm.KOL名稱,
+      excludeId: selectedMaster.專案ID,
+    });
+  }, [isEditingMaster, selectedMaster, masterList, editMasterForm.專案名稱, editMasterForm.KOL名稱]);
+  const editSimilarKey = `${String(editMasterForm.專案名稱 ?? "").trim()}||${String(editMasterForm.KOL名稱 ?? "").trim()}||${String(selectedMaster?.專案ID ?? "")}`;
+  const editSimilarAck = editSimilarMatches.length > 0 && editSimilarAckKey === editSimilarKey;
+
   const closeCreateMasterModal = useCallback(() => {
     setShowCreateMaster(false);
     setCreating(false);
     setCreateError(null);
     setCreateMasterCopyFromLabel(null);
+    setCreateSimilarAckKey("");
   }, []);
 
   const openCreateMasterBlank = useCallback(() => {
@@ -3464,6 +3494,7 @@ export default function DashboardPage() {
     );
     setCreateMasterCopyFromLabel(null);
     setCreateError(null);
+    setCreateSimilarAckKey("");
     setShowCreateMaster(true);
   }, [payoutDefaults, masterSubTab]);
 
@@ -3475,6 +3506,7 @@ export default function DashboardPage() {
       const srcName = String(source.專案名稱 ?? "").trim() || "—";
       const srcId = String(source.專案ID ?? "").trim() || "—";
       setCreateMasterCopyFromLabel(`${srcName}（${srcId}）`);
+      setCreateSimilarAckKey("");
       setCreateError(null);
       setSelectedMaster(null);
       setIsEditingMaster(false);
@@ -13493,6 +13525,11 @@ export default function DashboardPage() {
                   setCreateError("請填寫專案ID");
                   return;
                 }
+                if (createSimilarMatches.length > 0 && !createSimilarAck) {
+                  setCreateError("這位老師已有名稱相近的專案。請在 KOL 名稱下方勾選確認後再儲存。");
+                  document.getElementById("create-similar-notice")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  return;
+                }
                 setCreating(true);
                 try {
                   const res = await fetch("/api/master", {
@@ -13502,11 +13539,22 @@ export default function DashboardPage() {
                     body: JSON.stringify({
                     ...createForm,
                     專案營收: calc專案營收(createForm.專案總金額未稅, createForm.專案成本, createForm.KOL費用未稅),
+                    confirmSimilarName: createSimilarAck,
                   }),
                   });
-                  const data = (await safeResJson(res)) as { ok?: boolean; error?: string; master?: MasterRow };
+                  const data = (await safeResJson(res)) as {
+                    ok?: boolean;
+                    error?: string;
+                    code?: string;
+                    master?: MasterRow;
+                  };
                   if (!res.ok || !data.ok || !data.master) {
-                    setCreateError(data.error ?? "新增失敗");
+                    setCreateError(
+                      data.code === "similar_project"
+                        ? (data.error ?? "已有名稱很接近的專案，請確認後再建立")
+                        : (data.error ?? "新增失敗")
+                    );
+                    if (data.code === "similar_project") setCreateSimilarAckKey("");
                     setCreating(false);
                     return;
                   }
@@ -13696,6 +13744,12 @@ export default function DashboardPage() {
                       searchPlaceholder="搜尋 KOL…"
                       emptyHint="尚無合作夥伴資料時請先至「合作夥伴」新增 KOL"
                     />
+                    <SimilarProjectNotice
+                      id="create-similar-notice"
+                      matches={createSimilarMatches}
+                      acknowledged={createSimilarAck}
+                      onAcknowledge={(on) => setCreateSimilarAckKey(on ? createSimilarKey : "")}
+                    />
                     <InputField label="廠商名稱" value={createForm.廠商名稱} onChange={(v) => setCreateForm((f) => ({ ...f, 廠商名稱: v }))} />
                     {isPayoutModeB(createForm.專案類型) ? (
                       <>
@@ -13780,7 +13834,7 @@ export default function DashboardPage() {
                   disabled={creating}
                   className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-60"
                 >
-                  {creating ? "儲存中..." : createMasterCopyFromLabel ? "建立複製專案" : "儲存"}
+                  {creating ? "儲存中..." : createSimilarMatches.length > 0 && createSimilarAck ? "確認後建立" : createMasterCopyFromLabel ? "建立複製專案" : "儲存"}
                 </button>
               </footer>
             </form>
@@ -14210,6 +14264,7 @@ export default function DashboardPage() {
                   onClick={() => {
                     if (!isEditingMaster) {
                       setIsEditingMaster(true);
+                      setEditSimilarAckKey("");
                       setSaveMasterError(null);
                       void refreshDashboardData(["partners"]);
                       return;
@@ -14288,6 +14343,11 @@ export default function DashboardPage() {
                     disabled={savingMaster}
                     onClick={async () => {
                       setSaveMasterError(null);
+                      if (editSimilarMatches.length > 0 && !editSimilarAck) {
+                        setSaveMasterError("這位老師已有名稱相近的專案。請在 KOL 名稱下方勾選確認後再儲存。");
+                        document.getElementById("edit-similar-notice")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        return;
+                      }
                       setSavingMaster(true);
                       try {
                         const res = await fetch("/api/master", {
@@ -14305,13 +14365,19 @@ export default function DashboardPage() {
                                   editMasterForm.專案成本,
                                   editMasterForm.KOL費用未稅
                                 ),
+                                confirmSimilarName: editSimilarAck,
                               };
                             })(),
                           }),
                         });
-                        const data = (await safeResJson(res)) as { ok?: boolean; error?: string; master?: MasterRow };
+                        const data = (await safeResJson(res)) as { ok?: boolean; error?: string; code?: string; master?: MasterRow };
                         if (!res.ok || !data.ok || !data.master) {
-                          setSaveMasterError(data.error ?? "更新失敗");
+                          setSaveMasterError(
+                            data.code === "similar_project"
+                              ? (data.error ?? "已有名稱很接近的專案，請確認後再儲存")
+                              : (data.error ?? "更新失敗")
+                          );
+                          if (data.code === "similar_project") setEditSimilarAckKey("");
                           setSavingMaster(false);
                           return;
                         }
@@ -14328,7 +14394,7 @@ export default function DashboardPage() {
                     }}
                     className="rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-60"
                   >
-                    {savingMaster ? "儲存中..." : "儲存變更"}
+                    {savingMaster ? "儲存中..." : editSimilarMatches.length > 0 && editSimilarAck ? "確認後儲存" : "儲存變更"}
                   </button>
                 </div>
               )}
@@ -14989,6 +15055,14 @@ export default function DashboardPage() {
                     />
                   ) : (
                     <Field label="KOL名稱" value={selectedMaster.KOL名稱} />
+                  )}
+                  {isEditingMaster && (
+                    <SimilarProjectNotice
+                      id="edit-similar-notice"
+                      matches={editSimilarMatches}
+                      acknowledged={editSimilarAck}
+                      onAcknowledge={(on) => setEditSimilarAckKey(on ? editSimilarKey : "")}
+                    />
                   )}
                   {isEditingMaster ? (
                     <InputField label="廠商名稱" value={editMasterForm.廠商名稱} onChange={(v) => setEditMasterForm((f) => ({ ...f, 廠商名稱: v }))} />

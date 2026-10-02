@@ -33,6 +33,7 @@ import { syncPayoutForProject } from "@/lib/db/payout";
 import { syncFinanceForProject } from "@/lib/db/finance";
 import { requireEmployee } from "@/lib/auth/api";
 import { partnerEditorLabel } from "@/lib/partners/editor-label";
+import { findSimilarProjectNames } from "@/lib/master/similar-name";
 
 export async function GET(request: NextRequest) {
   const auth = await requireEmployee(request);
@@ -63,6 +64,26 @@ export async function POST(request: NextRequest) {
     const canCreate = role_permissions.master.create.includes(role);
     if (!canCreate) {
       return NextResponse.json({ ok: false, error: "您沒有建立專案的權限" }, { status: 403 });
+    }
+
+    const confirmSimilarName = Boolean((body as { confirmSimilarName?: boolean } | null)?.confirmSimilarName);
+    if (!confirmSimilarName) {
+      const existing = await getMasterList();
+      const matches = findSimilarProjectNames(existing, {
+        專案名稱: (body?.專案名稱 as string) ?? "",
+        KOL名稱: (body?.KOL名稱 as string) ?? "",
+      });
+      if (matches.length > 0) {
+        return NextResponse.json(
+          {
+            ok: false,
+            code: "similar_project",
+            error: "已有名稱很接近的專案。同一位老師多一筆會多一筆待請款，而且對不上發票。若確定是不同專案，請勾選後再建立。",
+            matches,
+          },
+          { status: 409 }
+        );
+      }
     }
 
     const today = todayYmdTaipei();
@@ -142,6 +163,31 @@ export async function PATCH(request: NextRequest) {
     const existing = await getMasterById(id);
     if (!existing) {
       return NextResponse.json({ ok: false, error: "找不到該專案" }, { status: 404 });
+    }
+
+    const confirmSimilarName = Boolean((body as { confirmSimilarName?: boolean } | null)?.confirmSimilarName);
+    const nextName = (body?.專案名稱 as string) ?? existing.專案名稱 ?? "";
+    const nextKol = (body?.KOL名稱 as string) ?? existing.KOL名稱 ?? "";
+    const nameChanged = String(nextName ?? "").trim() !== String(existing.專案名稱 ?? "").trim();
+    const kolChanged = String(nextKol ?? "").trim() !== String(existing.KOL名稱 ?? "").trim();
+    if (!confirmSimilarName && (nameChanged || kolChanged)) {
+      const list = await getMasterList();
+      const matches = findSimilarProjectNames(list, {
+        專案名稱: nextName,
+        KOL名稱: nextKol,
+        excludeId: existing.專案ID,
+      });
+      if (matches.length > 0) {
+        return NextResponse.json(
+          {
+            ok: false,
+            code: "similar_project",
+            error: "已有名稱很接近的專案。同一位老師多一筆會多一筆待請款，而且對不上發票。若確定是不同專案，請勾選後再儲存。",
+            matches,
+          },
+          { status: 409 }
+        );
+      }
     }
 
     const today = todayYmdTaipei();
