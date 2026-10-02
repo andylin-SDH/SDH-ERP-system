@@ -2033,6 +2033,10 @@ export default function DashboardPage() {
   const [configSaveNotice, setConfigSaveNotice] = useState<string | null>(null);
   const [payoutResyncNotice, setPayoutResyncNotice] = useState<string | null>(null);
   const [payoutResyncing, setPayoutResyncing] = useState(false);
+  const [payoutClaiming, setPayoutClaiming] = useState(false);
+  const [payoutClaimNotice, setPayoutClaimNotice] = useState<string | null>(null);
+  const [selectedPayoutClaimIds, setSelectedPayoutClaimIds] = useState<string[]>([]);
+  const [selectedPayoutWithdrawIds, setSelectedPayoutWithdrawIds] = useState<string[]>([]);
   const [savingRoles, setSavingRoles] = useState(false);
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
@@ -3910,6 +3914,52 @@ export default function DashboardPage() {
     return sum;
   }, [payoutForWorkflow, financeByProjectId]);
 
+  /** 目前這個人自己的可提領（管理者看全公司時，這張仍只算領取人是本人的列） */
+  const myPayoutClaim = useMemo(() => {
+    const name = (visibilitySubject?.name ?? "").trim();
+    const email = (visibilitySubject?.email ?? "").trim();
+    if (!name && !email) return null;
+    const mine = payoutForWorkflow.filter((r) => fieldMatchesUser(r.領取人, name, email));
+    const claimable = mine.filter(
+      (r) => payoutRowWorkflowStage(r, financeByProjectId) === "pending_payout" && !String(r.提領申請日 ?? "").trim()
+    );
+    const applied = mine.filter(
+      (r) => payoutRowWorkflowStage(r, financeByProjectId) === "pending_payout" && String(r.提領申請日 ?? "").trim()
+    );
+    const paid = mine.filter((r) => payoutRowWorkflowStage(r, financeByProjectId) === "settled");
+    const waiting = mine.filter((r) => payoutRowWorkflowStage(r, financeByProjectId) === "pending_vendor");
+    const sum = (rows: PayoutRow[]) => rows.reduce((s, r) => s + parseNumericField(r.分潤金額), 0);
+    return {
+      name: name || email,
+      claimable,
+      claimableAmount: sum(claimable),
+      applied,
+      appliedAmount: sum(applied),
+      appliedIds: applied.map((r) => String(r.id ?? "")).filter(Boolean),
+      paidAmount: sum(paid),
+      waitingAmount: sum(waiting),
+    };
+  }, [payoutForWorkflow, financeByProjectId, visibilitySubject]);
+
+  const selectedClaimRows = useMemo(() => {
+    if (!myPayoutClaim) return [];
+    const picked = new Set(selectedPayoutClaimIds);
+    return myPayoutClaim.claimable.filter((r) => picked.has(String(r.id ?? "")));
+  }, [myPayoutClaim, selectedPayoutClaimIds]);
+  const selectedWithdrawRows = useMemo(() => {
+    if (!myPayoutClaim) return [];
+    const picked = new Set(selectedPayoutWithdrawIds);
+    return myPayoutClaim.applied.filter((r) => picked.has(String(r.id ?? "")));
+  }, [myPayoutClaim, selectedPayoutWithdrawIds]);
+  const selectedClaimAmount = useMemo(
+    () => selectedClaimRows.reduce((s, r) => s + parseNumericField(r.分潤金額), 0),
+    [selectedClaimRows]
+  );
+  const selectedWithdrawAmount = useMemo(
+    () => selectedWithdrawRows.reduce((s, r) => s + parseNumericField(r.分潤金額), 0),
+    [selectedWithdrawRows]
+  );
+
   /** 財務「員工分潤付款」：廠商已付、尚未匯款給員工 */
   const financeEmployeePayoutPendingRows = useMemo(
     () => dedupedPayoutForFinanceEmployee.filter((r) => payoutRowWorkflowStage(r, financeByProjectId) === "pending_payout"),
@@ -4054,6 +4104,56 @@ export default function DashboardPage() {
     () => sumNumericColumn(searchedPayout as unknown as Record<string, unknown>[], "分潤金額"),
     [searchedPayout]
   );
+
+  function payoutRowClaimKind(row: PayoutRow): "claim" | "withdraw" | null {
+    if (!myPayoutClaim) return null;
+    const name = (visibilitySubject?.name ?? "").trim();
+    const email = (visibilitySubject?.email ?? "").trim();
+    if (!fieldMatchesUser(row.領取人, name, email)) return null;
+    if (payoutRowWorkflowStage(row, financeByProjectId) !== "pending_payout") return null;
+    if (!String(row.id ?? "").trim()) return null;
+    return String(row.提領申請日 ?? "").trim() ? "withdraw" : "claim";
+  }
+
+  const payoutClaimIdsInView = useMemo(() => {
+    const claim: string[] = [];
+    const withdraw: string[] = [];
+    for (const row of searchedPayout) {
+      const kind = payoutRowClaimKind(row);
+      const id = String(row.id ?? "").trim();
+      if (!kind || !id) continue;
+      if (kind === "withdraw") withdraw.push(id);
+      else claim.push(id);
+    }
+    return { claim, withdraw };
+  }, [searchedPayout, myPayoutClaim, visibilitySubject, financeByProjectId]);
+
+  const showPayoutClaimChecks =
+    payoutWorkflowTab === "pending_payout" &&
+    !!myPayoutClaim &&
+    (myPayoutClaim.claimable.length > 0 || myPayoutClaim.applied.length > 0);
+
+  const allPayoutClaimInViewSelected =
+    payoutClaimIdsInView.claim.length + payoutClaimIdsInView.withdraw.length > 0 &&
+    payoutClaimIdsInView.claim.every((id) => selectedPayoutClaimIds.includes(id)) &&
+    payoutClaimIdsInView.withdraw.every((id) => selectedPayoutWithdrawIds.includes(id));
+
+  function togglePayoutClaimId(kind: "claim" | "withdraw", id: string, on: boolean) {
+    const setter = kind === "claim" ? setSelectedPayoutClaimIds : setSelectedPayoutWithdrawIds;
+    setter((prev) => (on ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((x) => x !== id)));
+  }
+
+  function toggleAllPayoutClaimsInView(on: boolean) {
+    const claimSet = new Set(payoutClaimIdsInView.claim);
+    const withdrawSet = new Set(payoutClaimIdsInView.withdraw);
+    setSelectedPayoutClaimIds((prev) =>
+      on ? [...new Set([...prev, ...payoutClaimIdsInView.claim])] : prev.filter((id) => !claimSet.has(id))
+    );
+    setSelectedPayoutWithdrawIds((prev) =>
+      on ? [...new Set([...prev, ...payoutClaimIdsInView.withdraw])] : prev.filter((id) => !withdrawSet.has(id))
+    );
+  }
+
   const searchedFinance = useMemo(
     () => filterRowsBySearch(finance as unknown as Record<string, unknown>[], financeVisibleCols, deferredFinanceSearch),
     [finance, financeVisibleCols, deferredFinanceSearch, filterRowsBySearch]
@@ -5095,6 +5195,40 @@ export default function DashboardPage() {
       setPayoutResyncing(false);
     }
   }, [refreshDashboardData]);
+
+  const submitMyPayoutClaim = useCallback(
+    async (action: "claim" | "withdraw", ids: string[]) => {
+      if (!canMutate || ids.length === 0) return;
+      setPayoutClaiming(true);
+      setPayoutClaimNotice(null);
+      try {
+        const res = await fetch("/api/payout/claim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ ids, action }),
+        });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string; updated?: number };
+        if (!res.ok || !data.ok) {
+          setPayoutClaimNotice(data.error ?? "提領失敗");
+          return;
+        }
+        if (action === "claim") setSelectedPayoutClaimIds([]);
+        else setSelectedPayoutWithdrawIds([]);
+        await refreshDashboardData(["payout"]);
+        setPayoutClaimNotice(
+          action === "claim"
+            ? `已提出提領 ${data.updated ?? 0} 筆，等公司匯款`
+            : `已撤回 ${data.updated ?? 0} 筆提領申請`
+        );
+      } catch (e) {
+        setPayoutClaimNotice(e instanceof Error ? e.message : "提領失敗");
+      } finally {
+        setPayoutClaiming(false);
+      }
+    },
+    [canMutate, refreshDashboardData]
+  );
 
   const deleteInvoicesByIdList = useCallback(
     async (ids: string[]) => {
@@ -10282,7 +10416,7 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-xl font-bold tracking-tight text-stone-900">分潤表</h2>
               <p className="mt-1 max-w-2xl text-xs text-stone-500">
-                「廠商預計付款日」由大總表專案編輯。廠商是否已付款以財務表的「廠商付款日期」為準，分潤列上的同名欄位只是副本。有分潤匯款日則歸入「已分潤」。
+                「廠商預計付款日」由大總表專案編輯。廠商是否已付款以財務表的「廠商付款日期」為準，分潤列上的同名欄位只是副本。有分潤匯款日則歸入「已分潤」。要提領時切到「待分潤」，直接勾選下面列表裡自己的列。
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-stone-200 bg-amber-50/90 p-1">
@@ -10318,25 +10452,6 @@ export default function DashboardPage() {
           {payoutResyncNotice && (
             <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900">{payoutResyncNotice}</p>
           )}
-          <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
-            {canEditVisibility && (
-              <button
-                type="button"
-                disabled={payoutResyncing}
-                onClick={() => void resyncAllPayoutAmounts()}
-                className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:opacity-60"
-              >
-                {payoutResyncing ? "重算中…" : "重算分潤金額"}
-              </button>
-            )}
-            <input
-              type="text"
-              value={payoutSearch}
-              onChange={(e) => setPayoutSearch(e.target.value)}
-              placeholder="搜尋專案ID、類型、領取人…"
-              className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
-            />
-          </div>
           {filteredPayout.length === 0 ? (
             <p className="rounded-xl border border-stone-200/90 px-4 py-8 text-center text-stone-500">尚無分潤表資料</p>
           ) : (
@@ -10380,6 +10495,66 @@ export default function DashboardPage() {
                 </div>
               </div>
               <ListAmountSummary count={searchedPayout.length} amount={payoutListTotal} label="分潤金額合計" />
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {showPayoutClaimChecks ? (
+                    <>
+                      <button
+                        type="button"
+                        disabled={!canMutate || payoutClaiming || selectedClaimRows.length === 0}
+                        onClick={() => void submitMyPayoutClaim("claim", selectedClaimRows.map((r) => String(r.id ?? "")).filter(Boolean))}
+                        className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-slate-900 transition hover:bg-amber-400 disabled:opacity-50"
+                      >
+                        {payoutClaiming
+                          ? "處理中…"
+                          : isPreviewMode
+                            ? "預覽無法代為提領"
+                            : `提出提領（${selectedClaimRows.length} 筆 ${formatAmount(String(Math.round(selectedClaimAmount)))}）`}
+                      </button>
+                      {myPayoutClaim && myPayoutClaim.applied.length > 0 && (
+                        <button
+                          type="button"
+                          disabled={!canMutate || payoutClaiming || selectedWithdrawRows.length === 0}
+                          onClick={() => void submitMyPayoutClaim("withdraw", selectedWithdrawRows.map((r) => String(r.id ?? "")).filter(Boolean))}
+                          className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 transition hover:bg-stone-50 disabled:opacity-50"
+                        >
+                          {isPreviewMode
+                            ? "預覽無法撤回"
+                            : `撤回已選（${selectedWithdrawRows.length} 筆 ${formatAmount(String(Math.round(selectedWithdrawAmount)))}）`}
+                        </button>
+                      )}
+                    </>
+                  ) : myPayoutClaim && myPayoutClaim.claimable.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setPayoutWorkflowTab("pending_payout")}
+                      className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-slate-900 transition hover:bg-amber-400"
+                    >
+                      到待分潤勾選提領（{myPayoutClaim.claimable.length} 筆 {formatAmount(String(Math.round(myPayoutClaim.claimableAmount)))}）
+                    </button>
+                  ) : null}
+                  {payoutClaimNotice && <span className="text-xs text-stone-700">{payoutClaimNotice}</span>}
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  {canEditVisibility && (
+                    <button
+                      type="button"
+                      disabled={payoutResyncing}
+                      onClick={() => void resyncAllPayoutAmounts()}
+                      className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:opacity-60"
+                    >
+                      {payoutResyncing ? "重算中…" : "重算分潤金額"}
+                    </button>
+                  )}
+                  <input
+                    type="text"
+                    value={payoutSearch}
+                    onChange={(e) => setPayoutSearch(e.target.value)}
+                    placeholder="搜尋專案ID、類型、領取人…"
+                    className="w-full min-w-0 max-w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
+                  />
+                </div>
+              </div>
               {/* 小螢幕：卡片式收納顯示（分潤金額為主、次要資訊、其他可摺疊） */}
               <div className="space-y-3 md:hidden">
                 {searchedPayout.length === 0 ? (
@@ -10401,8 +10576,30 @@ export default function DashboardPage() {
                         ? (["專案ID", "廠商預計付款日", "廠商付款日期", "分潤匯款日期", "專案營收", "專案總金額未稅", "分潤類型", "領取人"] as const)
                         : (["專案ID", "廠商預計付款日", "廠商付款日期", "專案營收", "專案總金額未稅", "分潤類型", "領取人"] as const);
                     const hasExpandable = detailKeys.some((k) => payoutVisibleCols.includes(k));
+                    const claimKind = showPayoutClaimChecks ? payoutRowClaimKind(row) : null;
+                    const claimChecked =
+                      claimKind === "claim"
+                        ? selectedPayoutClaimIds.includes(String(row.id ?? ""))
+                        : claimKind === "withdraw"
+                          ? selectedPayoutWithdrawIds.includes(String(row.id ?? ""))
+                          : false;
                     return (
-                      <div key={cardKey} className="rounded-xl border border-stone-200/90 bg-amber-50/50 p-4">
+                      <div key={cardKey} className={`rounded-xl border p-4 ${claimChecked ? "border-amber-400 bg-amber-100/80" : "border-stone-200/90 bg-amber-50/50"}`}>
+                        {showPayoutClaimChecks && (
+                          <div className="mb-2">{claimKind ? (
+                            <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-stone-700">
+                              <input
+                                type="checkbox"
+                                checked={claimChecked}
+                                onChange={(e) => togglePayoutClaimId(claimKind, String(row.id ?? ""), e.target.checked)}
+                                className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
+                              />
+                              <span>{claimKind === "withdraw" ? `已申請 ${row.提領申請日 ?? ""}` : "可提領"}</span>
+                            </label>
+                          ) : (
+                            <span className="text-xs text-stone-300">—</span>
+                          )}</div>
+                        )}
                         {/* 主要：分潤金額（與 ③ 可見欄位一致，所有人同一套 UI） */}
                         {showAmt && (
                           <div className="flex items-baseline justify-between gap-2">
@@ -10484,6 +10681,19 @@ export default function DashboardPage() {
                 <table className="min-w-full divide-y divide-stone-200">
                   <thead className="bg-stone-100">
                     <tr>
+                      {showPayoutClaimChecks && (
+                        <th className="px-3 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-amber-800">
+                          <label className="inline-flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={allPayoutClaimInViewSelected}
+                              onChange={(e) => toggleAllPayoutClaimsInView(e.target.checked)}
+                              className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
+                            />
+                            提領
+                          </label>
+                        </th>
+                      )}
                       {payoutColsForActiveWorkflowTab.map((k) => (
                         <th
                           key={k}
@@ -10503,15 +10713,41 @@ export default function DashboardPage() {
                   <tbody className="divide-y divide-stone-200 bg-amber-50/40">
                     {searchedPayout.length === 0 ? (
                       <tr>
-                        <td colSpan={payoutColsForActiveWorkflowTab.length || 7} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                        <td colSpan={(payoutColsForActiveWorkflowTab.length || 7) + (showPayoutClaimChecks ? 1 : 0)} className="px-4 py-8 text-center text-base font-medium text-stone-500">
                           {deferredPayoutSearch.trim()
                             ? "沒有符合搜尋結果"
                             : "此階段目前沒有分潤列，可切換上方「待結帳／待分潤／已分潤」或至財務填寫廠商／員工日期。"}
                         </td>
                       </tr>
                     ) : (
-                      visiblePayoutRows.map((row, i) => (
-                        <tr key={row.id ?? i} className="hover:bg-amber-50/80">
+                      visiblePayoutRows.map((row, i) => {
+                        const claimKind = showPayoutClaimChecks ? payoutRowClaimKind(row) : null;
+                        const claimId = String(row.id ?? "");
+                        const claimChecked =
+                          claimKind === "claim"
+                            ? selectedPayoutClaimIds.includes(claimId)
+                            : claimKind === "withdraw"
+                              ? selectedPayoutWithdrawIds.includes(claimId)
+                              : false;
+                        return (
+                        <tr key={row.id ?? i} className={claimChecked ? "bg-amber-100/80" : "hover:bg-amber-50/80"}>
+                          {showPayoutClaimChecks && (
+                            <td className="px-3 py-3.5 align-middle">
+                              {claimKind ? (
+                                <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-stone-700">
+                                  <input
+                                    type="checkbox"
+                                    checked={claimChecked}
+                                    onChange={(e) => togglePayoutClaimId(claimKind, claimId, e.target.checked)}
+                                    className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
+                                  />
+                                  <span className="whitespace-nowrap">{claimKind === "withdraw" ? `已申請 ${row.提領申請日 ?? ""}` : "可提領"}</span>
+                                </label>
+                              ) : (
+                                <span className="text-xs text-stone-300">—</span>
+                              )}
+                            </td>
+                          )}
                           {payoutColsForActiveWorkflowTab.map((k) => {
                             const r = row as unknown as Record<string, unknown>;
                             const val = r[k];
@@ -10539,7 +10775,8 @@ export default function DashboardPage() {
                             );
                           })}
                         </tr>
-                      ))
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -10728,8 +10965,7 @@ export default function DashboardPage() {
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{financePayoutEditError}</p>
               )}
               <p className="mb-2 text-[11px] text-stone-500">
-                僅列出分潤表上<strong className="text-stone-600">廠商付款日已有值</strong>的列（由發票入帳自動同步）。若發票已入帳仍為空，請按「同步入帳至分潤」。
-                「已付款」勾選<strong className="text-stone-600">僅董事長</strong>可操作。
+                僅列出廠商已付款、尚未匯出的列。「提領」是員工自己提出申請；「已付款」勾選<strong className="text-stone-600">僅董事長</strong>可操作。
               </p>
               <ListAmountSummary
                 count={searchedFinanceEmployeePayout.length}
@@ -10764,6 +11000,9 @@ export default function DashboardPage() {
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
                           廠商付款日
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
+                          提領
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
                           分潤匯款日
@@ -10824,6 +11063,9 @@ export default function DashboardPage() {
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-stone-600">
                               {row.廠商付款日期 ?? "—"}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-700">
+                              {String(row.提領申請日 ?? "").trim() ? `已申請 ${row.提領申請日}` : "尚未申請"}
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-stone-600">
                               {row.分潤匯款日期 ?? "—"}

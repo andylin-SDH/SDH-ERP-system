@@ -9,7 +9,7 @@ import { parsePayoutRate, parseAmount } from "@/lib/payout-utils";
 import { isPayoutModeB } from "@/config/master-payout-defaults";
 import { calc專案營收 } from "@/config/project-types";
 import type { MasterRow } from "@/lib/db/master";
-import { getMasterList } from "@/lib/db/master";
+import { getMasterList, todayYmdTaipei } from "@/lib/db/master";
 import { getPartners } from "@/lib/db/partners";
 import type { PartnerRow } from "@/modules/partners/types";
 import { getSystemConfig, updateSystemConfig } from "@/lib/db/system-config";
@@ -55,6 +55,8 @@ export interface PayoutRow {
   /** 對應財務「廠商付款日期」；由 syncPayoutRowsFromFinanceDates 寫入 */
   廠商付款日期?: string;
   分潤匯款日期?: string;
+  /** 領取人提出提領的日期；空白表示尚未申請 */
+  提領申請日?: string;
   分潤類型?: string;
   分潤成數?: string;
   分潤金額?: string;
@@ -77,6 +79,7 @@ function rowToPayout(r: Record<string, unknown>): PayoutRow {
     廠商預計付款日: 廠商預計,
     廠商付款日期: 廠商實付,
     分潤匯款日期: (r.分潤匯款日期 ?? r.payout_remit_date) as string | undefined,
+    提領申請日: (r.提領申請日 as string | undefined) ?? undefined,
     分潤類型: (r.分潤類型 ?? r.角色 ?? r.payout_type) as string | undefined,
     分潤成數: normalizeDecimalString(r.分潤成數 ?? r.payout_rate, 4),
     分潤金額: normalizeDecimalString(r.分潤金額 ?? r.payout_amount, 2),
@@ -453,6 +456,43 @@ async function fillEmptyPayoutVendorDate(專案ID: string, vendorPaid: string): 
   return (data ?? []).length;
 }
 
+/** 重寫前保留提領申請日（欄位尚未建立時略過） */
+async function snapshotClaimDatesByRecipient(專案ID: string): Promise<Map<string, string>> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.from("分潤表").select('"領取人", "提領申請日"').eq("專案ID", 專案ID);
+  if (error) {
+    if (error.code === "42P01" || error.code === "42703") return new Map();
+    throw error;
+  }
+  const out = new Map<string, string>();
+  for (const r of data ?? []) {
+    const claimed = String((r as Record<string, unknown>)["提領申請日"] ?? "").trim();
+    if (!claimed) continue;
+    const key = normalizeRecipientForDedupe((r as Record<string, unknown>)["領取人"] as string | null) || "__empty__";
+    out.set(key, claimed);
+  }
+  return out;
+}
+
+async function restoreClaimDatesByRecipient(專案ID: string, snapshots: Map<string, string>): Promise<void> {
+  if (snapshots.size === 0) return;
+  const supabase = getSupabase();
+  const { data, error } = await supabase.from("分潤表").select('id, "領取人"').eq("專案ID", 專案ID);
+  if (error) {
+    if (error.code === "42P01") return;
+    throw error;
+  }
+  for (const r of data ?? []) {
+    const id = String((r as Record<string, unknown>).id ?? "").trim();
+    if (!id) continue;
+    const key = normalizeRecipientForDedupe((r as Record<string, unknown>)["領取人"] as string | null) || "__empty__";
+    const claimed = snapshots.get(key);
+    if (!claimed) continue;
+    const { error: upErr } = await supabase.from("分潤表").update({ 提領申請日: claimed }).eq("id", id).is("提領申請日", null);
+    if (upErr && upErr.code !== "42P01" && upErr.code !== "42703") throw upErr;
+  }
+}
+
 async function restoreRemitDatesByRecipient(專案ID: string, snapshots: Map<string, string>): Promise<void> {
   if (snapshots.size === 0) return;
   const supabase = getSupabase();
@@ -614,6 +654,7 @@ export async function syncPayoutForProject(
 
   const vendorPaid = await snapshotVendorPaidDate(專案ID);
   const remitByRecipient = await snapshotRemitDatesByRecipient(專案ID);
+  const claimByRecipient = await snapshotClaimDatesByRecipient(專案ID);
 
   await deletePayoutBy專案ID(專案ID);
 
@@ -626,12 +667,78 @@ export async function syncPayoutForProject(
 
   await refreshExtraBonusProjectFields(master);
   await restoreRemitDatesByRecipient(專案ID, remitByRecipient);
+  await restoreClaimDatesByRecipient(專案ID, claimByRecipient);
   if (vendorPaid) await fillEmptyPayoutVendorDate(專案ID, vendorPaid);
 
   if (options?.restoreVendorDates !== false) {
     const { syncFinanceVendorDateFromInvoicesForProject } = await import("@/lib/db/finance");
     await syncFinanceVendorDateFromInvoicesForProject(專案ID);
   }
+}
+
+function recipientIsUser(領取人: string | null | undefined, name: string, email: string): boolean {
+  const v = String(領取人 ?? "").trim();
+  if (!v) return false;
+  const n = name.trim();
+  const e = email.trim();
+  return v === n || (e !== "" && v === e);
+}
+
+/** 領取人對自己、且廠商已付款、尚未匯出的列提出或撤回提領。已有申請日不覆蓋。 */
+export async function claimMyPayoutRows(
+  ids: string[],
+  user: { name: string; email: string },
+  action: "claim" | "withdraw"
+): Promise<{ updated: number }> {
+  const unique = [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  if (unique.length === 0) return { updated: 0 };
+  const supabase = getSupabase();
+  const today = todayYmdTaipei();
+  let updated = 0;
+  for (const id of unique) {
+    const { data, error } = await supabase.from("分潤表").select("*").eq("id", id).maybeSingle();
+    if (error) {
+      if (error.code === "42703") throw new Error("請先在資料庫加上分潤表「提領申請日」欄位（migration 069）");
+      throw error;
+    }
+    if (!data) continue;
+    const row = rowToPayout(data as Record<string, unknown>);
+    if (!recipientIsUser(row.領取人, user.name, user.email)) continue;
+    if (String(row.分潤匯款日期 ?? "").trim()) continue;
+    const pid = String(row.專案ID ?? "").trim();
+    const { data: fin } = await supabase.from("財務").select("廠商付款日期").eq("專案ID", pid).maybeSingle();
+    const vendor =
+      String((fin as { 廠商付款日期?: unknown } | null)?.廠商付款日期 ?? "").trim() ||
+      String(row.廠商付款日期 ?? "").trim();
+    if (!vendor) continue;
+    if (action === "claim") {
+      if (String(row.提領申請日 ?? "").trim()) continue;
+      const { data: saved, error: upErr } = await supabase
+        .from("分潤表")
+        .update({ 提領申請日: today })
+        .eq("id", id)
+        .is("提領申請日", null)
+        .select("id");
+      if (upErr) {
+        if (upErr.code === "42703") throw new Error("請先在資料庫加上分潤表「提領申請日」欄位（migration 069）");
+        throw upErr;
+      }
+      updated += (saved ?? []).length;
+    } else {
+      if (!String(row.提領申請日 ?? "").trim()) continue;
+      const { data: saved, error: upErr } = await supabase
+        .from("分潤表")
+        .update({ 提領申請日: null })
+        .eq("id", id)
+        .select("id");
+      if (upErr) {
+        if (upErr.code === "42703") throw new Error("請先在資料庫加上分潤表「提領申請日」欄位（migration 069）");
+        throw upErr;
+      }
+      updated += (saved ?? []).length;
+    }
+  }
+  return { updated };
 }
 
 export function todayDateStringLocal(): string {
