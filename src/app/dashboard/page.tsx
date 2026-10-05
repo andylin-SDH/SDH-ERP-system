@@ -2229,6 +2229,7 @@ export default function DashboardPage() {
   const [kolAdvanceSaving, setKolAdvanceSaving] = useState(false);
   const [financeEmployeePayoutSearch, setFinanceEmployeePayoutSearch] = useState("");
   const [financePayoutSavingIds, setFinancePayoutSavingIds] = useState<string[]>([]);
+  const [financePayoutMarkAllArmed, setFinancePayoutMarkAllArmed] = useState(false);
   const [financePayoutEditError, setFinancePayoutEditError] = useState<string | null>(null);
   const [financeVendorResyncing, setFinanceVendorResyncing] = useState(false);
   const [financeVendorResyncMessage, setFinanceVendorResyncMessage] = useState<string | null>(null);
@@ -2264,6 +2265,9 @@ export default function DashboardPage() {
   const deferredPayoutSearch = useDeferredValue(payoutSearch);
   const deferredFinanceSearch = useDeferredValue(financeSearch);
   const deferredFinanceEmployeePayoutSearch = useDeferredValue(financeEmployeePayoutSearch);
+  useEffect(() => {
+    setFinancePayoutMarkAllArmed(false);
+  }, [financeEmployeePayoutTab, deferredFinanceEmployeePayoutSearch]);
   const deferredKolRemittanceSearch = useDeferredValue(kolRemittanceSearch);
   const deferredInvoicesSearch = useDeferredValue(invoicesSearch);
   const deferredPaymentRecordsSearch = useDeferredValue(paymentRecordsSearch);
@@ -5559,6 +5563,45 @@ export default function DashboardPage() {
     },
     [me?.role, refreshDashboardData]
   );
+
+  const markVisibleEmployeePayoutsPaid = useCallback(async () => {
+    if (me?.role !== "董事長") {
+      setFinancePayoutEditError("僅董事長可標記員工分潤已付款");
+      return;
+    }
+    const targets = searchedFinanceEmployeePayout.filter(
+      (row) => !String(row.分潤匯款日期 ?? "").trim() && String(row.id ?? "").trim()
+    );
+    setFinancePayoutMarkAllArmed(false);
+    if (targets.length === 0) return;
+    const ids = targets.map((row) => String(row.id));
+    setFinancePayoutSavingIds(ids);
+    setFinancePayoutEditError(null);
+    let failed = 0;
+    try {
+      for (const row of targets) {
+        const id = String(row.id);
+        const res = await fetch("/api/payout", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, markPaid: true }),
+        });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string; payout?: PayoutRow };
+        if (!res.ok || !data.ok || !data.payout) {
+          failed += 1;
+          continue;
+        }
+        const updated = data.payout;
+        setPayoutList((prev) => prev.map((item) => (String(item.id ?? "") === id ? { ...item, ...updated } : item)));
+      }
+      await refreshDashboardData(["finance", "payout"]);
+      if (failed > 0) setFinancePayoutEditError(`${failed} 筆沒有標成已付`);
+    } catch (e) {
+      setFinancePayoutEditError(e instanceof Error ? e.message : "更新失敗");
+    } finally {
+      setFinancePayoutSavingIds([]);
+    }
+  }, [me?.role, refreshDashboardData, searchedFinanceEmployeePayout]);
 
   const loadKolRemittanceList = useCallback(async (opts?: { preserveSelection?: boolean }) => {
     setKolRemittanceLoading(true);
@@ -11138,7 +11181,44 @@ export default function DashboardPage() {
                     <thead className="bg-stone-100">
                       <tr>
                         <th className="px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
-                          已付款
+                          <div>已付款</div>
+                          {me?.role === "董事長" &&
+                          searchedFinanceEmployeePayout.some((row) => !String(row.分潤匯款日期 ?? "").trim() && String(row.id ?? "").trim()) ? (
+                            financePayoutMarkAllArmed ? (
+                              <div className="mt-1 flex flex-col items-start gap-1 normal-case tracking-normal">
+                                <button
+                                  type="button"
+                                  disabled={financePayoutSavingIds.length > 0}
+                                  onClick={() => void markVisibleEmployeePayoutsPaid()}
+                                  className="rounded-md bg-stone-900 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
+                                >
+                                  確定已付{" "}
+                                  {
+                                    searchedFinanceEmployeePayout.filter(
+                                      (row) => !String(row.分潤匯款日期 ?? "").trim() && String(row.id ?? "").trim()
+                                    ).length
+                                  }{" "}
+                                  筆
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setFinancePayoutMarkAllArmed(false)}
+                                  className="text-[11px] font-medium text-stone-500 underline"
+                                >
+                                  取消
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={financePayoutSavingIds.length > 0}
+                                onClick={() => setFinancePayoutMarkAllArmed(true)}
+                                className="mt-1 block rounded-md border border-stone-300 bg-white px-2 py-1 text-[11px] font-semibold normal-case tracking-normal text-stone-800 disabled:opacity-60"
+                              >
+                                全選
+                              </button>
+                            )
+                          ) : null}
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
                           專案
