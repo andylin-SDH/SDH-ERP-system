@@ -6,7 +6,7 @@
 import { OVERVIEW_KPI_KEYS, OVERVIEW_KPI_LABELS } from "@/config/overview-kpi";
 
 /** 側欄／① 可見區塊順序（發票已併入財務分頁，不再獨立一區） */
-export const SECTION_KEYS = ["overview", "master", "partners", "tasks", "payout", "finance"] as const;
+export const SECTION_KEYS = ["overview", "master", "partners", "tasks", "schedule", "payout", "finance"] as const;
 
 /** ①「角色可見區塊」勾選用：不含總覽（總覽改由 ③ 依帳號設定子欄位／是否納入 tables） */
 export const ROLE_SECTION_KEYS_FOR_UI = SECTION_KEYS.filter((k) => k !== "overview");
@@ -16,6 +16,7 @@ export const TABLE_LABELS: Record<string, string> = {
   master: "大總表",
   partners: "合作夥伴 / KOL",
   tasks: "任務",
+  schedule: "班表",
   payout: "分潤表",
   finance: "財務",
   /** ③ 可見欄位用 key；側欄不單獨顯示 */

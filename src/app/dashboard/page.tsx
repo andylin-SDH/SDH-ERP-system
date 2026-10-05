@@ -29,7 +29,8 @@ import {
   displayPayoutTypeLabel,
   isExtraBonusPayoutType,
 } from "@/lib/payout-dedupe";
-import { ensureMasterSectionForRole, getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
+import { ensureMasterSectionForRole, ensureScheduleSection, getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
+import { ScheduleBoard } from "@/components/schedule/ScheduleBoard";
 import { PROJECT_TYPES, calc專案營收, projectRevenueFormulaHint } from "@/config/project-types";
 import { DEFAULT_PROJECT_STATUS_OPTIONS } from "@/config/project-status-defaults";
 import { DEFAULT_PROJECT_EXPENSE_TYPE_OPTIONS } from "@/config/project-expense-type-defaults";
@@ -2164,7 +2165,7 @@ export default function DashboardPage() {
   const [kolPortalPreviewLoading, setKolPortalPreviewLoading] = useState(false);
   const [kolPortalPreviewError, setKolPortalPreviewError] = useState<string | null>(null);
   const [kolPortalPreviewSearch, setKolPortalPreviewSearch] = useState("");
-  const [financeEmployeePayoutTab, setFinanceEmployeePayoutTab] = useState<"pending" | "paid">("pending");
+  const [financeEmployeePayoutTab, setFinanceEmployeePayoutTab] = useState<"pending" | "claimed" | "paid">("pending");
   const [financeKolRemittanceTab, setFinanceKolRemittanceTab] = useState<"pending" | "remitted">("pending");
   const [kolRemittanceItems, setKolRemittanceItems] = useState<
     Array<{
@@ -2860,7 +2861,7 @@ export default function DashboardPage() {
     }
     /** 舊設定「發票」獨立區塊 → 整併為「財務」 */
     const merged = base.map((s) => (s === "invoices" ? "finance" : s));
-    return ensureMasterSectionForRole(visibilitySubject.role, [...new Set(merged)]);
+    return ensureScheduleSection(visibilitySubject.role, ensureMasterSectionForRole(visibilitySubject.role, [...new Set(merged)]));
   }, [visibilitySubject, effectiveVisibility, systemConfig]);
 
   /** Dashboard 分頁列表：一般使用者只有資料區塊；董事長/管理者多「可見性與權限」「帳號視角」；董事長另有「異動紀錄」 */
@@ -4057,10 +4058,19 @@ export default function DashboardPage() {
       kol: paidDuplicateAlertLines(peers, names, kolIds),
     };
   }, [masterList, kolRemittanceItems, financeEmployeePayoutPendingRows, financeEmployeePayoutPaidRows]);
-  const financeEmployeePayoutBaseRows = useMemo(
-    () => (financeEmployeePayoutTab === "pending" ? financeEmployeePayoutPendingRows : financeEmployeePayoutPaidRows),
-    [financeEmployeePayoutTab, financeEmployeePayoutPendingRows, financeEmployeePayoutPaidRows]
+  const financeEmployeePayoutClaimedRows = useMemo(
+    () => financeEmployeePayoutPendingRows.filter((r) => String(r.提領申請日 ?? "").trim()),
+    [financeEmployeePayoutPendingRows]
   );
+  const financeEmployeePayoutBaseRows = useMemo(() => {
+    if (financeEmployeePayoutTab === "paid") return financeEmployeePayoutPaidRows;
+    if (financeEmployeePayoutTab === "claimed") return financeEmployeePayoutClaimedRows;
+    return [...financeEmployeePayoutPendingRows].sort((a, b) => {
+      const ac = String(a.提領申請日 ?? "").trim() ? 0 : 1;
+      const bc = String(b.提領申請日 ?? "").trim() ? 0 : 1;
+      return ac - bc;
+    });
+  }, [financeEmployeePayoutTab, financeEmployeePayoutPendingRows, financeEmployeePayoutClaimedRows, financeEmployeePayoutPaidRows]);
   const financeEmployeeWorkflowCounts = useMemo(() => {
     let pending_vendor = 0;
     let pending_payout = 0;
@@ -4075,6 +4085,8 @@ export default function DashboardPage() {
   const financeEmployeePayoutCounts = useMemo(() => {
     let pending = 0;
     let pendingAmount = 0;
+    let claimed = 0;
+    let claimedAmount = 0;
     let paid = 0;
     let paidAmount = 0;
     for (const r of dedupedPayoutForFinanceEmployee) {
@@ -4082,13 +4094,17 @@ export default function DashboardPage() {
       if (payoutRowWorkflowStage(r, financeByProjectId) === "pending_payout") {
         pending += 1;
         pendingAmount += amt;
+        if (String(r.提領申請日 ?? "").trim()) {
+          claimed += 1;
+          claimedAmount += amt;
+        }
       }
       if (String(r.分潤匯款日期 ?? "").trim()) {
         paid += 1;
         paidAmount += amt;
       }
     }
-    return { pending, pendingAmount, paid, paidAmount };
+    return { pending, pendingAmount, claimed, claimedAmount, paid, paidAmount };
   }, [dedupedPayoutForFinanceEmployee, financeByProjectId]);
   const kolRemittancePendingItems = useMemo(
     () => kolRemittanceItems.filter((r) => r.結帳狀態 === "待匯款"),
@@ -7141,6 +7157,8 @@ export default function DashboardPage() {
                 </div>
               </section>
             )}
+
+        {activeSection === "schedule" && <ScheduleBoard canEdit={canMutate} />}
 
         {/* 總覽：與我有關的進行中專案 + 指派給我的任務；董事長可切全公司 */}
         {activeSection === "overview" && (
@@ -10903,6 +10921,11 @@ export default function DashboardPage() {
                 }`}
               >
                 員工分潤付款
+                {financeEmployeePayoutCounts.claimed > 0 ? (
+                  <span className="ml-1 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] tabular-nums text-amber-950">
+                    {financeEmployeePayoutCounts.claimed}
+                  </span>
+                ) : null}
               </button>
               <button
                 type="button"
@@ -10979,8 +11002,14 @@ export default function DashboardPage() {
 
           {financeSubTab === "employeePayout" && (
             <>
-              <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 px-4 py-3">
+              <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                <button
+                  type="button"
+                  onClick={() => setFinanceEmployeePayoutTab("pending")}
+                  className={`rounded-xl border px-4 py-3 text-left ${
+                    financeEmployeePayoutTab === "pending" ? "border-amber-400 bg-amber-50" : "border-amber-200/80 bg-amber-50/60"
+                  }`}
+                >
                   <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-amber-800">待付款</p>
                   <p className="mt-1 text-lg font-bold tabular-nums text-stone-900">
                     {financeEmployeePayoutCounts.pending}{" "}
@@ -10989,8 +11018,30 @@ export default function DashboardPage() {
                   <p className="mt-0.5 text-xs tabular-nums text-stone-600">
                     合計 {formatAmount(String(Math.round(financeEmployeePayoutCounts.pendingAmount)))}
                   </p>
-                </div>
-                <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/50 px-4 py-3">
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFinanceEmployeePayoutTab("claimed")}
+                  className={`rounded-xl border px-4 py-3 text-left ${
+                    financeEmployeePayoutTab === "claimed" ? "border-orange-400 bg-orange-50" : "border-orange-200 bg-orange-50/70"
+                  }`}
+                >
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-orange-800">已申請提領</p>
+                  <p className="mt-1 text-lg font-bold tabular-nums text-stone-900">
+                    {financeEmployeePayoutCounts.claimed}{" "}
+                    <span className="text-sm font-semibold text-stone-500">筆</span>
+                  </p>
+                  <p className="mt-0.5 text-xs tabular-nums text-stone-600">
+                    合計 {formatAmount(String(Math.round(financeEmployeePayoutCounts.claimedAmount)))}
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFinanceEmployeePayoutTab("paid")}
+                  className={`rounded-xl border px-4 py-3 text-left ${
+                    financeEmployeePayoutTab === "paid" ? "border-emerald-400 bg-emerald-50" : "border-emerald-200/80 bg-emerald-50/50"
+                  }`}
+                >
                   <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-800">已付款</p>
                   <p className="mt-1 text-lg font-bold tabular-nums text-stone-900">
                     {financeEmployeePayoutCounts.paid}{" "}
@@ -10999,7 +11050,7 @@ export default function DashboardPage() {
                   <p className="mt-0.5 text-xs tabular-nums text-stone-600">
                     合計 {formatAmount(String(Math.round(financeEmployeePayoutCounts.paidAmount)))}
                   </p>
-                </div>
+                </button>
               </div>
               <PaidDuplicateAlert lines={canSeeOutgoingDuplicateAlert ? paidDuplicatePeers.employee : []} />
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -11015,6 +11066,18 @@ export default function DashboardPage() {
                   >
                     待付款
                     <span className="ml-1 text-[10px] opacity-80">{financeEmployeePayoutCounts.pending}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFinanceEmployeePayoutTab("claimed")}
+                    className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
+                      financeEmployeePayoutTab === "claimed"
+                        ? "bg-orange-500 text-white"
+                        : "text-stone-500 hover:text-stone-900"
+                    }`}
+                  >
+                    已申請
+                    <span className="ml-1 text-[10px] opacity-80">{financeEmployeePayoutCounts.claimed}</span>
                   </button>
                   <button
                     type="button"
@@ -11054,7 +11117,7 @@ export default function DashboardPage() {
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{financePayoutEditError}</p>
               )}
               <p className="mb-2 text-[11px] text-stone-500">
-                僅列出廠商已付款、尚未匯出的列。「提領」是員工自己提出申請；「已付款」勾選<strong className="text-stone-600">僅董事長</strong>可操作。
+                「已申請」是員工已經按下提領、還沒匯出的列。匯完款再勾待付，勾選<strong className="text-stone-600">僅董事長</strong>可操作。
               </p>
               <ListAmountSummary
                 count={searchedFinanceEmployeePayout.length}
@@ -11064,9 +11127,11 @@ export default function DashboardPage() {
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
                 {searchedFinanceEmployeePayout.length === 0 ? (
                   <p className="px-4 py-10 text-center text-sm text-stone-500">
-                    {financeEmployeePayoutTab === "pending"
-                      ? `目前沒有待付員工分潤。發票若在「已入帳」仍為空，請按上方「同步入帳至分潤」。全公司分潤：待結帳 ${financeEmployeeWorkflowCounts.pending_vendor} 筆、待分潤 ${financeEmployeeWorkflowCounts.pending_payout} 筆。`
-                      : "尚無已付款紀錄"}
+                    {financeEmployeePayoutTab === "claimed"
+                      ? "目前沒有人提出提領。"
+                      : financeEmployeePayoutTab === "pending"
+                        ? `目前沒有待付員工分潤。發票若在「已入帳」仍為空，請按上方「同步入帳至分潤」。全公司分潤：待結帳 ${financeEmployeeWorkflowCounts.pending_vendor} 筆、待分潤 ${financeEmployeeWorkflowCounts.pending_payout} 筆。`
+                        : "尚無已付款紀錄"}
                   </p>
                 ) : (
                   <table className="min-w-full divide-y divide-stone-200">
@@ -11153,7 +11218,7 @@ export default function DashboardPage() {
                             <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-stone-600">
                               {row.廠商付款日期 ?? "—"}
                             </td>
-                            <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-700">
+                            <td className={`whitespace-nowrap px-4 py-3 text-sm ${String(row.提領申請日 ?? "").trim() ? "font-semibold text-orange-800" : "text-stone-400"}`}>
                               {String(row.提領申請日 ?? "").trim() ? `已申請 ${row.提領申請日}` : "尚未申請"}
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-stone-600">

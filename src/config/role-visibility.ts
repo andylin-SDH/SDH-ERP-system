@@ -25,32 +25,32 @@ export interface RoleVisibilityConfig {
 export const ROLE_VISIBILITY: Record<string, RoleVisibilityConfig> = {
   董事長: {
     fullAccess: true,
-    sections: ["overview", "master", "partners", "tasks", "payout", "finance"],
+    sections: ["overview", "master", "partners", "tasks", "schedule", "payout", "finance"],
     filterNote: "全公司，不過濾",
   },
   管理者: {
     fullAccess: true,
-    sections: ["overview", "master", "partners", "tasks", "payout", "finance"],
+    sections: ["overview", "master", "partners", "tasks", "schedule", "payout", "finance"],
     filterNote: "全公司，不過濾",
   },
   經紀人: {
     fullAccess: false,
-    sections: ["overview", "master", "partners", "tasks"],
+    sections: ["overview", "master", "partners", "tasks", "schedule"],
     filterNote: "可進大總表；列依姓名／Email 對到相關專案，不是全公司",
   },
   製作人: {
     fullAccess: false,
-    sections: ["overview", "master", "tasks"],
+    sections: ["overview", "master", "tasks", "schedule"],
     filterNote: "專案與任務，可依 project_bd 或 task_owner 擴充過濾",
   },
   會計: {
     fullAccess: true,
-    sections: ["overview", "payout", "finance"],
+    sections: ["overview", "payout", "finance", "schedule"],
     filterNote: "財務相關表，目前全開",
   },
   行政: {
     fullAccess: false,
-    sections: ["overview", "master", "partners", "tasks"],
+    sections: ["overview", "master", "partners", "tasks", "schedule"],
     filterNote: "可進大總表；列依姓名／Email 對到相關專案，不是全公司",
   },
   /** 僅使用 /kol 訪客頁；不進員工 Dashboard 資料區塊 */
@@ -91,6 +91,13 @@ export function ensureMasterSectionForRole(role: string, sections: string[]): st
   const overviewAt = next.indexOf("overview");
   next.splice(overviewAt >= 0 ? overviewAt + 1 : 0, 0, "master");
   return next;
+}
+
+/** 員工都看得到班表。舊的角色區塊設定若沒勾這項，讀取時補上，不改資料庫。 */
+export function ensureScheduleSection(role: string, sections: string[]): string[] {
+  if (!role || role === "KOL") return sections;
+  if (sections.includes("schedule")) return sections;
+  return [...sections, "schedule"];
 }
 
 /**
