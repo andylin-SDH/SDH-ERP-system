@@ -2229,7 +2229,7 @@ export default function DashboardPage() {
   const [kolAdvanceSaving, setKolAdvanceSaving] = useState(false);
   const [financeEmployeePayoutSearch, setFinanceEmployeePayoutSearch] = useState("");
   const [financePayoutSavingIds, setFinancePayoutSavingIds] = useState<string[]>([]);
-  const [financePayoutMarkAllArmed, setFinancePayoutMarkAllArmed] = useState(false);
+  const [selectedFinancePayoutIds, setSelectedFinancePayoutIds] = useState<string[]>([]);
   const [financePayoutEditError, setFinancePayoutEditError] = useState<string | null>(null);
   const [financeVendorResyncing, setFinanceVendorResyncing] = useState(false);
   const [financeVendorResyncMessage, setFinanceVendorResyncMessage] = useState<string | null>(null);
@@ -2266,7 +2266,7 @@ export default function DashboardPage() {
   const deferredFinanceSearch = useDeferredValue(financeSearch);
   const deferredFinanceEmployeePayoutSearch = useDeferredValue(financeEmployeePayoutSearch);
   useEffect(() => {
-    setFinancePayoutMarkAllArmed(false);
+    setSelectedFinancePayoutIds([]);
   }, [financeEmployeePayoutTab, deferredFinanceEmployeePayoutSearch]);
   const deferredKolRemittanceSearch = useDeferredValue(kolRemittanceSearch);
   const deferredInvoicesSearch = useDeferredValue(invoicesSearch);
@@ -5569,11 +5569,11 @@ export default function DashboardPage() {
       setFinancePayoutEditError("僅董事長可標記員工分潤已付款");
       return;
     }
+    const picked = new Set(selectedFinancePayoutIds);
     const targets = searchedFinanceEmployeePayout.filter(
-      (row) => !String(row.分潤匯款日期 ?? "").trim() && String(row.id ?? "").trim()
+      (row) => picked.has(String(row.id ?? "").trim()) && !String(row.分潤匯款日期 ?? "").trim() && String(row.id ?? "").trim()
     );
-    setFinancePayoutMarkAllArmed(false);
-    if (targets.length === 0) return;
+    if (targets.length === 0 || financePayoutSavingIds.length > 0) return;
     const ids = targets.map((row) => String(row.id));
     setFinancePayoutSavingIds(ids);
     setFinancePayoutEditError(null);
@@ -5600,8 +5600,9 @@ export default function DashboardPage() {
       setFinancePayoutEditError(e instanceof Error ? e.message : "更新失敗");
     } finally {
       setFinancePayoutSavingIds([]);
+      setSelectedFinancePayoutIds([]);
     }
-  }, [me?.role, refreshDashboardData, searchedFinanceEmployeePayout]);
+  }, [financePayoutSavingIds.length, me?.role, refreshDashboardData, searchedFinanceEmployeePayout, selectedFinancePayoutIds]);
 
   const loadKolRemittanceList = useCallback(async (opts?: { preserveSelection?: boolean }) => {
     setKolRemittanceLoading(true);
@@ -11160,7 +11161,7 @@ export default function DashboardPage() {
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{financePayoutEditError}</p>
               )}
               <p className="mb-2 text-[11px] text-stone-500">
-                「已申請」是員工已經按下提領、還沒匯出的列。匯完款再勾待付，勾選<strong className="text-stone-600">僅董事長</strong>可操作。
+                「已申請」是員工已經按下提領、還沒匯出的列。勾選後按下方「標記已付款」，<strong className="text-stone-600">僅董事長</strong>可操作。
               </p>
               <ListAmountSummary
                 count={searchedFinanceEmployeePayout.length}
@@ -11180,46 +11181,33 @@ export default function DashboardPage() {
                   <table className="min-w-full divide-y divide-stone-200">
                     <thead className="bg-stone-100">
                       <tr>
-                        <th className="px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
-                          <div>已付款</div>
-                          {me?.role === "董事長" &&
-                          searchedFinanceEmployeePayout.some((row) => !String(row.分潤匯款日期 ?? "").trim() && String(row.id ?? "").trim()) ? (
-                            financePayoutMarkAllArmed ? (
-                              <div className="mt-1 flex flex-col items-start gap-1 normal-case tracking-normal">
-                                <button
-                                  type="button"
-                                  disabled={financePayoutSavingIds.length > 0}
-                                  onClick={() => void markVisibleEmployeePayoutsPaid()}
-                                  className="rounded-md bg-stone-900 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
-                                >
-                                  確定已付{" "}
-                                  {
-                                    searchedFinanceEmployeePayout.filter(
-                                      (row) => !String(row.分潤匯款日期 ?? "").trim() && String(row.id ?? "").trim()
-                                    ).length
-                                  }{" "}
-                                  筆
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setFinancePayoutMarkAllArmed(false)}
-                                  className="text-[11px] font-medium text-stone-500 underline"
-                                >
-                                  取消
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                disabled={financePayoutSavingIds.length > 0}
-                                onClick={() => setFinancePayoutMarkAllArmed(true)}
-                                className="mt-1 block rounded-md border border-stone-300 bg-white px-2 py-1 text-[11px] font-semibold normal-case tracking-normal text-stone-800 disabled:opacity-60"
-                              >
-                                全選
-                              </button>
-                            )
-                          ) : null}
-                        </th>
+                        {me?.role === "董事長" && financeEmployeePayoutTab !== "paid" ? (
+                          <th className="w-10 px-3 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={
+                                searchedFinanceEmployeePayout.some(
+                                  (row) => String(row.id ?? "").trim() && !String(row.分潤匯款日期 ?? "").trim()
+                                ) &&
+                                searchedFinanceEmployeePayout
+                                  .filter((row) => String(row.id ?? "").trim() && !String(row.分潤匯款日期 ?? "").trim())
+                                  .every((row) => selectedFinancePayoutIds.includes(String(row.id ?? "").trim()))
+                              }
+                              onChange={() => {
+                                const ids = searchedFinanceEmployeePayout
+                                  .filter((row) => String(row.id ?? "").trim() && !String(row.分潤匯款日期 ?? "").trim())
+                                  .map((row) => String(row.id ?? "").trim());
+                                setSelectedFinancePayoutIds((prev) =>
+                                  ids.length > 0 && ids.every((id) => prev.includes(id)) ? [] : ids
+                                );
+                              }}
+                              className="h-4 w-4 rounded border-stone-300 text-amber-600 focus:ring-amber-500"
+                              aria-label="全選待付款"
+                            />
+                          </th>
+                        ) : (
+                          <th className="px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">已付款</th>
+                        )}
                         <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
                           專案
                         </th>
@@ -11253,26 +11241,43 @@ export default function DashboardPage() {
                         const canTogglePaid = me?.role === "董事長";
                         return (
                           <tr key={id || `${pid}-${row.領取人}-${row.分潤類型}`} className="hover:bg-amber-50/40">
-                            <td className="px-3 py-3 align-middle">
-                              <label
-                                className={`inline-flex items-center gap-2 text-xs text-stone-700 ${
-                                  canTogglePaid && id && !saving ? "cursor-pointer" : "cursor-not-allowed opacity-70"
-                                }`}
-                                title={canTogglePaid ? undefined : "僅董事長可勾選已付款"}
-                              >
+                            {canTogglePaid && financeEmployeePayoutTab !== "paid" ? (
+                              <td className="px-3 py-3 text-center">
                                 <input
                                   type="checkbox"
-                                  checked={isPaid}
-                                  disabled={saving || !id || !canTogglePaid}
-                                  onChange={(e) => {
-                                    if (!canTogglePaid) return;
-                                    void persistEmployeePayoutPaid(row, e.target.checked);
-                                  }}
-                                  className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400 disabled:opacity-50"
+                                  checked={id !== "" && selectedFinancePayoutIds.includes(id)}
+                                  disabled={saving || !id || isPaid}
+                                  onChange={() =>
+                                    setSelectedFinancePayoutIds((prev) =>
+                                      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+                                    )
+                                  }
+                                  className="h-4 w-4 rounded border-stone-300 text-amber-600 focus:ring-amber-500 disabled:opacity-50"
+                                  aria-label={`選取 ${pname || row.領取人 || id}`}
                                 />
-                                {saving ? "儲存中…" : isPaid ? "已付" : "待付"}
-                              </label>
-                            </td>
+                              </td>
+                            ) : (
+                              <td className="px-3 py-3 align-middle">
+                                <label
+                                  className={`inline-flex items-center gap-2 text-xs text-stone-700 ${
+                                    canTogglePaid && id && !saving ? "cursor-pointer" : "cursor-not-allowed opacity-70"
+                                  }`}
+                                  title={canTogglePaid ? undefined : "僅董事長可勾選已付款"}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isPaid}
+                                    disabled={saving || !id || !canTogglePaid}
+                                    onChange={(e) => {
+                                      if (!canTogglePaid) return;
+                                      void persistEmployeePayoutPaid(row, e.target.checked);
+                                    }}
+                                    className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400 disabled:opacity-50"
+                                  />
+                                  {saving ? "儲存中…" : isPaid ? "已付" : "待付"}
+                                </label>
+                              </td>
+                            )}
                             <td className="px-4 py-3 text-sm">
                               <div
                                 className="max-w-xs truncate font-semibold text-stone-900"
@@ -11311,6 +11316,30 @@ export default function DashboardPage() {
                   </table>
                 )}
               </div>
+              {me?.role === "董事長" && financeEmployeePayoutTab !== "paid" && selectedFinancePayoutIds.length > 0 ? (
+                <div className="sticky bottom-4 z-40 mt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-white/95 px-4 py-3 shadow-xl ring-1 ring-emerald-100 backdrop-blur">
+                    <div className="text-sm">
+                      <span className="font-bold text-emerald-800">已選 {selectedFinancePayoutIds.length} 筆</span>
+                      <span className="ml-2 tabular-nums text-stone-600">
+                        合計 NT${" "}
+                        {searchedFinanceEmployeePayout
+                          .filter((row) => selectedFinancePayoutIds.includes(String(row.id ?? "").trim()))
+                          .reduce((sum, row) => sum + parseNumericField(row.分潤金額), 0)
+                          .toLocaleString("zh-TW")}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={financePayoutSavingIds.length > 0}
+                      onClick={() => void markVisibleEmployeePayoutsPaid()}
+                      className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow transition hover:bg-emerald-500 disabled:opacity-60"
+                    >
+                      {financePayoutSavingIds.length > 0 ? "標記中…" : "標記已付款"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </>
           )}
 
@@ -12075,7 +12104,7 @@ export default function DashboardPage() {
               )}
               {finance.length > 0 && (
                 <p className="mb-2 text-[11px] text-stone-500">
-                  廠商付款日期由發票清冊入帳後自動帶入並同步至分潤表。員工分潤請至「員工分潤付款」逐筆勾選；員工分潤日期於該專案全員付清後自動帶入。此處日期欄位不可手動填寫。
+                  廠商付款日期由發票清冊入帳後自動帶入並同步至分潤表。員工分潤請至「員工分潤付款」勾選後按「標記已付款」；員工分潤日期於該專案全員付清後自動帶入。此處日期欄位不可手動填寫。
                 </p>
               )}
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
