@@ -28,6 +28,8 @@ export interface KolRemittanceListItem {
   /** 對應合作夥伴 PartnerID（供開啟老師視角預覽） */
   PartnerID: string;
   KOL費用未稅: string;
+  /** 車馬費等。不併入匯款金額 */
+  KOL應收額外成本: string;
   廠商付款日期: string;
   請款方式: string;
   請款憑證摘要: string;
@@ -116,6 +118,7 @@ export async function getKolRemittanceList(): Promise<KolRemittanceListItem[]> {
       KOL名稱: kolName,
       PartnerID: partnerIdByName.get(kolName) ?? "",
       KOL費用未稅: formatMoney(row.KOL費用未稅),
+      KOL應收額外成本: formatMoney(row.KOL應收額外成本),
       廠商付款日期,
       請款方式: kolRequestMode(kolInv),
       請款憑證摘要: kolRequestCredentialLabel(kolInv),

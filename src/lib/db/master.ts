@@ -25,6 +25,8 @@ export interface MasterRow {
   專案營收: string | null;
   專案成本: string | null;
   KOL費用未稅: string | null;
+  /** 車馬費等，給付時另加，不計入專案營收 */
+  KOL應收額外成本: string | null;
   KOL名稱: string | null;
   /** 廣告業配（模式 B）：專案手填；分潤「經紀人」領取人以此為準 */
   經紀人: string | null;
@@ -75,6 +77,7 @@ function rowToMaster(r: Record<string, unknown>): MasterRow {
     專案營收: money(r.專案營收),
     專案成本: money(r.專案成本),
     KOL費用未稅: money(r.KOL費用未稅),
+    KOL應收額外成本: money(r.KOL應收額外成本),
     KOL名稱: (r.KOL名稱 as string) ?? null,
     經紀人: (r.經紀人 as string) ?? null,
     主管: (r.主管 as string) ?? null,
@@ -188,6 +191,7 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     ),
     專案成本: normalizeMoneyOrNull(payload.專案成本),
     KOL費用未稅: normalizeMoneyOrNull(payload.KOL費用未稅),
+    KOL應收額外成本: normalizeMoneyOrNull(payload.KOL應收額外成本),
     KOL名稱: payload.KOL名稱 ?? null,
     經紀人: payload.經紀人 ?? null,
     主管: payload.主管 ?? null,
@@ -249,6 +253,7 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
     ),
     專案成本: normalizeMoneyOrNull(payload.專案成本),
     KOL費用未稅: normalizeMoneyOrNull(payload.KOL費用未稅),
+    KOL應收額外成本: normalizeMoneyOrNull(payload.KOL應收額外成本),
     KOL名稱: payload.KOL名稱 ?? null,
     經紀人: payload.經紀人 ?? null,
     主管: payload.主管 ?? null,

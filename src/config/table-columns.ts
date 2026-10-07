@@ -45,6 +45,7 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "專案總金額未稅", label: "專案總金額未稅" },
     { key: "專案營收", label: "專案營收" },
     { key: "KOL費用未稅", label: "KOL費用未稅" },
+    { key: "KOL應收額外成本", label: "KOL應收額外成本（車馬費等）" },
     { key: "專案成本", label: "專案額外成本" },
     { key: "KOL名稱", label: "KOL名稱" },
     { key: "專案費用類型", label: "專案費用類型" },

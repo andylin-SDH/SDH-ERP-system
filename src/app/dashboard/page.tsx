@@ -31,7 +31,7 @@ import {
 } from "@/lib/payout-dedupe";
 import { ensureMasterSectionForRole, ensureScheduleSection, getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
 import { ScheduleBoard } from "@/components/schedule/ScheduleBoard";
-import { PROJECT_TYPES, calc專案營收, projectRevenueFormulaHint } from "@/config/project-types";
+import { PROJECT_TYPES, calc專案營收, kolExtraCostHint, projectRevenueFormulaHint } from "@/config/project-types";
 import { DEFAULT_PROJECT_STATUS_OPTIONS } from "@/config/project-status-defaults";
 import { DEFAULT_PROJECT_EXPENSE_TYPE_OPTIONS } from "@/config/project-expense-type-defaults";
 import { DEFAULT_TASK_TYPE_OPTIONS } from "@/config/task-type-defaults";
@@ -862,6 +862,8 @@ function TaskProjectInfoButton({
       ? ([
           ["專案總金額未稅", formatAmount(project.專案總金額未稅)],
           ["專案額外成本", formatAmount(project.專案成本)],
+          ["KOL費用未稅", formatAmount(project.KOL費用未稅)],
+          ["KOL應收額外成本（車馬費等）", formatAmount(project.KOL應收額外成本)],
           [
             "專案營收",
             formatAmount(calc專案營收(project.專案總金額未稅, project.專案成本, project.KOL費用未稅)),
@@ -1229,6 +1231,7 @@ type MasterCreateFormState = {
   專案營收: string;
   專案成本: string;
   KOL費用未稅: string;
+  KOL應收額外成本: string;
   KOL名稱: string;
   經紀人: string;
   主管: string;
@@ -1268,6 +1271,7 @@ function emptyMasterCreateForm(payoutDefaults: Record<string, string>, 專案類
     專案營收: "",
     專案成本: "",
     KOL費用未稅: "",
+    KOL應收額外成本: "",
     KOL名稱: "",
     經紀人: "",
     主管: "",
@@ -1314,6 +1318,7 @@ function buildMasterCreateFormFromCopy(
     專案營收: "",
     專案成本: "",
     KOL費用未稅: "",
+    KOL應收額外成本: "",
     KOL名稱: String(source.KOL名稱 ?? "").trim(),
     經紀人: String(source.經紀人 ?? "").trim(),
     主管: String(source.主管 ?? "").trim(),
@@ -1351,6 +1356,7 @@ const MASTER_LIST_HIDDEN_AMOUNT_KEYS = new Set([
   "專案營收",
   "專案成本",
   "KOL費用未稅",
+  "KOL應收額外成本",
 ]);
 
 /** 列表精簡隱藏（詳情／新增編輯仍可填）；KOL 名稱改顯示於「專案名稱」下方 */
@@ -1788,6 +1794,7 @@ export default function DashboardPage() {
     專案營收: "",
     專案成本: "",
     KOL費用未稅: "",
+    KOL應收額外成本: "",
     專案費用類型: "",
     KOL名稱: "",
     經紀人: "",
@@ -2174,6 +2181,7 @@ export default function DashboardPage() {
       KOL名稱: string;
       PartnerID: string;
       KOL費用未稅: string;
+      KOL應收額外成本: string;
       廠商付款日期: string;
       請款方式: string;
       請款憑證摘要: string;
@@ -4396,6 +4404,7 @@ export default function DashboardPage() {
           專案總金額未稅: row.專案總金額未稅 ?? "",
           專案成本: row.專案成本 ?? "",
           KOL費用未稅: row.KOL費用未稅 ?? "",
+          KOL應收額外成本: row.KOL應收額外成本 ?? "",
           專案營收: calc專案營收(row.專案總金額未稅 ?? "", row.專案成本 ?? "", row.KOL費用未稅 ?? ""),
           專案費用類型: row.專案費用類型 ?? "",
           KOL名稱: row.KOL名稱 ?? "",
@@ -4623,6 +4632,7 @@ export default function DashboardPage() {
       專案總金額未稅: selectedMaster.專案總金額未稅 ?? "",
       專案成本: selectedMaster.專案成本 ?? "",
       KOL費用未稅: selectedMaster.KOL費用未稅 ?? "",
+      KOL應收額外成本: selectedMaster.KOL應收額外成本 ?? "",
       專案營收: calc專案營收(
         selectedMaster.專案總金額未稅 ?? "",
         selectedMaster.專案成本 ?? "",
@@ -7703,7 +7713,7 @@ export default function DashboardPage() {
                             }}
                           >
                             {masterColsForDisplay.map((k) => {
-                              const amountKeys = ["專案總金額未稅", "專案營收", "專案成本", "KOL費用未稅", "額外成本"];
+                              const amountKeys = ["專案總金額未稅", "專案營收", "專案成本", "KOL費用未稅", "KOL應收額外成本", "額外成本"];
                               const isAmount = amountKeys.includes(k);
                               const val = (row as unknown as Record<string, unknown>)[k];
                               const modeBRow = isPayoutModeB(String(row.專案類型 ?? ""));
@@ -11660,6 +11670,7 @@ export default function DashboardPage() {
                         <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">專案</th>
                         <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">KOL</th>
                         <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-stone-600">KOL費用未稅</th>
+                        <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-stone-600">車馬費</th>
                         <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">請款方式</th>
                         <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">請款憑證</th>
                         <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">客戶入帳日</th>
@@ -11737,6 +11748,9 @@ export default function DashboardPage() {
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold tabular-nums text-stone-900">
                               {formatAmount(row.KOL費用未稅)}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-right text-sm tabular-nums text-stone-600" title="不開發票，不含在匯款金額">
+                              {formatAmount(row.KOL應收額外成本)}
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-700">
                               {row.請款方式 === "勞務報酬" ? "勞務報酬" : "發票"}
@@ -13928,6 +13942,14 @@ export default function DashboardPage() {
                         }))
                       }
                     />
+                    <div>
+                      <NumberField
+                        label="KOL應收額外成本（車馬費等）"
+                        value={createForm.KOL應收額外成本}
+                        onChange={(v) => setCreateForm((f) => ({ ...f, KOL應收額外成本: v }))}
+                      />
+                      <p className="mt-1 text-xs text-stone-500">{kolExtraCostHint()}</p>
+                    </div>
                     <NumberField
                       label="專案額外成本"
                       value={createForm.專案成本}
@@ -14518,6 +14540,7 @@ export default function DashboardPage() {
                       專案總金額未稅: selectedMaster.專案總金額未稅 ?? "",
                       專案成本: selectedMaster.專案成本 ?? "",
                       KOL費用未稅: selectedMaster.KOL費用未稅 ?? "",
+                      KOL應收額外成本: selectedMaster.KOL應收額外成本 ?? "",
                       專案營收: calc專案營收(
                         selectedMaster.專案總金額未稅 ?? "",
                         selectedMaster.專案成本 ?? "",
@@ -15027,6 +15050,22 @@ export default function DashboardPage() {
                     />
                   ) : (
                     <Field label="KOL費用未稅" value={formatAmount(selectedMaster.KOL費用未稅)} />
+                  )}
+
+                  {isEditingMaster ? (
+                    <div>
+                      <NumberField
+                        label="KOL應收額外成本（車馬費等）"
+                        value={editMasterForm.KOL應收額外成本}
+                        onChange={(v) => setEditMasterForm((f) => ({ ...f, KOL應收額外成本: v }))}
+                      />
+                      <p className="mt-1 text-xs text-stone-500">{kolExtraCostHint()}</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <Field label="KOL應收額外成本（車馬費等）" value={formatAmount(selectedMaster.KOL應收額外成本)} />
+                      <p className="mt-1 text-xs text-stone-500">{kolExtraCostHint()}</p>
+                    </div>
                   )}
 
                   {isEditingMaster ? (

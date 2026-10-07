@@ -151,6 +151,7 @@ async function buildKolPortalDataForPartner(
       專案狀態: String(row.專案狀態 ?? "—").trim() || "—",
       專案總金額未稅: formatKolAmountInt(parseKolAmount(row.專案總金額未稅)),
       KOL費用未稅: formatKolAmountInt(parseKolAmount(row.KOL費用未稅)),
+      KOL應收額外成本: formatKolAmountInt(parseKolAmount(row.KOL應收額外成本)),
       結帳狀態,
       廠商付款日期: String(f?.廠商付款日期 ?? "").trim() || "—",
       發票已開含稅合計: sumKolInvoiceAmount含稅(invs),

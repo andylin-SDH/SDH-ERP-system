@@ -547,6 +547,10 @@ function KolHomeInner() {
     () => claimableSelected.reduce((a, p) => a + parseKolAmount(p.KOL費用未稅), 0),
     [claimableSelected]
   );
+  const claimableSelectedTravel = useMemo(
+    () => claimableSelected.reduce((a, p) => a + parseKolAmount(p.KOL應收額外成本), 0),
+    [claimableSelected]
+  );
 
   const claimLaborSplit = useMemo(() => {
     if (claimForm.請款方式 !== "勞務報酬" || claimableSelected.length === 0) return null;
@@ -1012,6 +1016,9 @@ function KolHomeInner() {
                     <th className="min-w-[140px] px-3 py-3 text-xs font-bold tracking-wide">專案名稱</th>
                     <th className="whitespace-nowrap px-3 py-3 text-xs font-bold tracking-wide">結帳狀態</th>
                     <th className="whitespace-nowrap px-3 py-3 text-xs font-bold tracking-wide">KOL應領金額未稅</th>
+                    <th className="whitespace-nowrap px-3 py-3 text-xs font-bold tracking-wide" title="不開發票，不含在請款金額">
+                      車馬費
+                    </th>
                     <th className="whitespace-nowrap px-3 py-3 text-xs font-bold tracking-wide">專案總金額未稅</th>
                     <th className="min-w-[160px] px-3 py-3 text-xs font-bold tracking-wide">SDH對外請款</th>
                     <th className="whitespace-nowrap px-3 py-3 text-xs font-bold tracking-wide">請款憑證</th>
@@ -1084,6 +1091,14 @@ function KolHomeInner() {
                           >
                             {p.KOL費用未稅}
                           </span>
+                        </td>
+                        <td
+                          className={`whitespace-nowrap px-3 py-3.5 text-center tabular-nums ${
+                            isDark ? "text-stone-300" : "text-stone-700"
+                          }`}
+                          title="車馬費不開發票，不含在請款金額"
+                        >
+                          {p.KOL應收額外成本}
                         </td>
                         <td
                           className={`whitespace-nowrap px-3 py-3.5 tabular-nums ${
@@ -1189,6 +1204,11 @@ function KolHomeInner() {
               <span className={`ml-2 tabular-nums ${isDark ? "text-stone-300" : "text-stone-600"}`}>
                 未稅合計 NT$ {claimableSelectedTotal.toLocaleString("zh-TW")}
               </span>
+              {claimableSelectedTravel > 0 ? (
+                <span className={`ml-2 text-xs ${isDark ? "text-stone-400" : "text-stone-500"}`}>
+                  車馬費另計 NT$ {claimableSelectedTravel.toLocaleString("zh-TW")}，不開在發票裡
+                </span>
+              ) : null}
             </div>
             <button
               type="button"
@@ -1216,6 +1236,9 @@ function KolHomeInner() {
                 </h3>
                 <p className="mt-0.5 text-xs text-stone-500">
                   {claimableSelected.length} 筆 · 未稅合計 NT$ {claimableSelectedTotal.toLocaleString("zh-TW")}
+                  {claimableSelectedTravel > 0
+                    ? ` · 車馬費另計 NT$ ${claimableSelectedTravel.toLocaleString("zh-TW")}（不開發票）`
+                    : ""}
                 </p>
               </div>
               <button
@@ -1261,8 +1284,15 @@ function KolHomeInner() {
                       <span className="truncate text-stone-800">
                         <span className="font-mono text-xs text-stone-500">{p.專案ID}</span> {p.專案名稱}
                       </span>
-                      <span className="shrink-0 tabular-nums font-semibold text-stone-900">
-                        {parseKolAmount(p.KOL費用未稅).toLocaleString("zh-TW")}
+                      <span className="shrink-0 text-right">
+                        <span className="tabular-nums font-semibold text-stone-900">
+                          {parseKolAmount(p.KOL費用未稅).toLocaleString("zh-TW")}
+                        </span>
+                        {parseKolAmount(p.KOL應收額外成本) > 0 ? (
+                          <span className="mt-0.5 block text-[11px] font-medium text-stone-500">
+                            車馬費 {parseKolAmount(p.KOL應收額外成本).toLocaleString("zh-TW")}（不開發票）
+                          </span>
+                        ) : null}
                       </span>
                     </li>
                   ))}

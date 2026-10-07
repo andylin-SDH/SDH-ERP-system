@@ -15,6 +15,8 @@ export interface KolPortalProject {
   專案狀態: string;
   專案總金額未稅: string;
   KOL費用未稅: string;
+  /** 車馬費等。不開發票，不含在請款金額 */
+  KOL應收額外成本: string;
   結帳狀態: string;
   廠商付款日期: string;
   發票已開含稅合計: string;

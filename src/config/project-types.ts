@@ -33,7 +33,7 @@ export function costFromTotalByProjectType(
 
 /**
  * 專案營收 = 專案總金額未稅 − 專案額外成本 − KOL費用未稅
- * （DB 欄位：專案營收、專案成本、KOL費用未稅）
+ * KOL應收額外成本（車馬費等）不計入抽成。
  */
 export function calc專案營收(
   專案總金額未稅: string | null | undefined,
@@ -47,7 +47,12 @@ export function calc專案營收(
 }
 
 export function projectRevenueFormulaHint(): string {
-  return "自動計算：專案總金額未稅 − 專案額外成本 − KOL費用未稅";
+  return "自動計算：專案總金額未稅 − 專案額外成本 − KOL費用未稅。KOL應收額外成本（車馬費等）不計入。";
+}
+
+/** 車馬費另記，不進專案營收，也不進發票／勞報金額 */
+export function kolExtraCostHint(): string {
+  return "車馬費等不開發票，不計入專案營收，也不計入 KOL 請款金額。";
 }
 
 /** @deprecated 請改用 calc專案營收；保留別名避免舊引用炸掉 */
