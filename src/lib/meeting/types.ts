@@ -29,6 +29,7 @@ export type MeetingProjectItem = {
   款項進度: string;
   專案內容: string;
   備註: string;
+  老師備註: string;
   未完成任務數: number;
   逾期任務數: number;
   逾期警示: string[];

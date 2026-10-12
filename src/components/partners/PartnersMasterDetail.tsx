@@ -25,7 +25,8 @@ export type PartnerFilterTab = { key: string; label: string; count: number };
 const PARTNER_DETAIL_SECTIONS: { title: string; keys: string[] }[] = [
   { title: "識別與分類", keys: ["PartnerID", "合作夥伴名稱", "類別一", "類別二", "類別三"] },
   { title: "聯絡與管道", keys: ["社群網站", "Email", "資料夾", "粉絲數", "頻道｜節目名稱"] },
-  { title: "分潤與合約", keys: ["自來件分潤", "SDH開發分件分潤", "報價", "經銷約開始日", "經銷約結束日"] },
+  { title: "分潤與合約", keys: ["自來件分潤", "SDH開發分件分潤", "經銷約開始日", "經銷約結束日"] },
+  { title: "合作報價", keys: ["報價"] },
   { title: "人員", keys: ["KOL開發者", "主管"] },
   { title: "夥伴類型與其他", keys: ["分級", "是否有經營 私域群", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴"] },
 ];
@@ -320,9 +321,8 @@ function PartnerDetailPanel({
                   const s = String(val ?? "").trim();
                   return (
                     <div key={key} className="sm:col-span-2">
-                      <PartnerDetailField label={label}>
-                        <span className="whitespace-pre-wrap">{s === "" ? "—" : s}</span>
-                      </PartnerDetailField>
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-stone-800">{s === "" ? "—" : s}</p>
+                      <p className="mt-1 text-[11px] text-stone-400">僅內部看，不顯示於客戶名單與老師入口</p>
                     </div>
                   );
                 }
@@ -516,6 +516,11 @@ export function PartnersMasterDetail({
                             {pt.粉絲數 ? `${pt.粉絲數} 粉絲` : "—"}
                             {pt["頻道｜節目名稱"] ? ` · ${String(pt["頻道｜節目名稱"]).trim()}` : ""}
                           </p>
+                          {String(pt.報價 ?? "").trim() ? (
+                            <p className="mt-0.5 truncate text-[11px] text-stone-600" title={String(pt.報價).trim()}>
+                              合作報價 {String(pt.報價).trim()}
+                            </p>
+                          ) : null}
                           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                             <PartnerGradePill grade={pt.分級} />
                             {pt.類別一 ? (

@@ -148,6 +148,7 @@ async function buildKolPortalDataForPartner(
     projects.push({
       專案ID: pid,
       專案名稱: String(row.專案名稱 ?? "—"),
+      老師備註: String(row.老師備註 ?? "").trim(),
       專案狀態: String(row.專案狀態 ?? "—").trim() || "—",
       專案總金額未稅: formatKolAmountInt(parseKolAmount(row.專案總金額未稅)),
       KOL費用未稅: formatKolAmountInt(parseKolAmount(row.KOL費用未稅)),

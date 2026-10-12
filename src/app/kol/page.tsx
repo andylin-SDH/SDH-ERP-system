@@ -1073,6 +1073,16 @@ function KolHomeInner() {
                           <p className={`font-semibold ${isDark ? "text-stone-100" : "text-stone-900"}`}>
                             {p.專案名稱}
                           </p>
+                          {p.老師備註 ? (
+                            <p
+                              className={`mt-1 whitespace-pre-wrap text-xs leading-relaxed ${
+                                isDark ? "text-stone-400" : "text-stone-600"
+                              }`}
+                            >
+                              <span className="mr-1 font-semibold">備註</span>
+                              {p.老師備註}
+                            </p>
+                          ) : null}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3.5">
                           <span
@@ -1281,8 +1291,15 @@ function KolHomeInner() {
                 <ul className="max-h-36 space-y-1 overflow-y-auto text-sm">
                   {claimableSelected.map((p) => (
                     <li key={p.專案ID} className="flex justify-between gap-2">
-                      <span className="truncate text-stone-800">
-                        <span className="font-mono text-xs text-stone-500">{p.專案ID}</span> {p.專案名稱}
+                      <span className="min-w-0 text-stone-800">
+                        <span className="block truncate">
+                          <span className="font-mono text-xs text-stone-500">{p.專案ID}</span> {p.專案名稱}
+                        </span>
+                        {p.老師備註 ? (
+                          <span className="mt-0.5 block whitespace-pre-wrap text-[11px] leading-relaxed text-stone-500">
+                            備註 {p.老師備註}
+                          </span>
+                        ) : null}
                       </span>
                       <span className="shrink-0 text-right">
                         <span className="tabular-nums font-semibold text-stone-900">

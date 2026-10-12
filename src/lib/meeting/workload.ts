@@ -135,6 +135,7 @@ export function buildMeetingSnapshot(
       款項進度: financeProgressShortLabel(financeByPid.get(pid)),
       專案內容: String(row.專案內容 ?? "").trim(),
       備註: String(row.備註 ?? "").trim(),
+      老師備註: String(row.老師備註 ?? "").trim(),
       未完成任務數: openList.length,
       逾期任務數: overdue,
       逾期警示,

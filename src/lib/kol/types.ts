@@ -12,6 +12,8 @@ export interface KolPortalClientInvoice {
 export interface KolPortalProject {
   專案ID: string;
   專案名稱: string;
+  /** 大總表「給老師的備註」。內部備註不會進這個入口 */
+  老師備註: string;
   專案狀態: string;
   專案總金額未稅: string;
   KOL費用未稅: string;

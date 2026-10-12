@@ -111,6 +111,7 @@ export async function POST(request: NextRequest) {
       廠商預計付款日: (body?.廠商預計付款日 as string) ?? null,
       專案內容: (body?.專案內容 as string) ?? null,
       備註: (body?.備註 as string) ?? null,
+      老師備註: (body?.老師備註 as string) ?? null,
       專案BDPM: (body?.專案BDPM as string) ?? null,
       專案BDPM分潤成數: (body?.專案BDPM分潤成數 as string) ?? master_payout_defaults.專案BDPM分潤成數,
       專案引薦人: (body?.專案引薦人 as string) ?? null,
@@ -217,6 +218,11 @@ export async function PATCH(request: NextRequest) {
       廠商預計付款日: (body?.廠商預計付款日 as string) ?? null,
       專案內容: (body?.專案內容 as string) ?? null,
       備註: (body?.備註 as string) ?? null,
+      /** 沒帶這個欄位的舊請求，沿用資料庫原值，避免被清空 */
+      老師備註:
+        body && Object.prototype.hasOwnProperty.call(body, "老師備註")
+          ? ((body.老師備註 as string) ?? null)
+          : (existing.老師備註 ?? null),
       專案BDPM: (body?.專案BDPM as string) ?? null,
       專案引薦人: (body?.專案引薦人 as string) ?? null,
       專案開發人: (body?.專案開發人 as string) ?? null,

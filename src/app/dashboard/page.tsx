@@ -858,6 +858,7 @@ function TaskProjectInfoButton({
 }) {
   if (!project) return null;
   const fields = [
+    ["KOL名稱", String(project.KOL名稱 ?? "").trim() || "—"],
     ...(showAmounts
       ? ([
           ["專案總金額未稅", formatAmount(project.專案總金額未稅)],
@@ -891,9 +892,17 @@ function TaskProjectInfoButton({
         </span>
         <span className="grid grid-cols-2 gap-x-3 gap-y-2">
           {fields.map(([label, value]) => (
-            <span key={label} className="min-w-0">
+            <span key={label} className={label === "KOL名稱" ? "col-span-2 min-w-0" : "min-w-0"}>
               <span className="block text-[10px] font-semibold text-stone-400">{label}</span>
-              <span className="mt-0.5 block truncate font-medium text-stone-700">{value}</span>
+              <span
+                className={
+                  label === "KOL名稱"
+                    ? "mt-0.5 block break-words whitespace-normal font-semibold text-stone-900"
+                    : "mt-0.5 block truncate font-medium text-stone-700"
+                }
+              >
+                {value}
+              </span>
             </span>
           ))}
         </span>
@@ -901,6 +910,12 @@ function TaskProjectInfoButton({
           <span className="mt-2 block border-t border-stone-100 pt-2">
             <span className="block text-[10px] font-semibold text-stone-400">專案內容</span>
             <span className="mt-0.5 block line-clamp-3 whitespace-normal text-stone-600">{project.專案內容}</span>
+          </span>
+        ) : null}
+        {project.老師備註 ? (
+          <span className="mt-2 block border-t border-stone-100 pt-2">
+            <span className="block text-[10px] font-semibold text-stone-400">給老師的備註</span>
+            <span className="mt-0.5 block line-clamp-3 whitespace-normal text-stone-600">{project.老師備註}</span>
           </span>
         ) : null}
       </span>
@@ -1251,6 +1266,7 @@ type MasterCreateFormState = {
   執行管理員分潤成數: string;
   專案內容: string;
   備註: string;
+  老師備註: string;
 };
 
 /** 空白新增表單（開案日／狀態確認日預設今天；分潤成數帶系統預設） */
@@ -1291,6 +1307,7 @@ function emptyMasterCreateForm(payoutDefaults: Record<string, string>, 專案類
     執行管理員分潤成數: payoutDefaults.執行管理員分潤成數 ?? "",
     專案內容: "",
     備註: "",
+    老師備註: "",
   };
 }
 
@@ -1342,6 +1359,7 @@ function buildMasterCreateFormFromCopy(
       String(source.執行管理員分潤成數 ?? "").trim() || (payoutDefaults.執行管理員分潤成數 ?? ""),
     專案內容: String(source.專案內容 ?? "").trim(),
     備註: String(source.備註 ?? "").trim(),
+    老師備註: String(source.老師備註 ?? "").trim(),
   };
 }
 
@@ -1813,6 +1831,7 @@ export default function DashboardPage() {
     執行管理員分潤成數: "",
     專案內容: "",
     備註: "",
+    老師備註: "",
   }));
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [partners, setPartners] = useState<PartnerRow[]>([]);
@@ -3572,7 +3591,8 @@ export default function DashboardPage() {
       }
       const content = String(row.專案內容 ?? "").toLowerCase();
       const note = String(row.備註 ?? "").toLowerCase();
-      return content.includes(q) || note.includes(q);
+      const teacherNote = String(row.老師備註 ?? "").toLowerCase();
+      return content.includes(q) || note.includes(q) || teacherNote.includes(q);
     });
   }, [masterTabFilteredList, masterVisibleCols, deferredMasterSearch, partnerByKolName, financeByProjectId, invoiceSummaryByProjectId]);
 
@@ -4417,6 +4437,7 @@ export default function DashboardPage() {
           執行管理員: row.執行管理員 ?? "",
           專案內容: row.專案內容 ?? "",
           備註: row.備註 ?? "",
+          老師備註: row.老師備註 ?? "",
         }),
       });
       const data = (await safeResJson(res)) as { ok?: boolean; error?: string; master?: MasterRow };
@@ -4656,6 +4677,7 @@ export default function DashboardPage() {
       執行管理員分潤成數: selectedMaster.執行管理員分潤成數 ?? "",
       專案內容: selectedMaster.專案內容 ?? "",
       備註: selectedMaster.備註 ?? "",
+      老師備註: selectedMaster.老師備註 ?? "",
     });
   }, [selectedMaster]);
 
@@ -7307,6 +7329,7 @@ export default function DashboardPage() {
                           const name = String(row.專案名稱 ?? "").trim() || "—";
                           const content = String(row.專案內容 ?? "").trim();
                           const note = String(row.備註 ?? "").trim();
+                          const teacherNote = String(row.老師備註 ?? "").trim();
                           return (
                             <tr
                               key={row.id || row.專案ID}
@@ -7333,6 +7356,7 @@ export default function DashboardPage() {
                                   body={[
                                     { label: "專案內容", value: content },
                                     { label: "備註", value: note },
+                                    { label: "給老師的備註", value: teacherNote },
                                   ]}
                                   className="w-full"
                                 >
@@ -7906,7 +7930,12 @@ export default function DashboardPage() {
                               if (k === MASTER_LIST_CONTENT_NOTES_KEY) {
                                 const content = String(row.專案內容 ?? "").trim();
                                 const note = String(row.備註 ?? "").trim();
-                                const titleBits = [content && `內容：${content}`, note && `備註：${note}`]
+                                const teacherNote = String(row.老師備註 ?? "").trim();
+                                const titleBits = [
+                                  content && `內容：${content}`,
+                                  note && `備註：${note}`,
+                                  teacherNote && `給老師的備註：${teacherNote}`,
+                                ]
                                   .filter(Boolean)
                                   .join("\n\n");
                                 return (
@@ -7930,6 +7959,16 @@ export default function DashboardPage() {
                                               備註
                                             </span>
                                             {note}
+                                          </p>
+                                        </div>
+                                      ) : null}
+                                      {teacherNote ? (
+                                        <div className="mt-1.5 border-t border-dashed border-sky-200/90 pt-1.5">
+                                          <p className="line-clamp-1 break-words text-xs leading-relaxed text-stone-600">
+                                            <span className="mr-1.5 inline-block rounded bg-sky-100/90 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-sky-900/90">
+                                              給老師
+                                            </span>
+                                            {teacherNote}
                                           </p>
                                         </div>
                                       ) : null}
@@ -9281,14 +9320,14 @@ export default function DashboardPage() {
                   </div>
                   <div className="md:col-span-2">
                     <label className="mb-1 block text-xs font-semibold text-stone-500">
-                      報價
-                      <span className="ml-1.5 font-normal text-stone-400">僅後台紀錄，不顯示於前台</span>
+                      合作報價
+                      <span className="ml-1.5 font-normal text-stone-400">僅內部看，不顯示於客戶名單與老師入口</span>
                     </label>
                     <textarea
                       rows={2}
                       value={createPartnerForm.報價}
                       onChange={(e) => setCreatePartnerForm((f) => ({ ...f, 報價: e.target.value }))}
-                      placeholder="例：YT 置入 5 萬／短影音 3 萬"
+                      placeholder="文字或數字皆可，例：YT 置入 5 萬／短影音 3 萬"
                       className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                     />
                   </div>
@@ -9642,15 +9681,15 @@ export default function DashboardPage() {
                   </div>
                   <div className="md:col-span-2">
                     <label className="mb-1 block text-xs font-semibold text-stone-500">
-                      報價
-                      <span className="ml-1.5 font-normal text-stone-400">僅後台紀錄，不顯示於前台</span>
+                      合作報價
+                      <span className="ml-1.5 font-normal text-stone-400">僅內部看，不顯示於客戶名單與老師入口</span>
                     </label>
                     {partnerFieldEditable("報價") ? (
                       <textarea
                         rows={2}
                         value={editPartnerForm.報價}
                         onChange={(e) => setEditPartnerForm((f) => ({ ...f, 報價: e.target.value }))}
-                        placeholder="例：YT 置入 5 萬／短影音 3 萬"
+                        placeholder="文字或數字皆可，例：YT 置入 5 萬／短影音 3 萬"
                         className="w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-sm text-stone-900"
                       />
                     ) : (
@@ -14068,8 +14107,15 @@ export default function DashboardPage() {
                     />
                     <TextAreaField
                       label="備註"
+                      hint="僅內部，老師看不到"
                       value={createForm.備註}
                       onChange={(v) => setCreateForm((f) => ({ ...f, 備註: v }))}
+                    />
+                    <TextAreaField
+                      label="給老師的備註"
+                      hint="會顯示在老師的 KOL 後台"
+                      value={createForm.老師備註}
+                      onChange={(v) => setCreateForm((f) => ({ ...f, 老師備註: v }))}
                     />
                   </div>
                 </section>
@@ -14564,6 +14610,7 @@ export default function DashboardPage() {
                       執行管理員分潤成數: selectedMaster.執行管理員分潤成數 ?? "",
                       專案內容: selectedMaster.專案內容 ?? "",
                       備註: selectedMaster.備註 ?? "",
+                      老師備註: selectedMaster.老師備註 ?? "",
                     });
                   }}
                   className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
@@ -15527,7 +15574,8 @@ export default function DashboardPage() {
                 {isEditingMaster ? (
                   <div className="space-y-4">
                     <TextAreaField label="專案內容" value={editMasterForm.專案內容} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案內容: v }))} />
-                    <TextAreaField label="備註" value={editMasterForm.備註} onChange={(v) => setEditMasterForm((f) => ({ ...f, 備註: v }))} />
+                    <TextAreaField label="備註" hint="僅內部，老師看不到" value={editMasterForm.備註} onChange={(v) => setEditMasterForm((f) => ({ ...f, 備註: v }))} />
+                    <TextAreaField label="給老師的備註" hint="會顯示在老師的 KOL 後台" value={editMasterForm.老師備註} onChange={(v) => setEditMasterForm((f) => ({ ...f, 老師備註: v }))} />
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -15539,8 +15587,16 @@ export default function DashboardPage() {
                     </div>
                     <div>
                       <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-stone-500">備註</p>
+                      <p className="mb-1 text-[11px] text-stone-400">僅內部，老師看不到</p>
                       <p className="whitespace-pre-wrap rounded-xl border border-stone-200/90 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-700">
                         {selectedMaster.備註 || "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-stone-500">給老師的備註</p>
+                      <p className="mb-1 text-[11px] text-stone-400">會顯示在老師的 KOL 後台</p>
+                      <p className="whitespace-pre-wrap rounded-xl border border-stone-200/90 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-700">
+                        {selectedMaster.老師備註 || "—"}
                       </p>
                     </div>
                   </div>
@@ -16439,14 +16495,16 @@ function DateField({ label, value, onChange }: DateFieldProps) {
 
 interface TextAreaFieldProps {
   label: string;
+  hint?: string;
   value: string;
   onChange: (value: string) => void;
 }
 
-function TextAreaField({ label, value, onChange }: TextAreaFieldProps) {
+function TextAreaField({ label, hint, value, onChange }: TextAreaFieldProps) {
   return (
     <div>
       <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</label>
+      {hint ? <p className="-mt-1 mb-1.5 text-[11px] font-normal normal-case tracking-normal text-stone-400">{hint}</p> : null}
       <textarea
         className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm font-medium text-stone-900 placeholder:text-stone-500 focus:border-amber-400/70 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
         rows={3}

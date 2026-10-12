@@ -20,7 +20,13 @@ function InfoBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function MeetingProjectDetail({ project }: { project: MeetingProjectItem }) {
+export function MeetingProjectDetail({
+  project,
+  showTasks = true,
+}: {
+  project: MeetingProjectItem;
+  showTasks?: boolean;
+}) {
   return (
     <div className="space-y-4 rounded-xl border border-stone-200/80 bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -35,9 +41,11 @@ export function MeetingProjectDetail({ project }: { project: MeetingProjectItem 
 
       <div className="grid gap-4 sm:grid-cols-2">
         <InfoBlock label="專案內容" value={project.專案內容} />
-        <InfoBlock label="備註" value={project.備註} />
+        <InfoBlock label="備註（僅內部）" value={project.備註} />
+        <InfoBlock label="給老師的備註" value={project.老師備註} />
       </div>
 
+      {showTasks ? (
       <div>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-bold text-stone-800">
@@ -90,6 +98,7 @@ export function MeetingProjectDetail({ project }: { project: MeetingProjectItem 
           </div>
         )}
       </div>
+      ) : null}
     </div>
   );
 }

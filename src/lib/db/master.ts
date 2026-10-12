@@ -40,6 +40,8 @@ export interface MasterRow {
   廠商預計付款日: string | null;
   專案內容: string | null;
   備註: string | null;
+  /** 給老師看，顯示於 KOL 後台。內部「備註」不對老師公開 */
+  老師備註: string | null;
   專案BDPM: string | null;
   專案BDPM分潤成數: string | null;
   專案引薦人: string | null;
@@ -87,6 +89,7 @@ function rowToMaster(r: Record<string, unknown>): MasterRow {
     廠商預計付款日: (r.廠商預計付款日 as string) ?? null,
     專案內容: (r.專案內容 as string) ?? null,
     備註: (r.備註 as string) ?? null,
+    老師備註: (r.老師備註 as string) ?? null,
     專案BDPM: (r.專案BDPM as string) ?? null,
     專案BDPM分潤成數: (r.專案BDPM分潤成數 as string) ?? null,
     專案引薦人: (r.專案引薦人 as string) ?? null,
@@ -201,6 +204,7 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     廠商預計付款日: payload.廠商預計付款日 ?? null,
     專案內容: payload.專案內容 ?? null,
     備註: payload.備註 ?? null,
+    老師備註: payload.老師備註 ?? null,
     專案BDPM: payload.專案BDPM ?? null,
     專案BDPM分潤成數: payload.專案BDPM分潤成數 ?? null,
     專案引薦人: payload.專案引薦人 ?? null,
@@ -263,6 +267,7 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
     廠商預計付款日: payload.廠商預計付款日 ?? null,
     專案內容: payload.專案內容 ?? null,
     備註: payload.備註 ?? null,
+    老師備註: payload.老師備註 ?? null,
     專案BDPM: payload.專案BDPM ?? null,
     專案引薦人: payload.專案引薦人 ?? null,
     專案開發人: payload.專案開發人 ?? null,
