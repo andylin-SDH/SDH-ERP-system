@@ -6145,26 +6145,15 @@ export default function DashboardPage() {
     }
   }, []);
 
-  /** 任務分頁／大總表：背景同步他人更新（避免僅能靠整頁重新整理） */
+  /** 登入時已讀過任務。停在大總表／任務不再定時整表重讀；從別的分頁切回來才讀一次。 */
+  const taskListSectionRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!me) return;
+    if (!me || !activeSection) return;
+    const prev = taskListSectionRef.current;
+    taskListSectionRef.current = activeSection;
     if (activeSection !== "tasks" && activeSection !== "master") return;
+    if (prev === null || prev === "tasks" || prev === "master") return;
     void refetchTasksOnly();
-    const id = window.setInterval(() => {
-      void refetchTasksOnly();
-    }, 8000);
-    return () => window.clearInterval(id);
-  }, [me, activeSection, refetchTasksOnly]);
-
-  useEffect(() => {
-    if (!me) return;
-    const onVis = () => {
-      if (document.visibilityState !== "visible") return;
-      if (activeSection !== "tasks" && activeSection !== "master") return;
-      void refetchTasksOnly();
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
   }, [me, activeSection, refetchTasksOnly]);
 
   /** 新增／編輯合作夥伴 Modal 開啟時：自 DB 重新載入 Users 與表單選項（人員增刪後清單即更新） */
