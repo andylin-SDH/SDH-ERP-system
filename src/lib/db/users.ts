@@ -284,7 +284,7 @@ export async function getUserByEmail(email: string): Promise<User | null> {
     log("users.db", "getUserByEmail 英文欄位無列，改試帳號", { raw });
   }
   const zhSelect = '"帳號","姓名","角色","部門","scope","active_flag","直屬主管"';
-  let { data: dataZh, error: errZh } = await supabase
+  const { data: dataZh, error: errZh } = await supabase
     .from("users")
     .select(zhSelect)
     .eq("帳號", raw)
@@ -295,8 +295,9 @@ export async function getUserByEmail(email: string): Promise<User | null> {
       .select('"帳號","姓名","角色","部門","scope","active_flag"')
       .eq("帳號", raw)
       .maybeSingle();
-    dataZh = retry.data;
-    errZh = retry.error;
+    if (retry.error) throw retry.error;
+    if (!retry.data) return null;
+    return rowToUser(retry.data as unknown as Record<string, unknown>);
   }
   if (errZh) {
     log("users.db", "getUserByEmail 查詢錯誤", { error: String(errZh?.message) });
