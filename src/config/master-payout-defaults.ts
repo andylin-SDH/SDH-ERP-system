@@ -28,3 +28,10 @@ export function isPayoutModeB(projectType: string): boolean {
     .trim();
   return (PAYOUT_MODE_B_PROJECT_TYPES as readonly string[]).includes(t);
 }
+
+/** 這個日期之後新開的專案只留兩個分潤角色。舊專案此欄為空，沿用原來的角色。 */
+export const TWO_ROLE_PAYOUT_SCHEME = "兩角色";
+
+export function isTwoRolePayoutProject(row: { 分潤制度?: string | null } | null | undefined): boolean {
+  return String(row?.分潤制度 ?? "").trim() === TWO_ROLE_PAYOUT_SCHEME;
+}

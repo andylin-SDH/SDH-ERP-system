@@ -27,7 +27,7 @@ const PARTNER_DETAIL_SECTIONS: { title: string; keys: string[] }[] = [
   { title: "聯絡與管道", keys: ["社群網站", "Email", "資料夾", "粉絲數", "頻道｜節目名稱"] },
   { title: "分潤與合約", keys: ["自來件分潤", "SDH開發分件分潤", "經銷約開始日", "經銷約結束日"] },
   { title: "合作報價", keys: ["報價"] },
-  { title: "人員", keys: ["KOL開發者", "主管"] },
+  { title: "人員", keys: ["KOL開發者"] },
   { title: "夥伴類型與其他", keys: ["分級", "是否有經營 私域群", "廣告經銷夥伴", "節目製作夥伴", "課程製作夥伴"] },
 ];
 

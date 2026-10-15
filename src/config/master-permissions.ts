@@ -19,6 +19,7 @@ export const MASTER_PAYOUT_RATE_FIELD_KEYS = [
   "專案開發人分潤成數",
   "專案管理員分潤成數",
   "執行管理員分潤成數",
+  "直屬主管分潤成數",
 ] as const;
 
 /** @deprecated 請改用 MASTER_AMOUNT_FIELD_KEYS / MASTER_PAYOUT_RATE_FIELD_KEYS */

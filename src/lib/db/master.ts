@@ -55,6 +55,11 @@ export interface MasterRow {
   專案開發人分潤成數: string | null;
   專案管理員分潤成數: string | null;
   執行管理員分潤成數: string | null;
+  /** 開案當下抄下的執行PM直屬主管。舊專案為空。 */
+  直屬主管: string | null;
+  直屬主管分潤成數: string | null;
+  /** 兩角色＝新專案只有專案PM、主管。空白＝舊專案。 */
+  分潤制度: string | null;
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;
@@ -101,6 +106,9 @@ function rowToMaster(r: Record<string, unknown>): MasterRow {
     專案開發人分潤成數: (r.專案開發人分潤成數 as string) ?? null,
     專案管理員分潤成數: (r.專案管理員分潤成數 as string) ?? null,
     執行管理員分潤成數: (r.執行管理員分潤成數 as string) ?? null,
+    直屬主管: (r.直屬主管 as string) ?? null,
+    直屬主管分潤成數: (r.直屬主管分潤成數 as string) ?? null,
+    分潤制度: (r.分潤制度 as string) ?? null,
     created_at: r.created_at as string | undefined,
     updated_at: r.updated_at as string | undefined,
     deleted_at: (r.deleted_at as string) ?? null,
@@ -125,6 +133,22 @@ export function todayYmdTaipei(): string {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
+}
+
+/** 只拿掉錯誤訊息點名的新欄位，再寫一次。不能把所有缺欄都當成直屬主管。 */
+function dropMissingMasterColumns(data: Record<string, unknown>, error: { message?: string } | null): boolean {
+  const message = String(error?.message ?? "");
+  const groups = [
+    ["直屬主管", "直屬主管分潤成數"],
+    ["分潤制度"],
+  ];
+  let dropped = false;
+  for (const keys of groups) {
+    if (!keys.some((key) => message.includes(key))) continue;
+    for (const key of keys) delete data[key];
+    dropped = true;
+  }
+  return dropped;
 }
 
 export async function getMasterList(): Promise<MasterRow[]> {
@@ -216,13 +240,21 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     專案開發人分潤成數: payload.專案開發人分潤成數 ?? null,
     專案管理員分潤成數: payload.專案管理員分潤成數 ?? null,
     執行管理員分潤成數: payload.執行管理員分潤成數 ?? null,
+    直屬主管: payload.直屬主管 ?? null,
+    直屬主管分潤成數: payload.直屬主管分潤成數 ?? null,
+    分潤制度: payload.分潤制度 ?? null,
   };
 
-  const { data, error } = await getSupabase()
+  let { data, error } = await getSupabase()
     .from("大總表")
     .insert(insertData)
     .select("*")
     .maybeSingle();
+  for (let attempt = 0; attempt < 2 && error && dropMissingMasterColumns(insertData, error); attempt += 1) {
+    const retry = await getSupabase().from("大總表").insert(insertData).select("*").maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     log("master.db", "createMaster 新增失敗", { error: String(error?.message) });
@@ -288,13 +320,21 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
   if (payload.專案開發人分潤成數 !== undefined) updateData.專案開發人分潤成數 = payload.專案開發人分潤成數 ?? null;
   if (payload.專案管理員分潤成數 !== undefined) updateData.專案管理員分潤成數 = payload.專案管理員分潤成數 ?? null;
   if (payload.執行管理員分潤成數 !== undefined) updateData.執行管理員分潤成數 = payload.執行管理員分潤成數 ?? null;
+  if (payload.直屬主管 !== undefined) updateData.直屬主管 = payload.直屬主管 ?? null;
+  if (payload.直屬主管分潤成數 !== undefined) updateData.直屬主管分潤成數 = payload.直屬主管分潤成數 ?? null;
+  if (payload.分潤制度 !== undefined) updateData.分潤制度 = payload.分潤制度 ?? null;
 
-  const { data, error } = await getSupabase()
+  let { data, error } = await getSupabase()
     .from("大總表")
     .update(updateData)
     .eq("id", id)
     .select("*")
     .maybeSingle();
+  for (let attempt = 0; attempt < 2 && error && dropMissingMasterColumns(updateData, error); attempt += 1) {
+    const retry = await getSupabase().from("大總表").update(updateData).eq("id", id).select("*").maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     log("master.db", "updateMaster 更新失敗", { id, error: String(error?.message) });

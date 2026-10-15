@@ -35,7 +35,7 @@ import { PROJECT_TYPES, calc專案營收, kolExtraCostHint, projectRevenueFormul
 import { DEFAULT_PROJECT_STATUS_OPTIONS } from "@/config/project-status-defaults";
 import { DEFAULT_PROJECT_EXPENSE_TYPE_OPTIONS } from "@/config/project-expense-type-defaults";
 import { DEFAULT_TASK_TYPE_OPTIONS } from "@/config/task-type-defaults";
-import { MASTER_PAYOUT_DEFAULTS, isPayoutModeB } from "@/config/master-payout-defaults";
+import { MASTER_PAYOUT_DEFAULTS, isPayoutModeB, isTwoRolePayoutProject } from "@/config/master-payout-defaults";
 import type { PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
 import { TABLE_KEYS, TABLE_LABELS, TABLE_COLUMNS, ROLE_SECTION_KEYS_FOR_UI } from "@/config/table-columns";
 import {
@@ -111,10 +111,10 @@ const PAYOUT_DISPLAY_ORDER = [
   "分潤金額",
   "分潤成數",
   "專案名稱",
+  "分潤匯款日期",
   "專案ID",
   "廠商預計付款日",
   "廠商付款日期",
-  "分潤匯款日期",
   "專案營收",
   "專案總金額未稅",
   "分潤類型",
@@ -1140,6 +1140,28 @@ function ListAmountSummary({ count, amount, label }: { count: number; amount: nu
   );
 }
 
+/** 已匯出的分潤依匯款日彙總，方便對「某一天匯了多少」。 */
+function groupPayoutRowsByRemitDate(rows: PayoutRow[]): Array<{ date: string; rows: PayoutRow[]; total: number }> {
+  const groups = new Map<string, PayoutRow[]>();
+  for (const row of rows) {
+    const date = String(row.分潤匯款日期 ?? "").trim() || "未填匯款日";
+    const list = groups.get(date);
+    if (list) list.push(row);
+    else groups.set(date, [row]);
+  }
+  return [...groups.entries()]
+    .map(([date, groupRows]) => ({
+      date,
+      rows: groupRows,
+      total: groupRows.reduce((sum, row) => sum + parseNumericField(row.分潤金額), 0),
+    }))
+    .sort((a, b) => {
+      if (a.date === "未填匯款日") return 1;
+      if (b.date === "未填匯款日") return -1;
+      return b.date.localeCompare(a.date);
+    });
+}
+
 type InvoiceSummary = {
   rows: InvoiceRow[];
   count: number;
@@ -1264,6 +1286,8 @@ type MasterCreateFormState = {
   專案管理員分潤成數: string;
   執行管理員: string;
   執行管理員分潤成數: string;
+  直屬主管: string;
+  直屬主管分潤成數: string;
   專案內容: string;
   備註: string;
   老師備註: string;
@@ -1305,6 +1329,8 @@ function emptyMasterCreateForm(payoutDefaults: Record<string, string>, 專案類
     專案管理員分潤成數: payoutDefaults.專案管理員分潤成數 ?? "",
     執行管理員: "",
     執行管理員分潤成數: payoutDefaults.執行管理員分潤成數 ?? "",
+    直屬主管: "",
+    直屬主管分潤成數: "",
     專案內容: "",
     備註: "",
     老師備註: "",
@@ -1317,7 +1343,7 @@ function emptyMasterCreateForm(payoutDefaults: Record<string, string>, 專案類
  */
 function buildMasterCreateFormFromCopy(
   source: MasterRow,
-  payoutDefaults: Record<string, string>
+  _payoutDefaults: Record<string, string>
 ): MasterCreateFormState {
   const today = new Date().toISOString().slice(0, 10);
   return {
@@ -1337,26 +1363,24 @@ function buildMasterCreateFormFromCopy(
     KOL費用未稅: "",
     KOL應收額外成本: "",
     KOL名稱: String(source.KOL名稱 ?? "").trim(),
-    經紀人: String(source.經紀人 ?? "").trim(),
-    主管: String(source.主管 ?? "").trim(),
-    KOL開發者: String(source.KOL開發者 ?? "").trim(),
+    經紀人: "",
+    主管: "",
+    KOL開發者: "",
     專案費用類型: String(source.專案費用類型 ?? "").trim(),
     廠商名稱: String(source.廠商名稱 ?? "").trim(),
     專案資料夾: String(source.專案資料夾 ?? "").trim(),
-    專案BDPM: String(source.專案BDPM ?? "").trim(),
-    專案BDPM分潤成數: String(source.專案BDPM分潤成數 ?? "").trim() || (payoutDefaults.專案BDPM分潤成數 ?? ""),
-    專案引薦人: String(source.專案引薦人 ?? "").trim(),
-    專案引薦人分潤成數:
-      String(source.專案引薦人分潤成數 ?? "").trim() || (payoutDefaults.專案引薦人分潤成數 ?? ""),
-    專案開發人: String(source.專案開發人 ?? "").trim(),
-    專案開發人分潤成數:
-      String(source.專案開發人分潤成數 ?? "").trim() || (payoutDefaults.專案開發人分潤成數 ?? ""),
-    專案管理員: String(source.專案管理員 ?? "").trim(),
-    專案管理員分潤成數:
-      String(source.專案管理員分潤成數 ?? "").trim() || (payoutDefaults.專案管理員分潤成數 ?? ""),
-    執行管理員: String(source.執行管理員 ?? "").trim(),
-    執行管理員分潤成數:
-      String(source.執行管理員分潤成數 ?? "").trim() || (payoutDefaults.執行管理員分潤成數 ?? ""),
+    專案BDPM: "",
+    專案BDPM分潤成數: "",
+    專案引薦人: "",
+    專案引薦人分潤成數: "",
+    專案開發人: "",
+    專案開發人分潤成數: "",
+    專案管理員: "",
+    專案管理員分潤成數: "",
+    執行管理員: "",
+    執行管理員分潤成數: "7.5%",
+    直屬主管: "",
+    直屬主管分潤成數: "",
     專案內容: String(source.專案內容 ?? "").trim(),
     備註: String(source.備註 ?? "").trim(),
     老師備註: String(source.老師備註 ?? "").trim(),
@@ -1366,7 +1390,21 @@ function buildMasterCreateFormFromCopy(
 const OVERVIEW_SCOPE_STORAGE_KEY = "sdh-dashboard-overview-scope";
 
 /** 大總表上與「這個人與專案有關」可能對得上的欄位（姓名／Email 需與 Users 一致） */
-const MASTER_RELATED_FIELD_KEYS = ["專案BDPM", "專案引薦人", "專案開發人", "專案管理員", "執行管理員", "KOL名稱", "經紀人", "主管", "KOL開發者"] as const;
+const MASTER_RELATED_FIELD_KEYS = ["專案BDPM", "專案引薦人", "專案開發人", "專案管理員", "執行管理員", "直屬主管", "KOL名稱", "經紀人", "主管", "KOL開發者"] as const;
+
+/** 大總表先不顯示這些區塊，資料與表單留著。用 boolean 讓型別檢查仍走得到裡面。 */
+const showHiddenMasterBlocks = false as boolean;
+
+function stampNewProjectPm(form: MasterCreateFormState, pmName: string, supervisor: string): MasterCreateFormState {
+  const boss = supervisor.trim();
+  return {
+    ...form,
+    執行管理員: pmName.trim(),
+    執行管理員分潤成數: "7.5%",
+    直屬主管: boss,
+    直屬主管分潤成數: boss ? "2.5%" : "",
+  };
+}
 
 /** 列表不顯示；僅專案詳情內、且相關人員／全權角色可見 */
 const MASTER_LIST_HIDDEN_AMOUNT_KEYS = new Set([
@@ -1471,13 +1509,11 @@ function isMasterRowRelatedToUser(
 
   if (isPayoutModeB(String(row.專案類型 ?? ""))) {
     if (fieldMatchesUser(row.經紀人, userName, userEmail)) return true;
-    for (const key of ["主管", "KOL開發者"] as const) {
-      const cell = row[key];
-      if (fieldMatchesUser(cell, userName, userEmail)) return true;
-      if (!String(cell ?? "").trim()) {
-        const p = partnerByKolName.get(String(row.KOL名稱 ?? "").trim());
-        if (fieldMatchesUser(p?.[key], userName, userEmail)) return true;
-      }
+    if (fieldMatchesUser(row.主管, userName, userEmail)) return true;
+    if (fieldMatchesUser(row.KOL開發者, userName, userEmail)) return true;
+    if (!String(row.KOL開發者 ?? "").trim()) {
+      const p = partnerByKolName.get(String(row.KOL名稱 ?? "").trim());
+      if (fieldMatchesUser(p?.KOL開發者, userName, userEmail)) return true;
     }
   } else {
     for (const key of ["專案BDPM", "專案管理員", "執行管理員"] as const) {
@@ -1587,7 +1623,11 @@ function masterTableCellText(
     if (!modeB) return "";
     return String(row.經紀人 ?? "").trim();
   }
-  if (colKey === "主管" || colKey === "KOL開發者") {
+  if (colKey === "主管") {
+    if (!modeB) return "";
+    return String(row.主管 ?? "").trim();
+  }
+  if (colKey === "KOL開發者") {
     if (!modeB) return "";
     const fromMaster = String((row as MasterRow)[colKey as keyof MasterRow] ?? "").trim();
     if (fromMaster) return fromMaster;
@@ -1829,6 +1869,8 @@ export default function DashboardPage() {
     專案管理員分潤成數: "",
     執行管理員: "",
     執行管理員分潤成數: "",
+    直屬主管: "",
+    直屬主管分潤成數: "",
     專案內容: "",
     備註: "",
     老師備註: "",
@@ -1894,7 +1936,7 @@ export default function DashboardPage() {
   const [visibilityColumns, setVisibilityColumns] = useState<Record<string, string[]>>({});
   const [savingVisibility, setSavingVisibility] = useState(false);
   const [visibilityError, setVisibilityError] = useState<string | null>(null);
-  const [editUserForm, setEditUserForm] = useState<{ name: string; role: string; dept: string; scope: string }>({ name: "", role: "", dept: "", scope: "", });
+  const [editUserForm, setEditUserForm] = useState<{ name: string; role: string; dept: string; scope: string; 直屬主管: string }>({ name: "", role: "", dept: "", scope: "", 直屬主管: "" });
   const [userSettingsTab, setUserSettingsTab] = useState<"profile" | "password" | "visibility">("profile");
   const [resetPasswordForm, setResetPasswordForm] = useState({ password: "", confirm: "" });
   const [savingResetPassword, setSavingResetPassword] = useState(false);
@@ -1927,7 +1969,7 @@ export default function DashboardPage() {
   /** 董事長：總覽為「與我有關」或「全公司」（其餘角色僅與我有關） */
   const [overviewScope, setOverviewScopeState] = useState<"mine" | "company">("mine");
   const [showCreateUser, setShowCreateUser] = useState(false);
-  const [createUserForm, setCreateUserForm] = useState({ email: "", name: "", password: "", role: "經紀人", dept: "", scope: "" });
+  const [createUserForm, setCreateUserForm] = useState({ email: "", name: "", password: "", role: "經紀人", dept: "", scope: "", 直屬主管: "" });
   const [creatingUser, setCreatingUser] = useState(false);
   const [createUserError, setCreateUserError] = useState<string | null>(null);
   const [showCreatePartner, setShowCreatePartner] = useState(false);
@@ -3087,13 +3129,15 @@ export default function DashboardPage() {
       if (!visibilitySubject || isFullAccessRole(visibilitySubject.role)) return rows;
       const raw = visibilityRules[tableKey] ?? [];
       const matchFields = (Array.isArray(raw) ? raw : []).map((f) => String(f).trim()).filter(Boolean);
-      if (matchFields.length === 0) return rows;
+      const fields =
+        tableKey === "master" ? [...new Set([...matchFields, "執行管理員", "直屬主管"])] : matchFields;
+      if (fields.length === 0) return rows;
       const uName = (visibilitySubject.name ?? "").trim();
       const uEmail = (visibilitySubject.email ?? "").trim();
       return rows.filter((row) => {
-        for (const key of matchFields) {
+        for (const key of fields) {
           let val = String((row as unknown as Record<string, unknown>)[key] ?? "").trim();
-          if (!val && tableKey === "master" && (key === "主管" || key === "KOL開發者")) {
+          if (!val && tableKey === "master" && key === "KOL開發者") {
             const r = row as unknown as MasterRow;
             const p = partnerByKolName.get(String(r.KOL名稱 ?? "").trim());
             val = String((p as Record<string, unknown> | undefined)?.[key] ?? "").trim();
@@ -3360,10 +3404,14 @@ export default function DashboardPage() {
   );
   /** 分潤表實際欄順序：與權限／可見欄位一致，但全角色統一為「分潤金額優先」 */
   const payoutColsForDisplay = useMemo(() => sortPayoutColumnsForDisplay(payoutVisibleCols), [payoutVisibleCols]);
-  /** 待結帳／待分潤不顯示「分潤匯款日期」（有值即已分潤，僅在已分潤分頁有意義） */
+  /** 待結帳／待分潤不顯示匯款日期。已分潤一定顯示標記當天的日期。 */
   const payoutColsForActiveWorkflowTab = useMemo(() => {
-    if (payoutWorkflowTab === "settled") return payoutColsForDisplay;
-    return payoutColsForDisplay.filter((k) => k !== "分潤匯款日期");
+    const withoutRemit = payoutColsForDisplay.filter((k) => k !== "分潤匯款日期");
+    if (payoutWorkflowTab !== "settled") return withoutRemit;
+    const next = [...withoutRemit];
+    const nameAt = next.indexOf("專案名稱");
+    next.splice(nameAt >= 0 ? nameAt + 1 : next.length, 0, "分潤匯款日期");
+    return next;
   }, [payoutColsForDisplay, payoutWorkflowTab]);
   const financeVisibleCols = useMemo(() => getVisibleColumnKeys("finance"), [getVisibleColumnKeys]);
   const invoicesVisibleCols = useMemo(() => getVisibleColumnKeys("invoices"), [getVisibleColumnKeys]);
@@ -3522,23 +3570,35 @@ export default function DashboardPage() {
   }, []);
 
   const openCreateMasterBlank = useCallback(() => {
+    const meRow = users.find((user) => user.email === me?.email);
     setCreateForm(
-      emptyMasterCreateForm(
-        payoutDefaults as unknown as Record<string, string>,
-        masterSubTab !== "全部" ? masterSubTab : ""
+      stampNewProjectPm(
+        emptyMasterCreateForm(
+          payoutDefaults as unknown as Record<string, string>,
+          masterSubTab !== "全部" ? masterSubTab : ""
+        ),
+        String(me?.name ?? meRow?.name ?? "").trim(),
+        String(meRow?.直屬主管 ?? me?.直屬主管 ?? "").trim()
       )
     );
     setCreateMasterCopyFromLabel(null);
     setCreateError(null);
     setCreateSimilarAckKey("");
     setShowCreateMaster(true);
-  }, [payoutDefaults, masterSubTab]);
+  }, [payoutDefaults, masterSubTab, me, users]);
 
   /** 複製專案 → 關閉原詳情並開啟新增草稿（金額空白；不連動任務／財務） */
   const openCreateMasterFromCopy = useCallback(
     (source: MasterRow) => {
       if (!canMutate) return;
-      setCreateForm(buildMasterCreateFormFromCopy(source, payoutDefaults as unknown as Record<string, string>));
+      const meRow = users.find((user) => user.email === me?.email);
+      setCreateForm(
+        stampNewProjectPm(
+          buildMasterCreateFormFromCopy(source, payoutDefaults as unknown as Record<string, string>),
+          String(me?.name ?? meRow?.name ?? "").trim(),
+          String(meRow?.直屬主管 ?? me?.直屬主管 ?? "").trim()
+        )
+      );
       const srcName = String(source.專案名稱 ?? "").trim() || "—";
       const srcId = String(source.專案ID ?? "").trim() || "—";
       setCreateMasterCopyFromLabel(`${srcName}（${srcId}）`);
@@ -3551,7 +3611,7 @@ export default function DashboardPage() {
       setPendingDeleteMasterTaskTemplate(null);
       setShowCreateMaster(true);
     },
-    [canMutate, payoutDefaults]
+    [canMutate, payoutDefaults, me, users]
   );
 
   /**
@@ -4226,6 +4286,10 @@ export default function DashboardPage() {
     () => sumNumericColumn(searchedFinanceEmployeePayout as unknown as Record<string, unknown>[], "分潤金額"),
     [searchedFinanceEmployeePayout]
   );
+  const financeEmployeePaidDayGroups = useMemo(
+    () => (financeEmployeePayoutTab === "paid" ? groupPayoutRowsByRemitDate(searchedFinanceEmployeePayout) : []),
+    [financeEmployeePayoutTab, searchedFinanceEmployeePayout]
+  );
 
   const searchedPayout = useMemo(
     () =>
@@ -4239,6 +4303,10 @@ export default function DashboardPage() {
   const payoutListTotal = useMemo(
     () => sumNumericColumn(searchedPayout as unknown as Record<string, unknown>[], "分潤金額"),
     [searchedPayout]
+  );
+  const payoutSettledDayGroups = useMemo(
+    () => (payoutWorkflowTab === "settled" ? groupPayoutRowsByRemitDate(searchedPayout) : []),
+    [payoutWorkflowTab, searchedPayout]
   );
 
   function payoutRowClaimKind(row: PayoutRow): "claim" | "withdraw" | null {
@@ -4675,6 +4743,8 @@ export default function DashboardPage() {
       專案管理員分潤成數: selectedMaster.專案管理員分潤成數 ?? "",
       執行管理員: selectedMaster.執行管理員 ?? "",
       執行管理員分潤成數: selectedMaster.執行管理員分潤成數 ?? "",
+      直屬主管: selectedMaster.直屬主管 ?? "",
+      直屬主管分潤成數: selectedMaster.直屬主管分潤成數 ?? "",
       專案內容: selectedMaster.專案內容 ?? "",
       備註: selectedMaster.備註 ?? "",
       老師備註: selectedMaster.老師備註 ?? "",
@@ -4686,7 +4756,7 @@ export default function DashboardPage() {
       setVisibilityTables([]);
       setVisibilityColumns({});
       setVisibilityError(null);
-      setEditUserForm({ name: "", role: "", dept: "", scope: "" });
+      setEditUserForm({ name: "", role: "", dept: "", scope: "", 直屬主管: "" });
       setEditUserError(null);
       setUserSettingsTab("profile");
       setResetPasswordForm({ password: "", confirm: "" });
@@ -4698,6 +4768,7 @@ export default function DashboardPage() {
       role: selectedUserForVisibility.role ?? "",
       dept: selectedUserForVisibility.dept ?? "",
       scope: selectedUserForVisibility.scope ?? "",
+      直屬主管: selectedUserForVisibility.直屬主管 ?? "",
     });
     setEditUserError(null);
     setUserSettingsTab("profile");
@@ -7113,6 +7184,7 @@ export default function DashboardPage() {
                               : (displayRoles[0] ?? "經紀人"),
                         dept: "",
                         scope: "",
+                        直屬主管: "",
                       });
                       setCreateUserError(null);
                       setShowCreateUser(true);
@@ -8269,7 +8341,7 @@ export default function DashboardPage() {
                                         </table>
                                       </div>
                                     )}
-                                    {projectInvoices.length > 0 && (
+                                    {showHiddenMasterBlocks && projectInvoices.length > 0 && (
                                       <div className="mt-3">
                                         <PaymentCollectionLink 專案ID={pid} hasInvoices compact />
                                       </div>
@@ -9022,6 +9094,16 @@ export default function DashboardPage() {
                     </p>
                   </div>
                 )}
+                {createUserForm.role !== "KOL" ? (
+                  <SearchableSelectField
+                    label="直屬主管"
+                    value={createUserForm.直屬主管}
+                    onChange={(v) => setCreateUserForm((f) => ({ ...f, 直屬主管: v }))}
+                    options={employeeUserNames.filter((name) => name !== createUserForm.name.trim())}
+                    searchPlaceholder="搜尋員工…"
+                    emptyHint="可留空"
+                  />
+                ) : null}
               </div>
               <div className="mt-6 flex justify-end gap-3">
                 <button
@@ -10683,6 +10765,22 @@ export default function DashboardPage() {
                 </div>
               </div>
               <ListAmountSummary count={searchedPayout.length} amount={payoutListTotal} label="分潤金額合計" />
+              {payoutWorkflowTab === "settled" && payoutSettledDayGroups.length > 0 && (
+                <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {payoutSettledDayGroups.map((group) => (
+                    <div key={group.date} className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50/80 px-4 py-3">
+                      <div>
+                        <p className="text-[10px] font-bold tracking-wide text-emerald-800">匯款日</p>
+                        <p className="text-base font-bold tabular-nums text-stone-900">{group.date}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] font-medium text-emerald-800">{group.rows.length} 筆</p>
+                        <p className="text-lg font-bold tabular-nums text-emerald-950">{formatAmount(String(Math.round(group.total)))}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2">
                   {showPayoutClaimChecks ? (
@@ -10813,7 +10911,17 @@ export default function DashboardPage() {
                                 />
                               </p>
                             )}
+                            {payoutWorkflowTab === "settled" && (
+                              <p className="text-sm font-medium text-stone-700">
+                                <span className="text-stone-500">匯款日期</span> {String(row.分潤匯款日期 ?? "").trim() || "—"}
+                              </p>
+                            )}
                           </div>
+                        )}
+                        {payoutWorkflowTab === "settled" && !(showPct || showTitle) && (
+                          <p className={`text-sm font-medium text-stone-700 ${showAmt ? "mt-3" : ""}`}>
+                            <span className="text-stone-500">匯款日期</span> {String(row.分潤匯款日期 ?? "").trim() || "—"}
+                          </p>
                         )}
                         {/* 可摺疊：其餘可見欄位 */}
                         {hasExpandable && (
@@ -10842,9 +10950,6 @@ export default function DashboardPage() {
                                 )}
                                 {payoutVisibleCols.includes("廠商付款日期") && (
                                   <p><span className="text-stone-500">廠商付款日期</span> {String(r.廠商付款日期 ?? "—")}</p>
-                                )}
-                                {payoutWorkflowTab === "settled" && payoutVisibleCols.includes("分潤匯款日期") && (
-                                  <p><span className="text-stone-500">分潤匯款日期</span> {String(r.分潤匯款日期 ?? "—")}</p>
                                 )}
                                 {payoutVisibleCols.includes("分潤類型") && (
                                   <p>
@@ -11199,13 +11304,96 @@ export default function DashboardPage() {
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{financePayoutEditError}</p>
               )}
               <p className="mb-2 text-[11px] text-stone-500">
-                「已申請」是員工已經按下提領、還沒匯出的列。勾選後按下方「標記已付款」，<strong className="text-stone-600">僅董事長</strong>可操作。
+                {financeEmployeePayoutTab === "paid"
+                  ? "已付款依匯款日分開。看某一天匯出多少，對當天的銀行紀錄。"
+                  : "「已申請」是員工已經按下提領、還沒匯出的列。勾選後按下方「標記已付款」，僅董事長可操作。"}
               </p>
               <ListAmountSummary
                 count={searchedFinanceEmployeePayout.length}
                 amount={financeEmployeePayoutListTotal}
                 label="分潤金額合計"
               />
+              {financeEmployeePayoutTab === "paid" && financeEmployeePaidDayGroups.length > 0 ? (
+                <div className="space-y-4">
+                  {financeEmployeePaidDayGroups.map((group) => (
+                    <section key={group.date} className="overflow-hidden rounded-xl border border-emerald-200">
+                      <div className="flex items-center justify-between gap-4 bg-emerald-50 px-4 py-3">
+                        <div>
+                          <p className="text-[10px] font-bold tracking-wide text-emerald-800">匯款日</p>
+                          <p className="text-xl font-bold tabular-nums text-stone-900">{group.date}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs font-medium text-emerald-800">{group.rows.length} 筆</p>
+                          <p className="text-2xl font-bold tabular-nums text-emerald-950">{formatAmount(String(Math.round(group.total)))}</p>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-stone-200">
+                          <thead className="bg-stone-100">
+                            <tr>
+                              <th className="px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">已付款</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">專案</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">領取人</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">分潤類型</th>
+                              <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-stone-600">分潤金額</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">廠商付款日</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-stone-200 bg-white">
+                            {group.rows.map((row) => {
+                              const id = String(row.id ?? "").trim();
+                              const saving = id !== "" && financePayoutSavingIds.includes(id);
+                              const pid = String(row.專案ID ?? "").trim();
+                              const pname = String(row.專案名稱 ?? "").trim();
+                              const canTogglePaid = me?.role === "董事長";
+                              return (
+                                <tr key={id || `${pid}-${row.領取人}-${row.分潤類型}`} className="hover:bg-emerald-50/40">
+                                  <td className="px-3 py-3 align-middle">
+                                    <label
+                                      className={`inline-flex items-center gap-2 text-xs text-stone-700 ${
+                                        canTogglePaid && id && !saving ? "cursor-pointer" : "cursor-not-allowed opacity-70"
+                                      }`}
+                                      title={canTogglePaid ? undefined : "僅董事長可勾選已付款"}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked
+                                        disabled={saving || !id || !canTogglePaid}
+                                        onChange={(e) => {
+                                          if (!canTogglePaid) return;
+                                          void persistEmployeePayoutPaid(row, e.target.checked);
+                                        }}
+                                        className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400 disabled:opacity-50"
+                                      />
+                                      {saving ? "儲存中…" : "已付"}
+                                    </label>
+                                  </td>
+                                  <td className="px-4 py-3 text-sm">
+                                    <div className="max-w-xs truncate font-semibold text-stone-900" title={pname || pid || undefined}>
+                                      {pname || pid || "—"}
+                                    </div>
+                                    {pname && pid ? (
+                                      <div className="max-w-xs truncate text-[11px] text-stone-400" title={pid}>
+                                        {pid}
+                                      </div>
+                                    ) : null}
+                                  </td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-stone-900">{row.領取人 ?? "—"}</td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-600">{displayPayoutTypeLabel(row.分潤類型) || "—"}</td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold tabular-nums text-stone-900">
+                                    {formatAmount(row.分潤金額)}
+                                  </td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-stone-600">{row.廠商付款日期 ?? "—"}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              ) : (
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
                 {searchedFinanceEmployeePayout.length === 0 ? (
                   <p className="px-4 py-10 text-center text-sm text-stone-500">
@@ -11354,6 +11542,7 @@ export default function DashboardPage() {
                   </table>
                 )}
               </div>
+              )}
               {me?.role === "董事長" && financeEmployeePayoutTab !== "paid" && selectedFinancePayoutIds.length > 0 ? (
                 <div className="sticky bottom-4 z-40 mt-4">
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-white/95 px-4 py-3 shadow-xl ring-1 ring-emerald-100 backdrop-blur">
@@ -14010,18 +14199,18 @@ export default function DashboardPage() {
                 <section>
                   <h3 className="mb-3 text-base font-bold text-amber-800">人員與分潤設定</h3>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+                    <div>
+                      <Field label="專案PM" value={createForm.執行管理員 || "—"} />
+                      <p className="mt-1 text-xs text-stone-500">開立的人就是這個專案的專案PM，分潤 7.5%。</p>
+                    </div>
+                    <div>
+                      <Field label="主管" value={createForm.直屬主管 || "尚未設定"} />
+                      <p className="mt-1 text-xs text-stone-500">這位專案PM的主管。有主管時分潤 2.5%。這個專案只有這兩個角色。</p>
+                    </div>
                     <SearchableSelectField
                       label="KOL名稱"
                       value={createForm.KOL名稱}
-                      onChange={(v) => {
-                        const p = partnerByKolName.get(v.trim());
-                        setCreateForm((f) => ({
-                          ...f,
-                          KOL名稱: v,
-                          主管: f.主管.trim() || p?.主管 || "",
-                          KOL開發者: f.KOL開發者.trim() || p?.KOL開發者 || "",
-                        }));
-                      }}
+                      onChange={(v) => setCreateForm((f) => ({ ...f, KOL名稱: v }))}
                       options={kolNameOptionsFromDb}
                       searchPlaceholder="搜尋 KOL…"
                       emptyHint="尚無合作夥伴資料時請先至「合作夥伴」新增 KOL"
@@ -14033,56 +14222,6 @@ export default function DashboardPage() {
                       onAcknowledge={(on) => setCreateSimilarAckKey(on ? createSimilarKey : "")}
                     />
                     <InputField label="廠商名稱" value={createForm.廠商名稱} onChange={(v) => setCreateForm((f) => ({ ...f, 廠商名稱: v }))} />
-                    {isPayoutModeB(createForm.專案類型) ? (
-                      <>
-                        <SelectField
-                          label="專案開發人"
-                          value={createForm.專案開發人}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, 專案開發人: v }))}
-                          options={employeeUserNames}
-                        />
-                        <SelectField
-                          label="經紀人"
-                          value={createForm.經紀人}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, 經紀人: v }))}
-                          options={[...new Set([...employeeUserNames, createForm.經紀人].filter(Boolean))]}
-                        />
-                        <SelectField
-                          label="主管"
-                          value={createForm.主管}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, 主管: v }))}
-                          options={[...new Set([...employeeUserNames, createForm.主管].filter(Boolean))]}
-                        />
-                        <SelectField
-                          label="KOL引薦人"
-                          value={createForm.KOL開發者}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, KOL開發者: v }))}
-                          options={[...new Set([...employeeUserNames, createForm.KOL開發者].filter(Boolean))]}
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <SelectField label="專案BDPM" value={createForm.專案BDPM} onChange={(v) => setCreateForm((f) => ({ ...f, 專案BDPM: v }))} options={employeeUserNames} />
-                        <SelectField
-                          label="專案引薦人"
-                          value={createForm.專案引薦人}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, 專案引薦人: v }))}
-                          options={employeeUserNames}
-                        />
-                        <SelectField
-                          label="專案管理員"
-                          value={createForm.專案管理員}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, 專案管理員: v }))}
-                          options={employeeUserNames}
-                        />
-                        <SelectField
-                          label="執行管理員"
-                          value={createForm.執行管理員}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, 執行管理員: v }))}
-                          options={employeeUserNames}
-                        />
-                      </>
-                    )}
                   </div>
                 </section>
 
@@ -14254,6 +14393,19 @@ export default function DashboardPage() {
                       <p className="mt-1 text-xs leading-relaxed text-stone-500">經紀人常見：主管、* 或留空。</p>
                     </div>
                   )}
+                  {editUserForm.role !== "KOL" ? (
+                    <div className="sm:col-span-2">
+                      <SearchableSelectField
+                        label="直屬主管"
+                        value={editUserForm.直屬主管}
+                        onChange={(v) => setEditUserForm((f) => ({ ...f, 直屬主管: v }))}
+                        options={employeeUserNames.filter((name) => name !== editUserForm.name.trim())}
+                        searchPlaceholder="搜尋員工…"
+                        emptyHint="可留空"
+                      />
+                      <p className="mt-1 text-xs leading-relaxed text-stone-500">一個人一個直屬主管。之後新開的專案會帶這個人，並給 2.5% 分潤。已開的專案不會改。</p>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="mt-3 flex justify-end">
                   <button
@@ -14281,6 +14433,7 @@ export default function DashboardPage() {
                             role,
                             dept: editUserForm.dept.trim() || undefined,
                             scope: editUserForm.scope.trim() || undefined,
+                            直屬主管: editUserForm.直屬主管.trim(),
                           }),
                         });
                         const data = (await safeResJson(res)) as { ok?: boolean; error?: string; user?: User };
@@ -14597,6 +14750,8 @@ export default function DashboardPage() {
                       專案管理員分潤成數: selectedMaster.專案管理員分潤成數 ?? "",
                       執行管理員: selectedMaster.執行管理員 ?? "",
                       執行管理員分潤成數: selectedMaster.執行管理員分潤成數 ?? "",
+                      直屬主管: selectedMaster.直屬主管 ?? "",
+                      直屬主管分潤成數: selectedMaster.直屬主管分潤成數 ?? "",
                       專案內容: selectedMaster.專案內容 ?? "",
                       備註: selectedMaster.備註 ?? "",
                       老師備註: selectedMaster.老師備註 ?? "",
@@ -15153,6 +15308,7 @@ export default function DashboardPage() {
                 <MasterEditHistory logs={masterEditLogs} loading={masterEditLogsLoading} />
               ) : null}
 
+              {showHiddenMasterBlocks && (
               <section>
                 <h3 className="mb-3 text-base font-bold text-amber-800">收款表單</h3>
                 <PaymentCollectionLink
@@ -15161,8 +15317,9 @@ export default function DashboardPage() {
                   showSubmissions
                 />
               </section>
+              )}
 
-              {String(selectedMaster.KOL名稱 ?? "").trim() && (
+              {showHiddenMasterBlocks && String(selectedMaster.KOL名稱 ?? "").trim() && (
                 <section>
                   <h3 className="mb-3 text-base font-bold text-amber-800">KOL 請款發票</h3>
                   <p className="mb-3 text-xs text-stone-500">
@@ -15341,19 +15498,35 @@ export default function DashboardPage() {
               <section>
                 <h3 className="mb-3 text-base font-bold text-amber-800">人員與分潤設定</h3>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  <Field
+                    label={isTwoRolePayoutProject(selectedMaster) ? "專案PM" : "執行PM"}
+                    value={
+                      String((isEditingMaster ? editMasterForm.執行管理員 : selectedMaster?.執行管理員) ?? "").trim()
+                        ? `${isEditingMaster ? editMasterForm.執行管理員 : selectedMaster?.執行管理員 ?? ""}${
+                            String((isEditingMaster ? editMasterForm.執行管理員分潤成數 : selectedMaster?.執行管理員分潤成數) ?? "").trim()
+                              ? ` · ${isEditingMaster ? editMasterForm.執行管理員分潤成數 : selectedMaster?.執行管理員分潤成數 ?? ""}`
+                              : ""
+                          }`
+                        : "—"
+                    }
+                  />
+                  <Field
+                    label={isTwoRolePayoutProject(selectedMaster) ? "主管" : "直屬主管"}
+                    value={
+                      String((isEditingMaster ? editMasterForm.直屬主管 : selectedMaster?.直屬主管) ?? "").trim()
+                        ? `${isEditingMaster ? editMasterForm.直屬主管 : selectedMaster?.直屬主管 ?? ""}${
+                            String((isEditingMaster ? editMasterForm.直屬主管分潤成數 : selectedMaster?.直屬主管分潤成數) ?? "").trim()
+                              ? ` · ${isEditingMaster ? editMasterForm.直屬主管分潤成數 : selectedMaster?.直屬主管分潤成數 ?? ""}`
+                              : ""
+                          }`
+                        : "—"
+                    }
+                  />
                   {isEditingMaster ? (
                     <SearchableSelectField
                       label="KOL名稱"
                       value={editMasterForm.KOL名稱}
-                      onChange={(v) => {
-                        const p = partnerByKolName.get(v.trim());
-                        setEditMasterForm((f) => ({
-                          ...f,
-                          KOL名稱: v,
-                          主管: f.主管.trim() || p?.主管 || "",
-                          KOL開發者: f.KOL開發者.trim() || p?.KOL開發者 || "",
-                        }));
-                      }}
+                      onChange={(v) => setEditMasterForm((f) => ({ ...f, KOL名稱: v }))}
                       options={[...new Set([...kolNameOptionsFromDb, editMasterForm.KOL名稱].filter(Boolean))].sort((a, b) =>
                         a.localeCompare(b, "zh-Hant")
                       )}
@@ -15376,32 +15549,12 @@ export default function DashboardPage() {
                   ) : (
                     <Field label="廠商名稱" value={selectedMaster.廠商名稱} />
                   )}
-                  {isPayoutModeB(isEditingMaster ? editMasterForm.專案類型 : selectedMaster.專案類型 ?? "") ? (
+                  {!isTwoRolePayoutProject(selectedMaster) && (isPayoutModeB(isEditingMaster ? editMasterForm.專案類型 : selectedMaster.專案類型 ?? "") ? (
                     <>
                       {isEditingMaster ? (
                         <SelectField label="專案開發人" value={editMasterForm.專案開發人} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案開發人: v }))} options={employeeUserNames} />
                       ) : (
                         <Field label="專案開發人" value={selectedMaster.專案開發人} />
-                      )}
-                      {isEditingMaster ? (
-                        <SelectField
-                          label="經紀人"
-                          value={editMasterForm.經紀人}
-                          onChange={(v) => setEditMasterForm((f) => ({ ...f, 經紀人: v }))}
-                          options={[...new Set([...employeeUserNames, editMasterForm.經紀人].filter(Boolean))]}
-                        />
-                      ) : (
-                        <Field label="經紀人" value={selectedMaster.經紀人} />
-                      )}
-                      {isEditingMaster ? (
-                        <SelectField
-                          label="主管"
-                          value={editMasterForm.主管}
-                          onChange={(v) => setEditMasterForm((f) => ({ ...f, 主管: v }))}
-                          options={[...new Set([...employeeUserNames, editMasterForm.主管].filter(Boolean))]}
-                        />
-                      ) : (
-                        <Field label="主管" value={selectedMaster.主管 || selectedMasterPartner?.主管} />
                       )}
                       {isEditingMaster ? (
                         <SelectField
@@ -15436,13 +15589,8 @@ export default function DashboardPage() {
                       ) : (
                         <Field label="專案管理員" value={selectedMaster.專案管理員} />
                       )}
-                      {isEditingMaster ? (
-                        <SelectField label="執行管理員" value={editMasterForm.執行管理員} onChange={(v) => setEditMasterForm((f) => ({ ...f, 執行管理員: v }))} options={employeeUserNames} />
-                      ) : (
-                        <Field label="執行管理員" value={selectedMaster.執行管理員} />
-                      )}
                     </>
-                  )}
+                  ))}
                 </div>
               </section>
 

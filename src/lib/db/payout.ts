@@ -6,7 +6,7 @@
 import { getSupabase } from "@/lib/supabase/server";
 import { log } from "@/lib/log";
 import { parsePayoutRate, parseAmount } from "@/lib/payout-utils";
-import { isPayoutModeB } from "@/config/master-payout-defaults";
+import { isPayoutModeB, isTwoRolePayoutProject } from "@/config/master-payout-defaults";
 import { calc專案營收 } from "@/config/project-types";
 import type { MasterRow } from "@/lib/db/master";
 import { getMasterList, todayYmdTaipei } from "@/lib/db/master";
@@ -513,6 +513,40 @@ async function restoreRemitDatesByRecipient(專案ID: string, snapshots: Map<str
   }
 }
 
+/** 只用專案上已寫下的成數。成數空白就不產生列，避免舊專案被新預設補上。 */
+function pushStoredRole(
+  rows: PayoutInsertRow[],
+  input: {
+    專案ID: string;
+    專案名稱: string | null;
+    專案總金額未稅: string | null;
+    專案營收: string | null;
+    廠商預計付款日: string | null;
+    amount: number;
+    分潤類型: string;
+    領取人: string | null | undefined;
+    成數: string | null | undefined;
+  }
+) {
+  const person = String(input.領取人 ?? "").trim();
+  const rateStr = String(input.成數 ?? "").trim();
+  if (!person || !rateStr) return;
+  const rate = parsePayoutRate(rateStr);
+  rows.push({
+    專案ID: input.專案ID,
+    專案名稱: input.專案名稱,
+    專案總金額未稅: input.專案總金額未稅,
+    專案營收: input.專案營收,
+    廠商預計付款日: input.廠商預計付款日,
+    廠商付款日期: null,
+    分潤匯款日期: null,
+    分潤類型: input.分潤類型,
+    分潤成數: rateStr,
+    分潤金額: String(Math.round(input.amount * rate)),
+    領取人: person,
+  });
+}
+
 async function buildPayoutRowsForMaster(
   master: MasterRow,
   defaults: PayoutDefaults,
@@ -528,6 +562,32 @@ async function buildPayoutRowsForMaster(
   const 專案類型 = (master.專案類型 ?? "").trim();
   const 廠商預計付款日 = master.廠商預計付款日?.trim() || null;
   const rows: PayoutInsertRow[] = [];
+
+  if (isTwoRolePayoutProject(master)) {
+    pushStoredRole(rows, {
+      專案ID,
+      專案名稱,
+      專案總金額未稅,
+      專案營收,
+      廠商預計付款日,
+      amount,
+      分潤類型: "專案PM",
+      領取人: master.執行管理員,
+      成數: master.執行管理員分潤成數,
+    });
+    pushStoredRole(rows, {
+      專案ID,
+      專案名稱,
+      專案總金額未稅,
+      專案營收,
+      廠商預計付款日,
+      amount,
+      分潤類型: "主管",
+      領取人: master.直屬主管,
+      成數: master.直屬主管分潤成數,
+    });
+    return rows;
+  }
 
   if (isPayoutModeB(專案類型)) {
     const 專案開發人 = master.專案開發人 ?? null;
@@ -557,7 +617,7 @@ async function buildPayoutRowsForMaster(
       {
         key: "主管分潤成數",
         分潤類型: "主管",
-        領取人: master.主管?.trim() || kol?.主管?.trim() || null,
+        領取人: master.主管?.trim() || null,
       },
       {
         key: "KOL開發者分潤成數",
@@ -612,6 +672,31 @@ async function buildPayoutRowsForMaster(
         領取人,
       });
     }
+  }
+
+  pushStoredRole(rows, {
+    專案ID,
+    專案名稱,
+    專案總金額未稅,
+    專案營收,
+    廠商預計付款日,
+    amount,
+    分潤類型: "直屬主管",
+    領取人: master.直屬主管,
+    成數: master.直屬主管分潤成數,
+  });
+  if (isPayoutModeB(專案類型)) {
+    pushStoredRole(rows, {
+      專案ID,
+      專案名稱,
+      專案總金額未稅,
+      專案營收,
+      廠商預計付款日,
+      amount,
+      分潤類型: "執行管理員",
+      領取人: master.執行管理員,
+      成數: master.執行管理員分潤成數,
+    });
   }
 
   return rows;

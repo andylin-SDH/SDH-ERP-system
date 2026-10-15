@@ -13,4 +13,6 @@ export interface User {
   dept: string;
   scope?: Scope;
   activeFlag?: boolean;
+  /** 直屬主管姓名。只在新開專案時抄到該專案。 */
+  直屬主管?: string;
 }

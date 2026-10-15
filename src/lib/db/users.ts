@@ -15,7 +15,14 @@ function rowToUser(r: Record<string, unknown>): User {
   const dept = (r["dept"] ?? r["部門"] ?? "") as string;
   const scope = r["scope"] as string | undefined;
   const activeFlag = (r["active_flag"] ?? false) as boolean;
-  return { email, name, role, dept, scope, activeFlag };
+  const 直屬主管 = String(r["直屬主管"] ?? "").trim();
+  return { email, name, role, dept, scope, activeFlag, 直屬主管: 直屬主管 || undefined };
+}
+
+/** 只認「直屬主管」這一欄還沒建。不能把所有 42703 都當成這欄，否則中文帳號表（沒有 email 欄）會在改查帳號前就被丟出。 */
+function missingSupervisorColumn(error: { code?: string; message?: string } | null): boolean {
+  const message = String(error?.message ?? "");
+  return message.includes("直屬主管");
 }
 
 export interface CreateUserInput {
@@ -25,6 +32,7 @@ export interface CreateUserInput {
   role: string;
   dept?: string;
   scope?: string;
+  直屬主管?: string;
 }
 
 export interface UpdateUserInput {
@@ -33,6 +41,7 @@ export interface UpdateUserInput {
   dept?: string;
   scope?: string;
   password?: string;
+  直屬主管?: string;
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -57,6 +66,7 @@ export async function createUser(payload: CreateUserInput): Promise<User> {
     dept: payload.dept?.trim() || null,
     scope: payload.scope?.trim() || null,
     active_flag: true,
+    直屬主管: payload.直屬主管?.trim() || null,
   };
   const insertZh = {
     帳號: email,
@@ -67,7 +77,14 @@ export async function createUser(payload: CreateUserInput): Promise<User> {
     scope: payload.scope?.trim() || null,
     active_flag: true,
   };
-  const { data: dataEn, error: errEn } = await supabase.from("users").insert(insertEn).select("email, name, role, dept, scope, active_flag").maybeSingle();
+  const { data: dataEn, error: errEn } = await supabase.from("users").insert(insertEn).select("email, name, role, dept, scope, active_flag, 直屬主管").maybeSingle();
+  if (errEn && missingSupervisorColumn(errEn)) {
+    delete (insertEn as { 直屬主管?: string | null }).直屬主管;
+    const retry = await supabase.from("users").insert(insertEn).select("email, name, role, dept, scope, active_flag").maybeSingle();
+    if (retry.error) throw retry.error;
+    if (!retry.data) throw new Error("新增使用者失敗");
+    return rowToUser(retry.data as unknown as Record<string, unknown>);
+  }
   if (!errEn && dataEn) {
     log("users.db", "createUser 成功（英文欄位）", { email });
     return rowToUser(dataEn as unknown as Record<string, unknown>);
@@ -97,6 +114,7 @@ export async function updateUser(email: string, payload: UpdateUserInput): Promi
   if (payload.role !== undefined) updatesEn.role = payload.role.trim();
   if (payload.dept !== undefined) updatesEn.dept = payload.dept?.trim() || null;
   if (payload.scope !== undefined) updatesEn.scope = payload.scope?.trim() || null;
+  if (payload.直屬主管 !== undefined) updatesEn.直屬主管 = payload.直屬主管?.trim() || null;
   if (payload.password !== undefined && payload.password.trim()) updatesEn.password = payload.password.trim();
 
   const updatesZh: Record<string, unknown> = {};
@@ -110,8 +128,20 @@ export async function updateUser(email: string, payload: UpdateUserInput): Promi
     .from("users")
     .update(updatesEn)
     .eq("email", raw)
-    .select("email, name, role, dept, scope, active_flag")
+    .select("email, name, role, dept, scope, active_flag, 直屬主管")
     .maybeSingle();
+
+  if (errEn && missingSupervisorColumn(errEn)) {
+    delete updatesEn.直屬主管;
+    const retry = await supabase
+      .from("users")
+      .update(updatesEn)
+      .eq("email", raw)
+      .select("email, name, role, dept, scope, active_flag")
+      .maybeSingle();
+    if (retry.error) throw retry.error;
+    if (retry.data) return rowToUser(retry.data as unknown as Record<string, unknown>);
+  }
 
   if (!errEn && dataEn) {
     log("users.db", "updateUser 成功（英文欄位）", { email: raw?.slice(0, 25) });
@@ -174,20 +204,31 @@ export async function getUsers(): Promise<User[]> {
   const supabase = getSupabase();
   const { data: dataEn, error: errEn } = await supabase
     .from("users")
-    .select("email, name, role, dept, scope, active_flag")
+    .select("email, name, role, dept, scope, active_flag, 直屬主管")
     .eq("active_flag", true)
     .order("email");
+  if (errEn && missingSupervisorColumn(errEn)) {
+    const retry = await supabase
+      .from("users")
+      .select("email, name, role, dept, scope, active_flag")
+      .eq("active_flag", true)
+      .order("email");
+    if (retry.error) throw retry.error;
+    return (retry.data ?? []).map((r) => rowToUser(r as unknown as Record<string, unknown>));
+  }
   if (!errEn && dataEn?.length) {
     return (dataEn ?? []).map((r) => rowToUser(r as unknown as Record<string, unknown>));
   }
-  const { data, error } = await supabase
-    .from("users")
-    // Supabase select parser 對中文欄位需加上雙引號
-    .select('"帳號","姓名","角色","部門","scope","active_flag"')
-    .eq("active_flag", true)
-    .order("帳號");
-  if (error) throw error;
-  return (data ?? []).map((r) => rowToUser(r as unknown as Record<string, unknown>));
+  const zhSelect = '"帳號","姓名","角色","部門","scope","active_flag","直屬主管"';
+  const zhSelectBase = '"帳號","姓名","角色","部門","scope","active_flag"';
+  const zh = await supabase.from("users").select(zhSelect).eq("active_flag", true).order("帳號");
+  if (zh.error && missingSupervisorColumn(zh.error)) {
+    const retry = await supabase.from("users").select(zhSelectBase).eq("active_flag", true).order("帳號");
+    if (retry.error) throw retry.error;
+    return (retry.data ?? []).map((r) => rowToUser(r as unknown as Record<string, unknown>));
+  }
+  if (zh.error) throw zh.error;
+  return (zh.data ?? []).map((r) => rowToUser(r as unknown as Record<string, unknown>));
 }
 
 function normalizeEmail(s: string): string {
@@ -216,9 +257,19 @@ export async function getUserByEmail(email: string): Promise<User | null> {
   const supabase = getSupabase();
   const { data: dataEn, error: errEn } = await supabase
     .from("users")
-    .select("email, name, role, dept, scope, active_flag")
+    .select("email, name, role, dept, scope, active_flag, 直屬主管")
     .eq("email", raw)
     .maybeSingle();
+  if (errEn && missingSupervisorColumn(errEn)) {
+    const retry = await supabase
+      .from("users")
+      .select("email, name, role, dept, scope, active_flag")
+      .eq("email", raw)
+      .maybeSingle();
+    if (retry.error) throw retry.error;
+    if (!retry.data) return null;
+    return rowToUser(retry.data as unknown as Record<string, unknown>);
+  }
   if (!errEn && dataEn) {
     const foundRecord = dataEn as unknown as Record<string, unknown>;
     log("users.db", "getUserByEmail 找到使用者（英文欄位）", {
@@ -232,12 +283,21 @@ export async function getUserByEmail(email: string): Promise<User | null> {
   } else {
     log("users.db", "getUserByEmail 英文欄位無列，改試帳號", { raw });
   }
-  const { data: dataZh, error: errZh } = await supabase
+  const zhSelect = '"帳號","姓名","角色","部門","scope","active_flag","直屬主管"';
+  let { data: dataZh, error: errZh } = await supabase
     .from("users")
-    // Supabase select parser 對中文欄位需加上雙引號
-    .select('"帳號","姓名","角色","部門","scope","active_flag"')
+    .select(zhSelect)
     .eq("帳號", raw)
     .maybeSingle();
+  if (errZh && missingSupervisorColumn(errZh)) {
+    const retry = await supabase
+      .from("users")
+      .select('"帳號","姓名","角色","部門","scope","active_flag"')
+      .eq("帳號", raw)
+      .maybeSingle();
+    dataZh = retry.data;
+    errZh = retry.error;
+  }
   if (errZh) {
     log("users.db", "getUserByEmail 查詢錯誤", { error: String(errZh?.message) });
     throw errZh;
