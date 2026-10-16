@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Fragment, startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
@@ -16,6 +16,7 @@ import { buildPaidDuplicatePeers, findSimilarProjectNames, paidDuplicateAlertLin
 import { SimilarProjectNotice } from "@/components/master/SimilarProjectNotice";
 import { PaidDuplicateAlert } from "@/components/master/PaidDuplicateNotice";
 import { MasterProjectProgress } from "@/components/master/MasterProjectProgress";
+import { MasterCaseCard } from "@/components/master/MasterCaseCard";
 import { PaymentCollectionLink } from "@/components/PaymentCollectionLink";
 import { PaymentCollectionLinkIcon } from "@/components/PaymentCollectionLinkIcon";
 import { MasterEditHistory, type MasterEditLogItem } from "@/components/MasterEditHistory";
@@ -4551,12 +4552,25 @@ export default function DashboardPage() {
     () => searchedMasterList.slice(0, masterRenderCount),
     [searchedMasterList, masterRenderCount]
   );
+  /** 未完成任務數按專案預先加總，避免每張卡片都掃一遍 tasks */
+  const openTaskCountByProjectId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const t of tasks) {
+      if (Boolean(t.任務完成)) continue;
+      const id = String(t.專案ID ?? "").trim().toLowerCase();
+      if (!id) continue;
+      map.set(id, (map.get(id) ?? 0) + 1);
+    }
+    return map;
+  }, [tasks]);
+  const expandedMasterTreeIdSet = useMemo(() => new Set(expandedMasterTreeIds), [expandedMasterTreeIds]);
+  const selectedMasterProjectId = String(selectedMaster?.專案ID ?? "").trim();
   /** 大總表巢狀列：僅在母案「展開子專案」時插入子列（預設收合） */
   const visibleMasterDisplayItems = useMemo(() => {
     type Item = { row: MasterRow; depth: number; rowIndex: number };
     const items: Item[] = [];
     let rowIndex = 0;
-    const treeOpen = new Set(expandedMasterTreeIds);
+    const treeOpen = expandedMasterTreeIdSet;
     const walk = (row: MasterRow, depth: number) => {
       items.push({ row, depth, rowIndex: rowIndex++ });
       const pid = String(row.專案ID ?? "").trim();
@@ -4566,7 +4580,61 @@ export default function DashboardPage() {
     };
     for (const row of visibleMasterRows) walk(row, 0);
     return items;
-  }, [visibleMasterRows, masterChildrenByParentId, expandedMasterTreeIds]);
+  }, [visibleMasterRows, masterChildrenByParentId, expandedMasterTreeIdSet]);
+  const selectedMasterProjectIdRef = useRef(selectedMasterProjectId);
+  selectedMasterProjectIdRef.current = selectedMasterProjectId;
+  const masterDetailPaneRef = useRef(masterDetailPane);
+  masterDetailPaneRef.current = masterDetailPane;
+  const selectMasterFromCard = useCallback((row: MasterRow, pane: "project" | "tasks") => {
+    const pid = String(row.專案ID ?? "").trim();
+    const same =
+      selectedMasterProjectIdRef.current === pid && masterDetailPaneRef.current === pane;
+    setSelectedMaster(row);
+    setMasterDetailPane(pane);
+    startTransition(() => {
+      setIsEditingMaster(false);
+      setSaveMasterError(null);
+    });
+    window.requestAnimationFrame(() => {
+      document.getElementById("master-detail-dock")?.scrollIntoView({
+        behavior: same ? "auto" : "smooth",
+        block: "nearest",
+      });
+    });
+  }, []);
+  const selectMasterProjectFromCard = useCallback(
+    (row: MasterRow) => selectMasterFromCard(row, "project"),
+    [selectMasterFromCard]
+  );
+  const selectMasterTasksFromCard = useCallback(
+    (row: MasterRow) => selectMasterFromCard(row, "tasks"),
+    [selectMasterFromCard]
+  );
+  const toggleMasterTreeFromCard = useCallback(
+    (e: ReactMouseEvent, projectId: string) => {
+      e.stopPropagation();
+      const id = String(projectId ?? "").trim();
+      if (!id) return;
+      setExpandedMasterTreeIds((prev) => {
+        if (prev.includes(id)) {
+          const hideIds = new Set<string>();
+          const collect = (parentId: string) => {
+            for (const kid of masterChildrenByParentId.get(parentId) ?? []) {
+              const kidId = String(kid.專案ID ?? "").trim();
+              if (!kidId || hideIds.has(kidId)) continue;
+              hideIds.add(kidId);
+              collect(kidId);
+            }
+          };
+          collect(id);
+          setExpandedProjectId((cur) => (cur && hideIds.has(String(cur).trim()) ? null : cur));
+          return prev.filter((x) => x !== id && !hideIds.has(x));
+        }
+        return [...prev, id];
+      });
+    },
+    [masterChildrenByParentId]
+  );
   const visiblePayoutRows = useMemo(
     () => searchedPayout.slice(0, payoutRenderCount),
     [searchedPayout, payoutRenderCount]
@@ -4659,6 +4727,10 @@ export default function DashboardPage() {
       setInlineStatusSavingId(null);
     }
   }
+
+  const changeMasterStatusFromCard = useCallback((row: MasterRow, next: string) => {
+    void updateProjectStatusInline(row, next);
+  }, [inlineStatusSavingId, masterEditLogsOpen]);
 
   useEffect(() => {
     if (activeSection !== "master") return;
@@ -8248,196 +8320,41 @@ export default function DashboardPage() {
                     </div>
                   ) : (
                     visibleMasterDisplayItems.map(({ row, depth }) => {
-                      const pid = row.專案ID ?? "";
-                      const projectTasksOpen = tasks.filter(
-                        (t) =>
-                          (t.專案ID ?? "").trim().toLowerCase() === String(pid).trim().toLowerCase() &&
-                          !Boolean(t.任務完成)
-                      );
-                      const projectChildren = masterChildrenByParentId.get(String(pid).trim()) ?? [];
-                      const treeOpen = expandedMasterTreeIds.includes(String(pid).trim());
-                      const toggleMasterTree = (e: ReactMouseEvent) => {
-                        e.stopPropagation();
-                        const id = String(pid).trim();
-                        if (!id) return;
-                        setExpandedMasterTreeIds((prev) => {
-                          if (prev.includes(id)) {
-                            const hideIds = new Set<string>();
-                            const collect = (parentId: string) => {
-                              for (const kid of masterChildrenByParentId.get(parentId) ?? []) {
-                                const kidId = String(kid.專案ID ?? "").trim();
-                                if (!kidId || hideIds.has(kidId)) continue;
-                                hideIds.add(kidId);
-                                collect(kidId);
-                              }
-                            };
-                            collect(id);
-                            setExpandedProjectId((cur) =>
-                              cur && hideIds.has(String(cur).trim()) ? null : cur
-                            );
-                            return prev.filter((x) => x !== id && !hideIds.has(x));
-                          }
-                          return [...prev, id];
-                        });
-                      };
+                      const pid = String(row.專案ID ?? "").trim();
+                      const pidKey = pid.toLowerCase();
                       return (
-                        <Fragment key={`${depth}-${row.id ?? pid}`}>
-                          <div
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => {
-                              setSelectedMaster(row);
-                              setIsEditingMaster(false);
-                              setSaveMasterError(null);
-                              setMasterDetailPane("project");
-                              window.setTimeout(() => {
-                                document.getElementById("master-detail-dock")?.scrollIntoView({
-                                  behavior: "smooth",
-                                  block: "nearest",
-                                });
-                              }, 50);
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key !== "Enter" && e.key !== " ") return;
-                              e.preventDefault();
-                              setSelectedMaster(row);
-                              setIsEditingMaster(false);
-                              setSaveMasterError(null);
-                              setMasterDetailPane("project");
-                              window.setTimeout(() => {
-                                document.getElementById("master-detail-dock")?.scrollIntoView({
-                                  behavior: "smooth",
-                                  block: "nearest",
-                                });
-                              }, 50);
-                            }}
-                            className={`rounded-2xl border p-3.5 text-left shadow-sm transition ${
-                              String(selectedMaster?.專案ID ?? "").trim() === String(pid).trim()
-                                ? "border-emerald-600 bg-emerald-50/70 ring-2 ring-emerald-600/15"
-                                : "border-stone-200 bg-white hover:border-amber-200 hover:bg-amber-50/40"
-                            } ${depth > 0 ? "ml-4 border-l-4 border-l-sky-400" : ""}`}
-                          >
-                            {(() => {
-                              const projectName = String(row.專案名稱 ?? "").trim() || "—";
-                              const kolName = String(row.KOL名稱 ?? "").trim();
-                              const vendorName = String(row.廠商名稱 ?? "").trim();
-                              const pmName = String(row.執行管理員 ?? "").trim();
-                              const openedOn = String(row.開案日期 ?? "").trim();
-                              const statusText = String(row.專案狀態 ?? "").trim();
-                              const childCount = projectChildren.length;
-                              const rowId = String(row.id ?? "").trim();
-                              const statusOptions = [...new Set([...projectStatusOptions, statusText].filter(Boolean))];
-                              const closedish = /結案|完成|取消/.test(statusText);
-                              const taskActive =
-                                String(selectedMaster?.專案ID ?? "").trim() === String(pid).trim() &&
-                                masterDetailPane === "tasks";
-                              return (
-                                <>
-                                  <div className="flex items-start justify-between gap-2">
-                                    <p className="min-w-0 break-words text-sm font-semibold leading-snug text-stone-900">{projectName}</p>
-                                    {depth > 0 ? (
-                                      <span className="shrink-0 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-800">子專案</span>
-                                    ) : null}
-                                  </div>
-                                  <p className="mt-1 text-[11px] leading-relaxed text-stone-500">
-                                    <span
-                                      className={kolName || vendorName ? "font-bold" : "font-medium text-stone-400"}
-                                      style={
-                                        kolName || vendorName
-                                          ? { color: "#40A0C8" }
-                                          : undefined
-                                      }
-                                    >
-                                      {kolName || vendorName || "未填案主"}
-                                    </span>
-                                    <span className="text-stone-300"> · </span>
-                                    <span>{pmName ? `${pmName}負責` : "未填專案PM"}</span>
-                                    <span className="text-stone-300"> · </span>
-                                    <span>{openedOn || "未填開案日"}</span>
-                                  </p>
-                                  <div className="mt-2 flex flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                                    <select
-                                      value={statusText}
-                                      disabled={inlineStatusSavingId === rowId}
-                                      onChange={(e) => {
-                                        void updateProjectStatusInline(row, e.target.value);
-                                      }}
-                                      className={`max-w-[10rem] rounded-full border px-2 py-0.5 text-[11px] font-semibold focus:outline-none disabled:opacity-60 ${
-                                        closedish
-                                          ? "border-emerald-300 bg-emerald-100 text-emerald-900"
-                                          : "border-amber-300 bg-amber-100 text-amber-950"
-                                      }`}
-                                      title={statusText || "未設定"}
-                                    >
-                                      <option value="">未設定</option>
-                                      {statusOptions.map((s) => (
-                                        <option key={s} value={s}>
-                                          {s}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedMaster(row);
-                                        setIsEditingMaster(false);
-                                        setSaveMasterError(null);
-                                        setMasterDetailPane("tasks");
-                                        window.setTimeout(() => {
-                                          document.getElementById("master-detail-dock")?.scrollIntoView({
-                                            behavior: "smooth",
-                                            block: "nearest",
-                                          });
-                                        }, 50);
-                                      }}
-                                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                                        taskActive
-                                          ? "border-teal-600 bg-teal-700 text-white"
-                                          : projectTasksOpen.length > 0
-                                            ? "border-teal-200 bg-teal-50 text-teal-900 hover:bg-teal-100"
-                                            : "border-stone-200 bg-stone-50 text-stone-600 hover:bg-stone-100"
-                                      }`}
-                                    >
-                                      任務 {projectTasksOpen.length}
-                                    </button>
-                                    {childCount > 0 ? (
-                                      <button
-                                        type="button"
-                                        onClick={toggleMasterTree}
-                                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                                          treeOpen
-                                            ? "border-sky-500 bg-sky-600 text-white"
-                                            : "border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100"
-                                        }`}
-                                      >
-                                        {treeOpen ? "收合" : "子專案"} {childCount}
-                                      </button>
-                                    ) : null}
-                                    {row.長期案 ? (
-                                      <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-800">長期案</span>
-                                    ) : null}
-                                  </div>
-                                </>
-                              );
-                            })()}
-                          </div>
-                        </Fragment>
+                        <MasterCaseCard
+                          key={`${depth}-${row.id ?? pid}`}
+                          row={row}
+                          depth={depth}
+                          selected={selectedMasterProjectId === pid}
+                          taskActive={selectedMasterProjectId === pid && masterDetailPane === "tasks"}
+                          openTaskCount={openTaskCountByProjectId.get(pidKey) ?? 0}
+                          childCount={(masterChildrenByParentId.get(pid) ?? []).length}
+                          treeOpen={expandedMasterTreeIdSet.has(pid)}
+                          statusOptions={projectStatusOptions}
+                          statusSaving={inlineStatusSavingId === String(row.id ?? "").trim()}
+                          onSelectProject={selectMasterProjectFromCard}
+                          onSelectTasks={selectMasterTasksFromCard}
+                          onToggleTree={toggleMasterTreeFromCard}
+                          onStatusChange={changeMasterStatusFromCard}
+                        />
                       );
                     })
                   )}
                 </div>
               </div>
-              <div id="master-detail-dock" className="sticky top-4 min-h-[28rem] min-w-0">
-                <div
-                  ref={setMasterDetailHost}
-                  className={selectedMaster ? "min-h-[28rem]" : "hidden"}
-                />
-                {selectedMaster ? null : (
+              <div
+                id="master-detail-dock"
+                ref={setMasterDetailHost}
+                className="sticky top-4 min-h-[28rem] min-w-0"
+              >
+                {!selectedMaster ? (
                   <div className="rounded-2xl border border-dashed border-emerald-200 bg-gradient-to-br from-emerald-50/80 via-white to-amber-50/60 p-6">
                     <p className="text-sm font-semibold text-emerald-900">選左邊的專案</p>
                     <p className="mt-2 text-sm leading-relaxed text-stone-500">點一張卡片看這個專案。點卡片上的「任務」則直接看任務。</p>
                   </div>
-                )}
+                ) : null}
               </div>
             </div>
             {searchedMasterList.length > visibleMasterRows.length && (
@@ -16009,7 +15926,7 @@ export default function DashboardPage() {
             </div>
           </div>
           );
-          // 大總表詳情只進右欄，絕不改成浮窗；host 尚未掛上時這輪先不畫，下一輪會補上
+          // 大總表詳情只進右欄，絕不改成浮窗。host 用 dock 本身，進大總表就會掛上。
           if (activeSection !== "master" || !masterDetailHost) return null;
           return createPortal(panel, masterDetailHost);
         })()}
