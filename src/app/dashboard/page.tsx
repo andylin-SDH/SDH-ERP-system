@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
 import type { User } from "@/lib/types";
@@ -14,6 +15,7 @@ import type { MasterRow } from "@/lib/db/master";
 import { buildPaidDuplicatePeers, findSimilarProjectNames, paidDuplicateAlertLines } from "@/lib/master/similar-name";
 import { SimilarProjectNotice } from "@/components/master/SimilarProjectNotice";
 import { PaidDuplicateAlert } from "@/components/master/PaidDuplicateNotice";
+import { MasterProjectProgress } from "@/components/master/MasterProjectProgress";
 import { PaymentCollectionLink } from "@/components/PaymentCollectionLink";
 import { PaymentCollectionLinkIcon } from "@/components/PaymentCollectionLinkIcon";
 import { MasterEditHistory, type MasterEditLogItem } from "@/components/MasterEditHistory";
@@ -22,6 +24,13 @@ import { formatTaipeiDateTime, getTaipeiDateString } from "@/lib/taiwan-date";
 import { downloadTableAsExcelCsv } from "@/lib/export/download-table-excel";
 import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, PaymentRecordRow } from "@/modules/finance";
 import { sortInvoicesByInvoiceNumber, sortInvoicesForLedger } from "@/modules/finance";
+import { invoiceIsVoided, isEInvoiceTrackNumber } from "@/lib/invoice/ledger";
+import {
+  invoiceEInvoiceLaunchLabel,
+  invoiceEInvoiceLockedMessage,
+  isInvoiceEInvoiceLive,
+} from "@/lib/invoice/launch";
+import { InvoiceReviewPanel } from "@/components/invoice/InvoiceReviewPanel";
 import type { FinanceUpdateFields } from "@/lib/db/finance";
 import type { PayoutRow } from "@/lib/db/payout";
 import {
@@ -35,7 +44,7 @@ import { PROJECT_TYPES, calc專案營收, kolExtraCostHint, projectRevenueFormul
 import { DEFAULT_PROJECT_STATUS_OPTIONS } from "@/config/project-status-defaults";
 import { DEFAULT_PROJECT_EXPENSE_TYPE_OPTIONS } from "@/config/project-expense-type-defaults";
 import { DEFAULT_TASK_TYPE_OPTIONS } from "@/config/task-type-defaults";
-import { MASTER_PAYOUT_DEFAULTS, isPayoutModeB } from "@/config/master-payout-defaults";
+import { MASTER_PAYOUT_DEFAULTS, isCompanySupervisor, isPayoutModeB, isTwoRolePayoutProject, projectSupervisorForOpener } from "@/config/master-payout-defaults";
 import type { PayoutDedupeRulesByMode } from "@/config/payout-dedupe-defaults";
 import { TABLE_KEYS, TABLE_LABELS, TABLE_COLUMNS, ROLE_SECTION_KEYS_FOR_UI } from "@/config/table-columns";
 import {
@@ -111,10 +120,10 @@ const PAYOUT_DISPLAY_ORDER = [
   "分潤金額",
   "分潤成數",
   "專案名稱",
+  "分潤匯款日期",
   "專案ID",
   "廠商預計付款日",
   "廠商付款日期",
-  "分潤匯款日期",
   "專案營收",
   "專案總金額未稅",
   "分潤類型",
@@ -856,6 +865,33 @@ function TaskProjectInfoButton({
   /** 金額僅專案相關人員／全權角色可見 */
   showAmounts?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; placeAbove: boolean }>({
+    top: 0,
+    left: 0,
+    placeAbove: false,
+  });
+  const anchorRef = useRef<HTMLSpanElement>(null);
+
+  const updatePos = useCallback(() => {
+    const el = anchorRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const width = 288;
+    const margin = 8;
+    let left = r.left;
+    if (left + width > window.innerWidth - margin) {
+      left = Math.max(margin, window.innerWidth - width - margin);
+    }
+    if (left < margin) left = margin;
+    const placeAbove = r.bottom + 280 > window.innerHeight - margin;
+    setPos({
+      top: placeAbove ? r.top - 6 : r.bottom + 6,
+      left,
+      placeAbove,
+    });
+  }, []);
+
   if (!project) return null;
   const fields = [
     ["KOL名稱", String(project.KOL名稱 ?? "").trim() || "—"],
@@ -872,12 +908,28 @@ function TaskProjectInfoButton({
         ] as const)
       : ([] as const)),
     ["專案狀態", project.專案狀態 || "—"],
-    ["廠商名稱", project.廠商名稱 || "—"],
+    ["廠商名稱（發票抬頭）", project.廠商名稱 || "—"],
+    ["統一編號", project.統一編號 || "—"],
+    ["收件人 Email", project.收件人Email || "—"],
     ["預計付款日", formatPartnerDateDisplay(project.廠商預計付款日)],
   ] as const;
 
   return (
-    <span className="group relative inline-flex" onClick={(e) => e.stopPropagation()}>
+    <span
+      ref={anchorRef}
+      className="relative inline-flex"
+      onClick={(e) => e.stopPropagation()}
+      onMouseEnter={() => {
+        updatePos();
+        setOpen(true);
+      }}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => {
+        updatePos();
+        setOpen(true);
+      }}
+      onBlur={() => setOpen(false)}
+    >
       <button
         type="button"
         className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-amber-300 bg-amber-50 text-[11px] font-bold text-amber-800 shadow-sm transition hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-300/70"
@@ -885,40 +937,52 @@ function TaskProjectInfoButton({
       >
         i
       </button>
-      <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 hidden w-72 -translate-x-1/2 rounded-xl border border-amber-200 bg-white p-3 text-left text-xs shadow-2xl ring-1 ring-stone-200/70 group-hover:block group-focus-within:block">
-        <span className="mb-2 block border-b border-stone-100 pb-2">
-          <span className="block break-words whitespace-normal text-sm font-bold leading-snug text-stone-900">{project.專案名稱 || project.專案ID}</span>
-          <span className="mt-0.5 block truncate text-[11px] text-stone-500">{project.專案ID}</span>
-        </span>
-        <span className="grid grid-cols-2 gap-x-3 gap-y-2">
-          {fields.map(([label, value]) => (
-            <span key={label} className={label === "KOL名稱" ? "col-span-2 min-w-0" : "min-w-0"}>
-              <span className="block text-[10px] font-semibold text-stone-400">{label}</span>
-              <span
-                className={
-                  label === "KOL名稱"
-                    ? "mt-0.5 block break-words whitespace-normal font-semibold text-stone-900"
-                    : "mt-0.5 block truncate font-medium text-stone-700"
-                }
-              >
-                {value}
-              </span>
+      {open ? (
+        <span
+          className="pointer-events-none fixed z-[80] w-72 rounded-xl border border-amber-200 bg-white p-3 text-left text-xs shadow-2xl ring-1 ring-stone-200/70"
+          style={{
+            top: pos.top,
+            left: pos.left,
+            transform: pos.placeAbove ? "translateY(-100%)" : undefined,
+          }}
+          role="tooltip"
+        >
+          <span className="mb-2 block border-b border-stone-100 pb-2">
+            <span className="block break-words whitespace-normal text-sm font-bold leading-snug text-stone-900">
+              {project.專案名稱 || project.專案ID}
             </span>
-          ))}
+            <span className="mt-0.5 block truncate text-[11px] text-stone-500">{project.專案ID}</span>
+          </span>
+          <span className="grid grid-cols-2 gap-x-3 gap-y-2">
+            {fields.map(([label, value]) => (
+              <span key={label} className={label === "KOL名稱" ? "col-span-2 min-w-0" : "min-w-0"}>
+                <span className="block text-[10px] font-semibold text-stone-400">{label}</span>
+                <span
+                  className={
+                    label === "KOL名稱"
+                      ? "mt-0.5 block break-words whitespace-normal font-semibold text-stone-900"
+                      : "mt-0.5 block truncate font-medium text-stone-700"
+                  }
+                >
+                  {value}
+                </span>
+              </span>
+            ))}
+          </span>
+          {project.專案內容 ? (
+            <span className="mt-2 block border-t border-stone-100 pt-2">
+              <span className="block text-[10px] font-semibold text-stone-400">專案內容</span>
+              <span className="mt-0.5 block line-clamp-3 whitespace-normal text-stone-600">{project.專案內容}</span>
+            </span>
+          ) : null}
+          {project.老師備註 ? (
+            <span className="mt-2 block border-t border-stone-100 pt-2">
+              <span className="block text-[10px] font-semibold text-stone-400">給老師的備註</span>
+              <span className="mt-0.5 block line-clamp-3 whitespace-normal text-stone-600">{project.老師備註}</span>
+            </span>
+          ) : null}
         </span>
-        {project.專案內容 ? (
-          <span className="mt-2 block border-t border-stone-100 pt-2">
-            <span className="block text-[10px] font-semibold text-stone-400">專案內容</span>
-            <span className="mt-0.5 block line-clamp-3 whitespace-normal text-stone-600">{project.專案內容}</span>
-          </span>
-        ) : null}
-        {project.老師備註 ? (
-          <span className="mt-2 block border-t border-stone-100 pt-2">
-            <span className="block text-[10px] font-semibold text-stone-400">給老師的備註</span>
-            <span className="mt-0.5 block line-clamp-3 whitespace-normal text-stone-600">{project.老師備註}</span>
-          </span>
-        ) : null}
-      </span>
+      ) : null}
     </span>
   );
 }
@@ -1140,6 +1204,28 @@ function ListAmountSummary({ count, amount, label }: { count: number; amount: nu
   );
 }
 
+/** 已匯出的分潤依匯款日彙總，方便對「某一天匯了多少」。 */
+function groupPayoutRowsByRemitDate(rows: PayoutRow[]): Array<{ date: string; rows: PayoutRow[]; total: number }> {
+  const groups = new Map<string, PayoutRow[]>();
+  for (const row of rows) {
+    const date = String(row.分潤匯款日期 ?? "").trim() || "未填匯款日";
+    const list = groups.get(date);
+    if (list) list.push(row);
+    else groups.set(date, [row]);
+  }
+  return [...groups.entries()]
+    .map(([date, groupRows]) => ({
+      date,
+      rows: groupRows,
+      total: groupRows.reduce((sum, row) => sum + parseNumericField(row.分潤金額), 0),
+    }))
+    .sort((a, b) => {
+      if (a.date === "未填匯款日") return 1;
+      if (b.date === "未填匯款日") return -1;
+      return b.date.localeCompare(a.date);
+    });
+}
+
 type InvoiceSummary = {
   rows: InvoiceRow[];
   count: number;
@@ -1253,6 +1339,8 @@ type MasterCreateFormState = {
   KOL開發者: string;
   專案費用類型: string;
   廠商名稱: string;
+  統一編號: string;
+  收件人Email: string;
   專案資料夾: string;
   專案BDPM: string;
   專案BDPM分潤成數: string;
@@ -1264,6 +1352,8 @@ type MasterCreateFormState = {
   專案管理員分潤成數: string;
   執行管理員: string;
   執行管理員分潤成數: string;
+  直屬主管: string;
+  直屬主管分潤成數: string;
   專案內容: string;
   備註: string;
   老師備註: string;
@@ -1294,6 +1384,8 @@ function emptyMasterCreateForm(payoutDefaults: Record<string, string>, 專案類
     KOL開發者: "",
     專案費用類型: "",
     廠商名稱: "",
+    統一編號: "",
+    收件人Email: "",
     專案資料夾: "",
     專案BDPM: "",
     專案BDPM分潤成數: payoutDefaults.專案BDPM分潤成數 ?? "",
@@ -1305,6 +1397,8 @@ function emptyMasterCreateForm(payoutDefaults: Record<string, string>, 專案類
     專案管理員分潤成數: payoutDefaults.專案管理員分潤成數 ?? "",
     執行管理員: "",
     執行管理員分潤成數: payoutDefaults.執行管理員分潤成數 ?? "",
+    直屬主管: "",
+    直屬主管分潤成數: "",
     專案內容: "",
     備註: "",
     老師備註: "",
@@ -1317,7 +1411,7 @@ function emptyMasterCreateForm(payoutDefaults: Record<string, string>, 專案類
  */
 function buildMasterCreateFormFromCopy(
   source: MasterRow,
-  payoutDefaults: Record<string, string>
+  _payoutDefaults: Record<string, string>
 ): MasterCreateFormState {
   const today = new Date().toISOString().slice(0, 10);
   return {
@@ -1337,26 +1431,26 @@ function buildMasterCreateFormFromCopy(
     KOL費用未稅: "",
     KOL應收額外成本: "",
     KOL名稱: String(source.KOL名稱 ?? "").trim(),
-    經紀人: String(source.經紀人 ?? "").trim(),
-    主管: String(source.主管 ?? "").trim(),
-    KOL開發者: String(source.KOL開發者 ?? "").trim(),
+    經紀人: "",
+    主管: "",
+    KOL開發者: "",
     專案費用類型: String(source.專案費用類型 ?? "").trim(),
     廠商名稱: String(source.廠商名稱 ?? "").trim(),
+    統一編號: String(source.統一編號 ?? "").trim(),
+    收件人Email: String(source.收件人Email ?? "").trim(),
     專案資料夾: String(source.專案資料夾 ?? "").trim(),
-    專案BDPM: String(source.專案BDPM ?? "").trim(),
-    專案BDPM分潤成數: String(source.專案BDPM分潤成數 ?? "").trim() || (payoutDefaults.專案BDPM分潤成數 ?? ""),
-    專案引薦人: String(source.專案引薦人 ?? "").trim(),
-    專案引薦人分潤成數:
-      String(source.專案引薦人分潤成數 ?? "").trim() || (payoutDefaults.專案引薦人分潤成數 ?? ""),
-    專案開發人: String(source.專案開發人 ?? "").trim(),
-    專案開發人分潤成數:
-      String(source.專案開發人分潤成數 ?? "").trim() || (payoutDefaults.專案開發人分潤成數 ?? ""),
-    專案管理員: String(source.專案管理員 ?? "").trim(),
-    專案管理員分潤成數:
-      String(source.專案管理員分潤成數 ?? "").trim() || (payoutDefaults.專案管理員分潤成數 ?? ""),
-    執行管理員: String(source.執行管理員 ?? "").trim(),
-    執行管理員分潤成數:
-      String(source.執行管理員分潤成數 ?? "").trim() || (payoutDefaults.執行管理員分潤成數 ?? ""),
+    專案BDPM: "",
+    專案BDPM分潤成數: "",
+    專案引薦人: "",
+    專案引薦人分潤成數: "",
+    專案開發人: "",
+    專案開發人分潤成數: "",
+    專案管理員: "",
+    專案管理員分潤成數: "",
+    執行管理員: "",
+    執行管理員分潤成數: "7.5%",
+    直屬主管: "",
+    直屬主管分潤成數: "",
     專案內容: String(source.專案內容 ?? "").trim(),
     備註: String(source.備註 ?? "").trim(),
     老師備註: String(source.老師備註 ?? "").trim(),
@@ -1366,7 +1460,26 @@ function buildMasterCreateFormFromCopy(
 const OVERVIEW_SCOPE_STORAGE_KEY = "sdh-dashboard-overview-scope";
 
 /** 大總表上與「這個人與專案有關」可能對得上的欄位（姓名／Email 需與 Users 一致） */
-const MASTER_RELATED_FIELD_KEYS = ["專案BDPM", "專案引薦人", "專案開發人", "專案管理員", "執行管理員", "KOL名稱", "經紀人", "主管", "KOL開發者"] as const;
+const MASTER_RELATED_FIELD_KEYS = ["專案BDPM", "專案引薦人", "專案開發人", "專案管理員", "執行管理員", "直屬主管", "KOL名稱", "經紀人", "主管", "KOL開發者"] as const;
+
+/** 大總表先不顯示這些區塊，資料與表單留著。用 boolean 讓型別檢查仍走得到裡面。 */
+const showHiddenMasterBlocks = false as boolean;
+
+function stampNewProjectPm(
+  form: MasterCreateFormState,
+  pmName: string,
+  supervisor: string,
+  openerIsSupervisor: boolean
+): MasterCreateFormState {
+  const boss = projectSupervisorForOpener(pmName, supervisor, openerIsSupervisor);
+  return {
+    ...form,
+    執行管理員: pmName.trim(),
+    執行管理員分潤成數: "7.5%",
+    直屬主管: boss,
+    直屬主管分潤成數: boss ? "2.5%" : "",
+  };
+}
 
 /** 列表不顯示；僅專案詳情內、且相關人員／全權角色可見 */
 const MASTER_LIST_HIDDEN_AMOUNT_KEYS = new Set([
@@ -1383,6 +1496,8 @@ const MASTER_LIST_HIDDEN_KEYS = new Set([
   "KOL名稱",
   "專案費用類型",
   "廠商名稱",
+  "統一編號",
+  "收件人Email",
   "廠商預計付款日",
   "專案引薦人",
   /** 結案會進「已結案」分頁；列表不必再佔一欄下拉 */
@@ -1471,13 +1586,11 @@ function isMasterRowRelatedToUser(
 
   if (isPayoutModeB(String(row.專案類型 ?? ""))) {
     if (fieldMatchesUser(row.經紀人, userName, userEmail)) return true;
-    for (const key of ["主管", "KOL開發者"] as const) {
-      const cell = row[key];
-      if (fieldMatchesUser(cell, userName, userEmail)) return true;
-      if (!String(cell ?? "").trim()) {
-        const p = partnerByKolName.get(String(row.KOL名稱 ?? "").trim());
-        if (fieldMatchesUser(p?.[key], userName, userEmail)) return true;
-      }
+    if (fieldMatchesUser(row.主管, userName, userEmail)) return true;
+    if (fieldMatchesUser(row.KOL開發者, userName, userEmail)) return true;
+    if (!String(row.KOL開發者 ?? "").trim()) {
+      const p = partnerByKolName.get(String(row.KOL名稱 ?? "").trim());
+      if (fieldMatchesUser(p?.KOL開發者, userName, userEmail)) return true;
     }
   } else {
     for (const key of ["專案BDPM", "專案管理員", "執行管理員"] as const) {
@@ -1587,7 +1700,11 @@ function masterTableCellText(
     if (!modeB) return "";
     return String(row.經紀人 ?? "").trim();
   }
-  if (colKey === "主管" || colKey === "KOL開發者") {
+  if (colKey === "主管") {
+    if (!modeB) return "";
+    return String(row.主管 ?? "").trim();
+  }
+  if (colKey === "KOL開發者") {
     if (!modeB) return "";
     const fromMaster = String((row as MasterRow)[colKey as keyof MasterRow] ?? "").trim();
     if (fromMaster) return fromMaster;
@@ -1771,9 +1888,14 @@ export default function DashboardPage() {
     })
   );
   const [selectedMaster, setSelectedMaster] = useState<MasterRow | null>(null);
+  const [masterDetailHost, setMasterDetailHost] = useState<HTMLDivElement | null>(null);
+  const [masterDetailPane, setMasterDetailPane] = useState<"project" | "tasks">("project");
   const [isEditingMaster, setIsEditingMaster] = useState(false);
   const [masterEditLogs, setMasterEditLogs] = useState<MasterEditLogItem[]>([]);
   const [masterEditLogsLoading, setMasterEditLogsLoading] = useState(false);
+  const [masterEditLogsOpen, setMasterEditLogsOpen] = useState(false);
+  const [masterEditLogsLoadedFor, setMasterEditLogsLoadedFor] = useState("");
+  const masterEditLogRequestRef = useRef("");
   const [showDeleteMasterConfirm, setShowDeleteMasterConfirm] = useState(false);
   const [deletingMaster, setDeletingMaster] = useState(false);
   const [savingMaster, setSavingMaster] = useState(false);
@@ -1819,6 +1941,8 @@ export default function DashboardPage() {
     主管: "",
     KOL開發者: "",
     廠商名稱: "",
+    統一編號: "",
+    收件人Email: "",
     專案BDPM: "",
     專案BDPM分潤成數: "",
     專案引薦人: "",
@@ -1829,6 +1953,8 @@ export default function DashboardPage() {
     專案管理員分潤成數: "",
     執行管理員: "",
     執行管理員分潤成數: "",
+    直屬主管: "",
+    直屬主管分潤成數: "",
     專案內容: "",
     備註: "",
     老師備註: "",
@@ -1894,13 +2020,14 @@ export default function DashboardPage() {
   const [visibilityColumns, setVisibilityColumns] = useState<Record<string, string[]>>({});
   const [savingVisibility, setSavingVisibility] = useState(false);
   const [visibilityError, setVisibilityError] = useState<string | null>(null);
-  const [editUserForm, setEditUserForm] = useState<{ name: string; role: string; dept: string; scope: string }>({ name: "", role: "", dept: "", scope: "", });
+  const [editUserForm, setEditUserForm] = useState<{ name: string; role: string; dept: string; scope: string; 直屬主管: string }>({ name: "", role: "", dept: "", scope: "", 直屬主管: "" });
   const [userSettingsTab, setUserSettingsTab] = useState<"profile" | "password" | "visibility">("profile");
   const [resetPasswordForm, setResetPasswordForm] = useState({ password: "", confirm: "" });
   const [savingResetPassword, setSavingResetPassword] = useState(false);
   const [resetPasswordNotice, setResetPasswordNotice] = useState<string | null>(null);
   const [savingUser, setSavingUser] = useState(false);
   const [editUserError, setEditUserError] = useState<string | null>(null);
+  const [profileSavedHint, setProfileSavedHint] = useState<string | null>(null);
   const [myVisibility, setMyVisibility] = useState<{
     tables: string[];
     columns: Record<string, string[]>;
@@ -1927,7 +2054,7 @@ export default function DashboardPage() {
   /** 董事長：總覽為「與我有關」或「全公司」（其餘角色僅與我有關） */
   const [overviewScope, setOverviewScopeState] = useState<"mine" | "company">("mine");
   const [showCreateUser, setShowCreateUser] = useState(false);
-  const [createUserForm, setCreateUserForm] = useState({ email: "", name: "", password: "", role: "經紀人", dept: "", scope: "" });
+  const [createUserForm, setCreateUserForm] = useState({ email: "", name: "", password: "", role: "經紀人", dept: "", scope: "", 直屬主管: "" });
   const [creatingUser, setCreatingUser] = useState(false);
   const [createUserError, setCreateUserError] = useState<string | null>(null);
   const [showCreatePartner, setShowCreatePartner] = useState(false);
@@ -2115,6 +2242,7 @@ export default function DashboardPage() {
   const [extraBonusEditingId, setExtraBonusEditingId] = useState<string | null>(null);
   const [extraBonusSaving, setExtraBonusSaving] = useState(false);
   const [extraBonusError, setExtraBonusError] = useState<string | null>(null);
+  const [extraBonusOpen, setExtraBonusOpen] = useState(false);
   /** Dashboard 分頁搜尋關鍵字（各區塊獨立） */
   const [masterSearch, setMasterSearch] = useState("");
   /** 大總表：依專案類型子分頁（「全部」= 不篩類型） */
@@ -2182,6 +2310,7 @@ export default function DashboardPage() {
     | "kolRemittance"
     | "kolPortalView"
     | "invoices"
+    | "invoiceReview"
     | "payments"
     | "collectionSubmissions"
   >("employeePayout");
@@ -2263,6 +2392,9 @@ export default function DashboardPage() {
   /** 發票清冊排序（獨立下拉，不點表頭） */
   const [invoiceListDateSortMode, setInvoiceListDateSortMode] = useState<InvoiceListDateSortMode>("dateDesc");
   const [showInvoiceCreateModal, setShowInvoiceCreateModal] = useState(false);
+  const [voidInvoiceTarget, setVoidInvoiceTarget] = useState<{ number: string } | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+  const [voidingInvoice, setVoidingInvoice] = useState(false);
   const [showInvoicePasteImportModal, setShowInvoicePasteImportModal] = useState(false);
   const [invoicePasteText, setInvoicePasteText] = useState("");
   const [invoiceDraftRows, setInvoiceDraftRows] = useState<Array<Record<string, string>>>([]);
@@ -2363,13 +2495,13 @@ export default function DashboardPage() {
     return { tasks: tasksN, payouts: payoutsN };
   }, [selectedMaster, tasks, payoutList]);
   const selectedMasterExtraBonuses = useMemo(() => {
-    if (!selectedMaster) return [] as PayoutRow[];
+    if (!extraBonusOpen || !selectedMaster) return [] as PayoutRow[];
     const pid = String(selectedMaster.專案ID ?? "").trim();
     if (!pid) return [];
     return payoutList.filter(
       (p) => String(p.專案ID ?? "").trim() === pid && isExtraBonusPayoutType(p.分潤類型)
     );
-  }, [selectedMaster, payoutList]);
+  }, [extraBonusOpen, selectedMaster, payoutList]);
   const selectedMasterHasInvoices = useMemo(() => {
     if (!selectedMaster) return false;
     const pid = String(selectedMaster.專案ID ?? "").trim();
@@ -2472,6 +2604,7 @@ export default function DashboardPage() {
   }, [selectedMaster?.專案ID, selectedMaster?.長期案, loadMasterTaskTemplates]);
 
   useEffect(() => {
+    setExtraBonusOpen(false);
     setExtraBonusDraftRecipient("");
     setExtraBonusDraftAmount("");
     setExtraBonusEditingId(null);
@@ -2776,16 +2909,23 @@ export default function DashboardPage() {
       setMasterEditLogs([]);
       return;
     }
+    masterEditLogRequestRef.current = pid;
     setMasterEditLogsLoading(true);
     try {
       const res = await fetch(`/api/master/edit-log?專案ID=${encodeURIComponent(pid)}`, {
         cache: "no-store",
       });
       const data = (await safeResJson(res)) as { ok?: boolean; logs?: MasterEditLogItem[] };
-      if (res.ok && Array.isArray(data.logs)) setMasterEditLogs(data.logs);
-      else setMasterEditLogs([]);
+      if (masterEditLogRequestRef.current !== pid) return;
+      if (res.ok && Array.isArray(data.logs)) {
+        setMasterEditLogs(data.logs);
+        setMasterEditLogsLoadedFor(pid);
+      } else {
+        setMasterEditLogs([]);
+        setMasterEditLogsLoadedFor("");
+      }
     } finally {
-      setMasterEditLogsLoading(false);
+      if (masterEditLogRequestRef.current === pid) setMasterEditLogsLoading(false);
     }
   }, []);
 
@@ -3087,13 +3227,15 @@ export default function DashboardPage() {
       if (!visibilitySubject || isFullAccessRole(visibilitySubject.role)) return rows;
       const raw = visibilityRules[tableKey] ?? [];
       const matchFields = (Array.isArray(raw) ? raw : []).map((f) => String(f).trim()).filter(Boolean);
-      if (matchFields.length === 0) return rows;
+      const fields =
+        tableKey === "master" ? [...new Set([...matchFields, "執行管理員", "直屬主管"])] : matchFields;
+      if (fields.length === 0) return rows;
       const uName = (visibilitySubject.name ?? "").trim();
       const uEmail = (visibilitySubject.email ?? "").trim();
       return rows.filter((row) => {
-        for (const key of matchFields) {
+        for (const key of fields) {
           let val = String((row as unknown as Record<string, unknown>)[key] ?? "").trim();
-          if (!val && tableKey === "master" && (key === "主管" || key === "KOL開發者")) {
+          if (!val && tableKey === "master" && key === "KOL開發者") {
             const r = row as unknown as MasterRow;
             const p = partnerByKolName.get(String(r.KOL名稱 ?? "").trim());
             val = String((p as Record<string, unknown> | undefined)?.[key] ?? "").trim();
@@ -3360,10 +3502,14 @@ export default function DashboardPage() {
   );
   /** 分潤表實際欄順序：與權限／可見欄位一致，但全角色統一為「分潤金額優先」 */
   const payoutColsForDisplay = useMemo(() => sortPayoutColumnsForDisplay(payoutVisibleCols), [payoutVisibleCols]);
-  /** 待結帳／待分潤不顯示「分潤匯款日期」（有值即已分潤，僅在已分潤分頁有意義） */
+  /** 待結帳／待分潤不顯示匯款日期。已分潤一定顯示標記當天的日期。 */
   const payoutColsForActiveWorkflowTab = useMemo(() => {
-    if (payoutWorkflowTab === "settled") return payoutColsForDisplay;
-    return payoutColsForDisplay.filter((k) => k !== "分潤匯款日期");
+    const withoutRemit = payoutColsForDisplay.filter((k) => k !== "分潤匯款日期");
+    if (payoutWorkflowTab !== "settled") return withoutRemit;
+    const next = [...withoutRemit];
+    const nameAt = next.indexOf("專案名稱");
+    next.splice(nameAt >= 0 ? nameAt + 1 : next.length, 0, "分潤匯款日期");
+    return next;
   }, [payoutColsForDisplay, payoutWorkflowTab]);
   const financeVisibleCols = useMemo(() => getVisibleColumnKeys("finance"), [getVisibleColumnKeys]);
   const invoicesVisibleCols = useMemo(() => getVisibleColumnKeys("invoices"), [getVisibleColumnKeys]);
@@ -3464,29 +3610,52 @@ export default function DashboardPage() {
   }, [masterList]);
 
   useEffect(() => {
+    masterEditLogRequestRef.current = "";
+    setMasterEditLogsOpen(false);
+    setMasterEditLogs([]);
+    setMasterEditLogsLoadedFor("");
+    setMasterEditLogsLoading(false);
+  }, [selectedMaster?.專案ID]);
+
+  const toggleMasterEditLogs = useCallback(() => {
     const pid = String(selectedMaster?.專案ID ?? "").trim();
-    if (!pid) {
-      setMasterEditLogs([]);
+    if (masterEditLogsOpen) {
+      setMasterEditLogsOpen(false);
       return;
     }
+    setMasterEditLogsOpen(true);
+    if (!pid || masterEditLogsLoadedFor === pid) return;
     void fetchMasterEditLogs(pid);
-  }, [selectedMaster?.專案ID, fetchMasterEditLogs]);
+  }, [selectedMaster?.專案ID, masterEditLogsOpen, masterEditLogsLoadedFor, fetchMasterEditLogs]);
 
   const openProjectDetailById = useCallback(
     (projectId: string) => {
       const master = masterByProjectId.get(projectId.trim());
       if (!master) return;
+      setActiveSection("master");
       setSelectedMaster(master);
       setIsEditingMaster(false);
       setSaveMasterError(null);
       setShowDeleteMasterConfirm(false);
       setPendingDeleteMasterTaskTemplate(null);
+      setMasterDetailPane("project");
       window.setTimeout(() => {
-        document.getElementById("master-project-content")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        document.getElementById("master-detail-dock")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       }, 80);
     },
     [masterByProjectId]
   );
+
+  /** 離開大總表就關掉專案詳情，避免跑去別的分頁變成浮窗 */
+  useEffect(() => {
+    if (activeSection === "master") return;
+    setSelectedMaster(null);
+    setIsEditingMaster(false);
+    setSaveMasterError(null);
+    setShowDeleteMasterConfirm(false);
+    setPendingDeleteMasterTaskTemplate(null);
+    setMasterDetailPane("project");
+  }, [activeSection]);
 
   const createSimilarMatches = useMemo(
     () =>
@@ -3522,23 +3691,45 @@ export default function DashboardPage() {
   }, []);
 
   const openCreateMasterBlank = useCallback(() => {
+    const meRow = users.find((user) => user.email === me?.email);
+    const pmName = String(me?.name ?? meRow?.name ?? "").trim();
     setCreateForm(
-      emptyMasterCreateForm(
-        payoutDefaults as unknown as Record<string, string>,
-        masterSubTab !== "全部" ? masterSubTab : ""
+      stampNewProjectPm(
+        emptyMasterCreateForm(
+          payoutDefaults as unknown as Record<string, string>,
+          masterSubTab !== "全部" ? masterSubTab : ""
+        ),
+        pmName,
+        String(meRow?.直屬主管 ?? me?.直屬主管 ?? "").trim(),
+        isCompanySupervisor(
+          pmName,
+          users.map((user) => user.直屬主管 ?? "")
+        )
       )
     );
     setCreateMasterCopyFromLabel(null);
     setCreateError(null);
     setCreateSimilarAckKey("");
     setShowCreateMaster(true);
-  }, [payoutDefaults, masterSubTab]);
+  }, [payoutDefaults, masterSubTab, me, users]);
 
   /** 複製專案 → 關閉原詳情並開啟新增草稿（金額空白；不連動任務／財務） */
   const openCreateMasterFromCopy = useCallback(
     (source: MasterRow) => {
       if (!canMutate) return;
-      setCreateForm(buildMasterCreateFormFromCopy(source, payoutDefaults as unknown as Record<string, string>));
+      const meRow = users.find((user) => user.email === me?.email);
+      const pmName = String(me?.name ?? meRow?.name ?? "").trim();
+      setCreateForm(
+        stampNewProjectPm(
+          buildMasterCreateFormFromCopy(source, payoutDefaults as unknown as Record<string, string>),
+          pmName,
+          String(meRow?.直屬主管 ?? me?.直屬主管 ?? "").trim(),
+          isCompanySupervisor(
+            pmName,
+            users.map((user) => user.直屬主管 ?? "")
+          )
+        )
+      );
       const srcName = String(source.專案名稱 ?? "").trim() || "—";
       const srcId = String(source.專案ID ?? "").trim() || "—";
       setCreateMasterCopyFromLabel(`${srcName}（${srcId}）`);
@@ -3551,7 +3742,7 @@ export default function DashboardPage() {
       setPendingDeleteMasterTaskTemplate(null);
       setShowCreateMaster(true);
     },
-    [canMutate, payoutDefaults]
+    [canMutate, payoutDefaults, me, users]
   );
 
   /**
@@ -3650,11 +3841,10 @@ export default function DashboardPage() {
     if (!q) return;
     for (const row of searchedMasterHits) {
       const parentId = String(row.母專案ID ?? "").trim();
-      if (parentId) {
-        setExpandedProjectId(parentId);
-        setExpandedMasterTreeIds((prev) => (prev.includes(parentId) ? prev : [...prev, parentId]));
-        return;
-      }
+        if (parentId) {
+          setExpandedMasterTreeIds((prev) => (prev.includes(parentId) ? prev : [...prev, parentId]));
+          return;
+        }
     }
   }, [deferredMasterSearch, searchedMasterHits]);
 
@@ -4226,6 +4416,10 @@ export default function DashboardPage() {
     () => sumNumericColumn(searchedFinanceEmployeePayout as unknown as Record<string, unknown>[], "分潤金額"),
     [searchedFinanceEmployeePayout]
   );
+  const financeEmployeePaidDayGroups = useMemo(
+    () => (financeEmployeePayoutTab === "paid" ? groupPayoutRowsByRemitDate(searchedFinanceEmployeePayout) : []),
+    [financeEmployeePayoutTab, searchedFinanceEmployeePayout]
+  );
 
   const searchedPayout = useMemo(
     () =>
@@ -4239,6 +4433,10 @@ export default function DashboardPage() {
   const payoutListTotal = useMemo(
     () => sumNumericColumn(searchedPayout as unknown as Record<string, unknown>[], "分潤金額"),
     [searchedPayout]
+  );
+  const payoutSettledDayGroups = useMemo(
+    () => (payoutWorkflowTab === "settled" ? groupPayoutRowsByRemitDate(searchedPayout) : []),
+    [payoutWorkflowTab, searchedPayout]
   );
 
   function payoutRowClaimKind(row: PayoutRow): "claim" | "withdraw" | null {
@@ -4430,6 +4628,8 @@ export default function DashboardPage() {
           KOL名稱: row.KOL名稱 ?? "",
           經紀人: row.經紀人 ?? "",
           廠商名稱: row.廠商名稱 ?? "",
+          統一編號: row.統一編號 ?? "",
+          收件人Email: row.收件人Email ?? "",
           專案BDPM: row.專案BDPM ?? "",
           專案引薦人: row.專案引薦人 ?? "",
           專案開發人: row.專案開發人 ?? "",
@@ -4450,7 +4650,8 @@ export default function DashboardPage() {
         if (!prev || prev.id !== data.master!.id) return prev;
         return data.master!;
       });
-      void fetchMasterEditLogs(data.master.專案ID);
+      if (masterEditLogsOpen) void fetchMasterEditLogs(data.master.專案ID);
+      else setMasterEditLogsLoadedFor("");
       await refreshDashboardData(["master", "payout", "finance"]);
     } catch (err) {
       setInlineStatusError(err instanceof Error ? err.message : "更新專案狀態失敗");
@@ -4665,6 +4866,8 @@ export default function DashboardPage() {
       主管: selectedMaster.主管 ?? "",
       KOL開發者: selectedMaster.KOL開發者 ?? "",
       廠商名稱: selectedMaster.廠商名稱 ?? "",
+      統一編號: selectedMaster.統一編號 ?? "",
+      收件人Email: selectedMaster.收件人Email ?? "",
       專案BDPM: selectedMaster.專案BDPM ?? "",
       專案BDPM分潤成數: selectedMaster.專案BDPM分潤成數 ?? "",
       專案引薦人: selectedMaster.專案引薦人 ?? "",
@@ -4675,29 +4878,45 @@ export default function DashboardPage() {
       專案管理員分潤成數: selectedMaster.專案管理員分潤成數 ?? "",
       執行管理員: selectedMaster.執行管理員 ?? "",
       執行管理員分潤成數: selectedMaster.執行管理員分潤成數 ?? "",
+      直屬主管: selectedMaster.直屬主管 ?? "",
+      直屬主管分潤成數: selectedMaster.直屬主管分潤成數 ?? "",
       專案內容: selectedMaster.專案內容 ?? "",
       備註: selectedMaster.備註 ?? "",
       老師備註: selectedMaster.老師備註 ?? "",
     });
   }, [selectedMaster]);
 
+  const editUserEmailRef = useRef("");
   useEffect(() => {
     if (!selectedUserForVisibility) {
+      editUserEmailRef.current = "";
       setVisibilityTables([]);
       setVisibilityColumns({});
       setVisibilityError(null);
-      setEditUserForm({ name: "", role: "", dept: "", scope: "" });
+      setEditUserForm({ name: "", role: "", dept: "", scope: "", 直屬主管: "" });
       setEditUserError(null);
+      setProfileSavedHint(null);
       setUserSettingsTab("profile");
       setResetPasswordForm({ password: "", confirm: "" });
       setResetPasswordNotice(null);
       return;
     }
+    const email = selectedUserForVisibility.email;
+    if (editUserEmailRef.current === email) {
+      setEditUserForm((form) => ({
+        ...form,
+        直屬主管: selectedUserForVisibility.直屬主管 ?? form.直屬主管,
+      }));
+      return;
+    }
+    editUserEmailRef.current = email;
+    setProfileSavedHint(null);
     setEditUserForm({
       name: selectedUserForVisibility.name ?? "",
       role: selectedUserForVisibility.role ?? "",
       dept: selectedUserForVisibility.dept ?? "",
       scope: selectedUserForVisibility.scope ?? "",
+      直屬主管: selectedUserForVisibility.直屬主管 ?? "",
     });
     setEditUserError(null);
     setUserSettingsTab("profile");
@@ -5140,6 +5359,38 @@ export default function DashboardPage() {
     [masterUntaxedByProjectId, refreshDashboardData]
   );
 
+  const voidInvoiceOnAmego = useCallback(async () => {
+    const number = String(voidInvoiceTarget?.number ?? "").trim();
+    const reason = voidReason.trim();
+    if (!number || !reason || voidingInvoice) return;
+    setVoidingInvoice(true);
+    setInvoiceEditError(null);
+    try {
+      const res = await fetch("/api/invoices/amego/void", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invoiceNumber: number, reason }),
+      });
+      const data = (await safeResJson(res)) as { ok?: boolean; error?: string; invoices?: InvoiceRow[] };
+      if (!res.ok || data.ok === false) {
+        setInvoiceEditError(String(data.error ?? "作廢失敗"));
+        return;
+      }
+      const byId = new Map((data.invoices ?? []).filter((row) => row.id).map((row) => [String(row.id), row]));
+      if (byId.size > 0) {
+        setInvoices((prev) =>
+          sortInvoicesByInvoiceNumber(prev.map((row) => (row.id && byId.has(row.id) ? { ...row, ...byId.get(row.id) } : row)))
+        );
+      }
+      setVoidInvoiceTarget(null);
+      setVoidReason("");
+    } catch (e) {
+      setInvoiceEditError(e instanceof Error ? e.message : "作廢失敗");
+    } finally {
+      setVoidingInvoice(false);
+    }
+  }, [voidInvoiceTarget, voidReason, voidingInvoice]);
+
   /** 同一張發票再綁另一專案（新增一列；金額依該專案總金額未稅×1.05） */
   const bindInvoiceToAnotherProject = useCallback(
     async (sourceId: string, projectId: string) => {
@@ -5217,6 +5468,7 @@ export default function DashboardPage() {
       setActiveSection("finance");
       if (
         finSub === "invoices" ||
+        finSub === "invoiceReview" ||
         finSub === "byProject" ||
         finSub === "payments" ||
         finSub === "collectionSubmissions" ||
@@ -6403,9 +6655,12 @@ export default function DashboardPage() {
 
   useEffect(() => {
     try {
+      const fromUrl = new URLSearchParams(window.location.search).get("financeSubTab")?.trim();
+      if (fromUrl) return;
       const v = localStorage.getItem("sdh-finance-subtab");
       if (
         v === "invoices" ||
+        v === "invoiceReview" ||
         v === "byProject" ||
         v === "payments" ||
         v === "collectionSubmissions" ||
@@ -6426,6 +6681,13 @@ export default function DashboardPage() {
       /* ignore */
     }
   }, [financeSubTab]);
+
+  useEffect(() => {
+    if (financeSubTab !== "invoiceReview" || !me) return;
+    if (!isInvoiceEInvoiceLive() || (me.role !== "董事長" && me.role !== "會計")) {
+      setFinanceSubTab("invoices");
+    }
+  }, [financeSubTab, me]);
 
   useEffect(() => {
     try {
@@ -6554,6 +6816,353 @@ export default function DashboardPage() {
     setChangingPassword(false);
   }
 
+  const renderMasterSideTasks = () => {
+    if (!selectedMaster) return null;
+    const row = selectedMaster;
+    const pid = String(row.專案ID ?? "");
+    const projectTasksAll = sortTaskRows(
+      tasks.filter((t) => (t.專案ID ?? "").trim().toLowerCase() === pid.trim().toLowerCase()),
+      tasksSortMode
+    );
+    const projectTasksOpen = projectTasksAll.filter((t) => !Boolean(t.任務完成));
+    const projectTasksDone = projectTasksAll.filter((t) => Boolean(t.任務完成));
+    const projectTasks = expandedTasksShowCompleted ? projectTasksAll : projectTasksOpen;
+    return (
+      <>
+<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+  <h3 className="text-sm font-bold uppercase tracking-wider text-amber-800">
+    此專案任務
+    <span className="ml-2 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-amber-900">
+      {expandedTasksShowCompleted
+        ? `${projectTasksAll.length} 筆`
+        : `進行中 ${projectTasksOpen.length}`}
+    </span>
+    {!expandedTasksShowCompleted && projectTasksDone.length > 0 ? (
+      <span className="ml-1 text-[10px] font-medium normal-case tracking-normal text-stone-500">
+        （已完成 {projectTasksDone.length} 筆已隱藏）
+      </span>
+    ) : null}
+  </h3>
+  {me?.role && me.role !== "KOL" && isInvoiceEInvoiceLive() ? (
+    <Link
+      href={`/invoice?project=${encodeURIComponent(pid)}`}
+      className="rounded-lg border border-sky-200 bg-white px-2.5 py-1 text-[11px] font-bold text-sky-800 hover:bg-sky-50"
+    >
+      開立發票
+    </Link>
+  ) : null}
+  {projectTasksDone.length > 0 ? (
+    <button
+      type="button"
+      onClick={() => setExpandedTasksShowCompleted((v) => !v)}
+      className="rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-stone-600 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-900"
+    >
+      {expandedTasksShowCompleted ? "只看進行中" : "顯示已完成"}
+    </button>
+  ) : null}
+</div>
+<div className="mb-4 max-w-full overflow-x-auto rounded-lg border border-stone-200/90">
+  {/*
+    inline-table：避免在整欄寬的 td 內被撐成 100% 寬（與上方專案列無對齊需求）
+  */}
+  <table className="inline-table max-w-full align-top border-collapse divide-y divide-stone-200">
+    <thead className="bg-amber-100/80">
+      <tr>
+        <th className="w-[10rem] max-w-[11rem] px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">
+          任務
+        </th>
+        <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">
+          任務類型
+        </th>
+        <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">
+          任務負責人
+        </th>
+        <th className="max-w-[10rem] px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">
+          備註
+        </th>
+        <th className="whitespace-nowrap px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">
+          到期日
+        </th>
+        <th className="whitespace-nowrap px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">
+          開始時間
+        </th>
+        <th className="whitespace-nowrap px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">
+          完成時間
+        </th>
+        <th className="w-[7.5rem] min-w-[7.5rem] whitespace-nowrap px-2 py-2 text-center text-xs font-semibold uppercase text-stone-500">
+          完成
+        </th>
+        <th className="w-12 min-w-[2.75rem] whitespace-nowrap px-2 py-2 text-center text-xs font-semibold uppercase text-stone-500">
+          刪除
+        </th>
+      </tr>
+    </thead>
+    <tbody className="divide-y divide-stone-200 bg-white/90">
+      {projectTasks.length === 0 ? (
+        <tr>
+          <td colSpan={9} className="px-3 py-4 text-center text-sm text-stone-500">
+            {projectTasksAll.length === 0
+              ? "尚無任務，請點「新增任務」新增"
+              : "目前沒有進行中任務（可點「顯示已完成」查看）"}
+          </td>
+        </tr>
+      ) : (
+        projectTasks.map((t, i) => (
+          <tr
+            key={t.任務ID ?? i}
+            className="cursor-pointer hover:bg-amber-50/80"
+            onClick={() => setSelectedTask(t)}
+          >
+            <td
+              className="w-[10rem] max-w-[11rem] px-3 py-2.5 text-sm text-stone-900 align-top"
+              title={t.任務 ? String(t.任務) : undefined}
+            >
+              <span className="line-clamp-2 break-words">{t.任務 ?? "—"}</span>
+            </td>
+            <td className="whitespace-nowrap px-3 py-2.5 text-sm text-stone-600">{t.任務類型 ?? "—"}</td>
+            <td className="whitespace-nowrap px-3 py-2.5 text-sm text-stone-600">
+              <span className="inline-flex items-center gap-1">
+                {t.任務負責人 ?? "—"}
+                {t.任務負責人 && t.任務ID && (
+                  <button
+                    type="button"
+                    onClick={async (ev) => {
+                      ev.stopPropagation();
+                      if (!t.任務ID) return;
+                      setRemindingTaskId(t.任務ID);
+                      try {
+                        await fetch("/api/tasks/remind", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ 任務ID: t.任務ID }),
+                        });
+                      } finally {
+                        setRemindingTaskId(null);
+                      }
+                    }}
+                    disabled={remindingTaskId === t.任務ID}
+                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-stone-300 bg-stone-50 text-stone-500 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800 disabled:opacity-50"
+                    title="發信提醒"
+                  >
+                    {remindingTaskId === t.任務ID ? (
+                      <span className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
+                    ) : (
+                      <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                    )}
+                  </button>
+                )}
+              </span>
+            </td>
+            <td className="max-w-[10rem] px-3 py-2.5 text-xs text-stone-600 align-top">
+              <span className="line-clamp-3 break-words" title={t.備註 ? String(t.備註) : undefined}>
+                {t.備註?.trim() ? t.備註 : "—"}
+              </span>
+            </td>
+            <td
+              className="whitespace-nowrap px-3 py-2.5 text-center text-xs tabular-nums align-top"
+              onClick={(ev) => ev.stopPropagation()}
+            >
+              <input
+                type="date"
+                value={t.到期日?.trim() ? t.到期日.trim().slice(0, 10) : ""}
+                onChange={async (ev) => {
+                  if (!t.任務ID) return;
+                  const v = ev.target.value.trim();
+                  try {
+                    const res = await fetch("/api/tasks", {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        任務ID: t.任務ID,
+                        到期日: v || null,
+                      }),
+                    });
+                    const data = (await safeResJson(res)) as { ok?: boolean; task?: TaskRow };
+                    if (res.ok && data.ok && data.task) {
+                      setTasks((prev) => prev.map((x) => (x.任務ID === t.任務ID ? data.task! : x)));
+                    }
+                  } catch {
+                    /* 忽略 */
+                  }
+                }}
+                className={`max-w-[9.5rem] rounded border px-1.5 py-1 text-xs ${
+                  getTaskDueUiStatus(t.任務完成, t.到期日) === "overdue"
+                    ? "border-red-300 bg-red-50 text-red-900"
+                    : getTaskDueUiStatus(t.任務完成, t.到期日) === "soon"
+                      ? "border-amber-300 bg-amber-50 text-amber-900"
+                      : "border-stone-200 bg-white text-stone-800"
+                }`}
+                title="在此設定到期日；點列其餘處可開啟完整編輯"
+              />
+            </td>
+            <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs tabular-nums text-stone-600">
+              {formatTaskDisplayTime(t.開始時間)}
+            </td>
+            <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs tabular-nums text-stone-600">
+              {formatTaskDisplayTime(t.完成時間)}
+            </td>
+            <td className="w-[7.5rem] min-w-[7.5rem] px-1 py-2 text-center align-middle" onClick={(ev) => ev.stopPropagation()}>
+              <TaskCompleteActions
+                task={t}
+                compact
+                busy={taskCompleteBusyId === t.任務ID}
+                onToggleComplete={toggleTaskComplete}
+                onCompleteAndAssignNext={openCompleteAndAssignNext}
+              />
+            </td>
+            <td className="w-12 min-w-[2.75rem] px-2 py-2.5 text-center align-middle" onClick={(ev) => ev.stopPropagation()}>
+              <TaskDeleteButton
+                task={t}
+                deleting={deletingTaskId === t.任務ID}
+                onRequestDelete={() => setPendingDeleteTask(t)}
+              />
+            </td>
+          </tr>
+        ))
+      )}
+    </tbody>
+  </table>
+</div>
+{addingTaskFor === pid ? (
+  <form
+    className="flex flex-wrap items-end gap-3 rounded-lg border border-amber-200 bg-amber-500/5 p-4"
+    onSubmit={async (e) => {
+      e.preventDefault();
+      setAddTaskError(null);
+      if (!newTaskForm.任務名稱.trim()) {
+        setAddTaskError("請填寫任務名稱");
+        return;
+      }
+      setAddingTask(true);
+      try {
+        const res = await fetch("/api/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            專案ID: pid,
+            專案名稱: row.專案名稱 ?? "",
+            任務名稱: newTaskForm.任務名稱.trim(),
+            任務類型: newTaskForm.任務類型.trim() || null,
+            負責人: newTaskForm.任務負責人.trim() || null,
+            備註: newTaskForm.備註.trim() || null,
+            到期日: newTaskForm.到期日.trim() || null,
+          }),
+        });
+        const data = (await safeResJson(res)) as { ok?: boolean; error?: string; task?: TaskRow };
+        if (!res.ok || !data.ok) {
+          setAddTaskError(data.error ?? "新增失敗");
+          setAddingTask(false);
+          return;
+        }
+        setTasks((prev) => [data.task!, ...prev]);
+        setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
+        setAddingTaskFor(null);
+      } catch (err: unknown) {
+        setAddTaskError(err instanceof Error ? err.message : "新增失敗");
+      }
+      setAddingTask(false);
+    }}
+  >
+    {addTaskError && <p className="w-full text-sm text-amber-800">{addTaskError}</p>}
+    <div>
+      <label className="mb-1 block text-xs font-semibold text-stone-500">任務名稱</label>
+      <input
+        type="text"
+        value={newTaskForm.任務名稱}
+        onChange={(e) => setNewTaskForm((f) => ({ ...f, 任務名稱: e.target.value }))}
+        className="w-64 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+        placeholder="輸入任務內容"
+      />
+    </div>
+    <div>
+      <label className="mb-1 block text-xs font-semibold text-stone-500">任務類型</label>
+      <select
+        value={newTaskForm.任務類型}
+        onChange={(e) => setNewTaskForm((f) => ({ ...f, 任務類型: e.target.value }))}
+        className="min-w-[8rem] rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+      >
+        <option value="">—</option>
+        {taskTypeOptions.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    </div>
+    <div>
+      <label className="mb-1 block text-xs font-semibold text-stone-500">任務負責人</label>
+      <select
+        value={newTaskForm.任務負責人}
+        onChange={(e) => setNewTaskForm((f) => ({ ...f, 任務負責人: e.target.value }))}
+        className="w-40 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+      >
+        <option value="">— 未指定 —</option>
+        {employeeUserNames.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </select>
+    </div>
+    <div>
+      <label className="mb-1 block text-xs font-semibold text-stone-500">到期日</label>
+      <input
+        type="date"
+        value={newTaskForm.到期日}
+        onChange={(e) => setNewTaskForm((f) => ({ ...f, 到期日: e.target.value }))}
+        className="w-44 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+      />
+    </div>
+    <div className="w-full basis-full">
+      <label className="mb-1 block text-xs font-semibold text-stone-500">備註</label>
+      <textarea
+        value={newTaskForm.備註}
+        onChange={(e) => setNewTaskForm((f) => ({ ...f, 備註: e.target.value }))}
+        rows={2}
+        className="w-full min-w-[min(100%,20rem)] rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+        placeholder="選填"
+      />
+    </div>
+    <div className="flex gap-2">
+      <button
+        type="submit"
+        disabled={addingTask}
+        className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-60"
+      >
+        {addingTask ? "新增中…" : "儲存"}
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setAddingTaskFor(null);
+          setAddTaskError(null);
+          setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
+        }}
+        className="rounded-lg border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-100"
+      >
+        取消
+      </button>
+    </div>
+  </form>
+) : (
+  <button
+    type="button"
+    onClick={() => {
+      setAddingTaskFor(pid);
+      setAddTaskError(null);
+      setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
+    }}
+    className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100/90"
+  >
+    + 新增任務
+  </button>
+)}
+      </>
+    );
+  };
+
   return (
     <div className="flex min-h-screen flex-col bg-[#faf8f5]">
       <SessionExpiryMonitor active={!!me} onSessionEnd={handleSessionEnd} />
@@ -6657,6 +7266,29 @@ export default function DashboardPage() {
                 })}
               </nav>
               <div className="shrink-0 space-y-2 border-t border-stone-700/80 px-2.5 py-3">
+                {isInvoiceEInvoiceLive() ? (
+                  <Link
+                    href="/invoice"
+                    title={sidebarCollapsed ? "開立發票" : undefined}
+                    onClick={() => setMobileNavOpen(false)}
+                    className={`relative block w-full overflow-hidden rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-amber-200 ring-1 ring-amber-400/30 transition-all duration-150 ease-out hover:bg-stone-800/70 hover:text-white ${
+                      sidebarCollapsed ? "md:px-1.5 md:text-center md:text-[10px] md:leading-tight" : ""
+                    }`}
+                  >
+                    <span className={`block min-w-0 ${sidebarCollapsed ? "md:break-words" : "truncate"}`}>{sidebarCollapsed ? "開立" : "開立發票"}</span>
+                  </Link>
+                ) : (
+                  <div
+                    title={invoiceEInvoiceLockedMessage()}
+                    className={`relative block w-full cursor-not-allowed overflow-hidden rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-stone-500 ring-1 ring-stone-700/60 ${
+                      sidebarCollapsed ? "md:px-1.5 md:text-center md:text-[10px] md:leading-tight" : ""
+                    }`}
+                  >
+                    <span className={`block min-w-0 ${sidebarCollapsed ? "md:break-words" : "truncate"}`}>
+                      {sidebarCollapsed ? "開立" : `開立發票（${invoiceEInvoiceLaunchLabel()}）`}
+                    </span>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -7113,6 +7745,7 @@ export default function DashboardPage() {
                               : (displayRoles[0] ?? "經紀人"),
                         dept: "",
                         scope: "",
+                        直屬主管: "",
                       });
                       setCreateUserError(null);
                       setShowCreateUser(true);
@@ -7439,23 +8072,11 @@ export default function DashboardPage() {
 
         {/* 大總表 */}
         {activeSection === "master" && (
-          <section className="rounded-2xl border border-stone-200/90 bg-white/90 p-4 shadow-xl ring-1 ring-amber-100/60 sm:p-6">
+          <section className="rounded-2xl bg-transparent p-0">
             <div className="mb-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-xl font-bold tracking-tight text-stone-900">大總表</h2>
               <div className="flex flex-wrap items-center gap-3">
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={masterSearch}
-                    onChange={(e) => setMasterSearch(e.target.value)}
-                    placeholder="搜尋專案ID、名稱、KOL、廠商…"
-                    className="w-60 rounded-full border border-stone-200 bg-stone-50 px-3.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-500 focus:border-amber-500/60 focus:outline-none"
-                  />
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-stone-500">
-                    搜尋
-                  </span>
-                </div>
                 <Link
                   href="/meeting"
                   target="_blank"
@@ -7587,107 +8208,54 @@ export default function DashboardPage() {
                 <p className="mt-2 rounded-lg bg-amber-100/90 px-3 py-2 text-xs font-medium text-amber-800">{inlineStatusError}</p>
               )}
             </div>
-            <div className="overflow-x-auto rounded-xl border border-stone-200/90 ring-1 ring-amber-100/60">
-              <table className="w-full table-fixed divide-y divide-stone-200">
-                <colgroup>
-                  {masterColsForDisplay.map((k) => {
-                    const width =
-                      k === "專案ID"
-                        ? "4.5rem"
-                        : k === "專案名稱"
-                          ? "24rem"
-                          : k === "發票摘要"
-                            ? "9.5rem"
-                            : k === "開案日期"
-                              ? "6.5rem"
-                              : k === "款項進度"
-                                ? "5.5rem"
-                                : k === MASTER_LIST_CONTENT_NOTES_KEY
-                                  ? "11rem"
-                                  : "6rem";
-                    return <col key={k} style={{ width }} />;
-                  })}
-                </colgroup>
-                <thead className="sticky top-0 z-20 bg-stone-100">
-                  <tr>
-                    {masterColsForDisplay.map((k) => (
-                      <th
-                        key={k}
-                        className={
-                          k === "專案ID"
-                            ? "sticky left-0 z-30 w-[4.5rem] bg-stone-100 px-2 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
-                            : k === "專案名稱"
-                              ? "sticky left-[4.5rem] z-30 w-[24rem] min-w-[18rem] bg-stone-100 px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800"
-                              : k === "發票摘要"
-                                ? "px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
-                                : k === "開案日期"
-                                  ? "px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600 whitespace-nowrap"
-                                  : k === MASTER_LIST_CONTENT_NOTES_KEY
-                                    ? "px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-amber-800 whitespace-nowrap"
-                                    : "px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600 whitespace-nowrap"
-                        }
-                      >
-                        {k === MASTER_LIST_CONTENT_NOTES_KEY
-                          ? "內容與備註"
-                          : (tableColumnLabels.master?.[k] ?? k)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-200/90 bg-white">
+            <div className="grid items-start gap-4 lg:grid-cols-[minmax(260px,360px)_minmax(0,1fr)]">
+              <div className="min-w-0">
+                <div className="mb-2 flex items-center justify-between px-1">
+                  <p className="text-sm font-semibold text-stone-800">案件列表</p>
+                  <p className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-amber-900">
+                    {searchedMasterList.length} 件
+                  </p>
+                </div>
+                <input
+                  type="search"
+                  value={masterSearch}
+                  onChange={(e) => setMasterSearch(e.target.value)}
+                  placeholder="搜尋專案ID、名稱、KOL、廠商…"
+                  className="mb-2 w-full rounded-xl border border-amber-100 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 shadow-sm focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/10"
+                />
+                <div className="max-h-[calc(100vh-16rem)] space-y-2.5 overflow-y-auto pr-1">
                   {filteredMasterList.length === 0 ? (
-                    <tr>
-                      <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                    <div className="rounded-2xl border border-dashed border-stone-200 bg-white px-4 py-8 text-center text-sm font-medium text-stone-500">
                         尚無大總表資料，請點「新增專案」建立第一筆
-                      </td>
-                    </tr>
+                    </div>
                   ) : masterLifecycleBaseList.length === 0 ? (
-                    <tr>
-                      <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                    <div className="rounded-2xl border border-dashed border-stone-200 bg-white px-4 py-8 text-center text-sm font-medium text-stone-500">
                         {masterLifecycleTab === "in_progress"
                           ? "目前沒有進行中的專案。將專案狀態改為結案／完成等狀態後，該筆會出現在「已結案」。"
                           : "目前沒有已結案的專案。"}
-                      </td>
-                    </tr>
+                    </div>
                   ) : masterLongTermFilteredList.length === 0 ? (
-                    <tr>
-                      <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                    <div className="rounded-2xl border border-dashed border-stone-200 bg-white px-4 py-8 text-center text-sm font-medium text-stone-500">
                         目前分頁沒有符合「僅長期案」的專案，請切回「全部」或到專案詳情勾選「長期案」。
-                      </td>
-                    </tr>
+                    </div>
                   ) : masterTabFilteredList.length === 0 ? (
-                    <tr>
-                      <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                    <div className="rounded-2xl border border-dashed border-stone-200 bg-white px-4 py-8 text-center text-sm font-medium text-stone-500">
                         此專案類型在目前區間尚無資料，請切換上方「專案類型」或新增專案
-                      </td>
-                    </tr>
+                    </div>
                   ) : searchedMasterList.length === 0 ? (
-                    <tr>
-                      <td colSpan={masterColsForDisplay.length || 15} className="px-4 py-8 text-center text-base font-medium text-stone-500">
+                    <div className="rounded-2xl border border-dashed border-stone-200 bg-white px-4 py-8 text-center text-sm font-medium text-stone-500">
                         沒有符合搜尋結果
-                      </td>
-                    </tr>
+                    </div>
                   ) : (
-                    visibleMasterDisplayItems.map(({ row, depth, rowIndex }) => {
+                    visibleMasterDisplayItems.map(({ row, depth }) => {
                       const pid = row.專案ID ?? "";
-                      const isExpanded = expandedProjectId === pid;
-                      const lifecycleClosed = masterLifecycleTab === "closed";
-                      const rowSurface = masterListRowSurface(rowIndex, lifecycleClosed, {
-                        nested: depth > 0,
-                      });
-                      const nestIndentPx = 20 + Math.min(depth, 4) * 28;
-                      // 大總表展開列：該專案任務全顯（不套用任務②可見規則）；側邊「任務」分頁仍為 filteredTasks
-                      const projectTasksAll = sortTaskRows(
-                        tasks.filter((t) => (t.專案ID ?? "").trim().toLowerCase() === pid.trim().toLowerCase()),
-                        tasksSortMode
+                      const projectTasksOpen = tasks.filter(
+                        (t) =>
+                          (t.專案ID ?? "").trim().toLowerCase() === String(pid).trim().toLowerCase() &&
+                          !Boolean(t.任務完成)
                       );
-                      const projectTasksOpen = projectTasksAll.filter((t) => !Boolean(t.任務完成));
-                      const projectTasksDone = projectTasksAll.filter((t) => Boolean(t.任務完成));
-                      const projectTasks = expandedTasksShowCompleted ? projectTasksAll : projectTasksOpen;
                       const projectChildren = masterChildrenByParentId.get(String(pid).trim()) ?? [];
                       const treeOpen = expandedMasterTreeIds.includes(String(pid).trim());
-                      const invoiceSummary = invoiceSummaryByProjectId.get(String(pid).trim());
-                      const projectInvoices = invoiceSummary?.rows ?? [];
                       const toggleMasterTree = (e: ReactMouseEvent) => {
                         e.stopPropagation();
                         const id = String(pid).trim();
@@ -7714,275 +8282,92 @@ export default function DashboardPage() {
                       };
                       return (
                         <Fragment key={`${depth}-${row.id ?? pid}`}>
-                          <tr
-                            key={row.id ?? pid}
-                            className={`cursor-pointer transition ${rowSurface.row} ${rowSurface.base} ${
-                              depth > 0 ? "border-l-4 border-l-sky-400" : ""
-                            }`}
+                          <div
+                            role="button"
+                            tabIndex={0}
                             onClick={() => {
                               setSelectedMaster(row);
                               setIsEditingMaster(false);
                               setSaveMasterError(null);
+                              setMasterDetailPane("project");
+                              window.setTimeout(() => {
+                                document.getElementById("master-detail-dock")?.scrollIntoView({
+                                  behavior: "smooth",
+                                  block: "nearest",
+                                });
+                              }, 50);
                             }}
+                            onKeyDown={(e) => {
+                              if (e.key !== "Enter" && e.key !== " ") return;
+                              e.preventDefault();
+                              setSelectedMaster(row);
+                              setIsEditingMaster(false);
+                              setSaveMasterError(null);
+                              setMasterDetailPane("project");
+                              window.setTimeout(() => {
+                                document.getElementById("master-detail-dock")?.scrollIntoView({
+                                  behavior: "smooth",
+                                  block: "nearest",
+                                });
+                              }, 50);
+                            }}
+                            className={`rounded-2xl border p-3.5 text-left shadow-sm transition ${
+                              String(selectedMaster?.專案ID ?? "").trim() === String(pid).trim()
+                                ? "border-emerald-600 bg-emerald-50/70 ring-2 ring-emerald-600/15"
+                                : "border-stone-200 bg-white hover:border-amber-200 hover:bg-amber-50/40"
+                            } ${depth > 0 ? "ml-4 border-l-4 border-l-sky-400" : ""}`}
                           >
-                            {masterColsForDisplay.map((k) => {
-                              const amountKeys = ["專案總金額未稅", "專案營收", "專案成本", "KOL費用未稅", "KOL應收額外成本", "額外成本"];
-                              const isAmount = amountKeys.includes(k);
-                              const val = (row as unknown as Record<string, unknown>)[k];
-                              const modeBRow = isPayoutModeB(String(row.專案類型 ?? ""));
-                              const wrongModeRoleCol =
-                                (modeBRow && MASTER_PAYOUT_MODE_A_COL_KEYS.has(k)) ||
-                                (!modeBRow && MASTER_PAYOUT_MODE_B_COL_KEYS.has(k));
-                              const cellBg = `${rowSurface.base} ${rowSurface.hover}`;
-                              const stickyBg = `${rowSurface.sticky} ${rowSurface.hover}`;
-                              if (k === "專案ID") {
-                                return (
-                                  <td
-                                    key={k}
-                                    className={`sticky left-0 z-20 w-[4.5rem] px-2 py-3 ${stickyBg}`}
-                                    title={pid}
-                                  >
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setExpandedProjectId((prev) => (prev === pid ? null : pid));
-                                        setExpandedTasksShowCompleted(false);
-                                        setAddingTaskFor(null);
-                                        setAddTaskError(null);
-                                        setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
-                                      }}
-                                      className="mr-2 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-stone-50 text-stone-500 transition hover:bg-amber-100/90 hover:border-amber-300 hover:text-amber-800"
-                                      title={isExpanded ? "收合任務" : "展開任務／新增任務"}
-                                    >
-                                      <svg className={`h-4 w-4 transition-transform ${isExpanded ? "rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                      </svg>
-                                    </button>
-                                    <span className="truncate text-xs font-normal text-stone-500" title={pid || undefined}>{pid ? "SDH-…" : "—"}</span>
-                                  </td>
-                                );
-                              }
-                              if (k === "專案名稱") {
-                                const projectName = String(val ?? "").trim() || "—";
-                                const kolName = String(row.KOL名稱 ?? "").trim();
-                                const childCount = projectChildren.length;
-                                const isOrphanChild = depth === 0 && Boolean(String(row.母專案ID ?? "").trim());
-                                return (
-                                  <td
-                                    key={k}
-                                    className={`sticky left-[4.5rem] z-20 w-[24rem] min-w-[18rem] px-3 py-3 ${stickyBg}`}
-                                    title={kolName ? `${projectName} · ${kolName}` : projectName}
-                                    style={depth > 0 ? { paddingLeft: `${nestIndentPx}px` } : undefined}
-                                  >
-                                    <div className="flex min-w-0 flex-col gap-1.5">
-                                      {childCount > 0 ? (
-                                        <button
-                                          type="button"
-                                          onClick={toggleMasterTree}
-                                          className={`inline-flex w-fit max-w-full items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-bold shadow-sm transition ${
-                                            treeOpen
-                                              ? "border-sky-500 bg-sky-600 text-white hover:bg-sky-500"
-                                              : "border-sky-300 bg-sky-50 text-sky-900 ring-1 ring-sky-200 hover:border-sky-400 hover:bg-sky-100"
-                                          }`}
-                                          title={treeOpen ? "收合子專案列" : `展開 ${childCount} 個子專案列`}
-                                        >
-                                          <svg
-                                            className={`h-3.5 w-3.5 shrink-0 transition-transform ${treeOpen ? "rotate-90" : ""}`}
-                                            fill="none"
-                                            stroke="currentColor"
-                                            viewBox="0 0 24 24"
-                                            aria-hidden
-                                          >
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-                                          </svg>
-                                          <span className="whitespace-nowrap">
-                                            {treeOpen ? "收合子專案" : "展開子專案"}
-                                          </span>
-                                          <span
-                                            className={`rounded-md px-1.5 py-0.5 text-[10px] tabular-nums ${
-                                              treeOpen ? "bg-white/20 text-white" : "bg-sky-200/80 text-sky-950"
-                                            }`}
-                                          >
-                                            {childCount}
-                                          </span>
-                                        </button>
-                                      ) : null}
-                                      <div className="flex min-w-0 items-start gap-1.5">
-                                        {depth > 0 ? (
-                                          <span
-                                            className="mt-0.5 flex shrink-0 items-center gap-1 text-sky-600"
-                                            title="子專案"
-                                          >
-                                            <span className="select-none font-mono text-[11px] leading-none text-sky-400" aria-hidden>
-                                              └
-                                            </span>
-                                            <span className="rounded border border-sky-300 bg-white px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-sky-800">
-                                              子
-                                            </span>
-                                          </span>
-                                        ) : null}
-                                        {isOrphanChild ? (
-                                          <span
-                                            className="mt-0.5 shrink-0 rounded border border-sky-300 bg-white px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-sky-800"
-                                            title="此為子專案；母專案不在目前篩選列表中"
-                                          >
-                                            子案
-                                          </span>
-                                        ) : null}
-                                        <div className="min-w-0 flex-1">
-                                          <p
-                                            className={`break-words whitespace-normal text-sm font-medium leading-snug ${
-                                              depth > 0 ? "text-sky-950" : "text-stone-900"
-                                            }`}
-                                          >
-                                            {projectName}
-                                          </p>
-                                          {kolName ? (
-                                            <p className="mt-0.5 break-words text-[11px] font-semibold tracking-wide text-amber-900/85">
-                                              {kolName}
-                                            </p>
-                                          ) : null}
-                                        </div>
-                                        {canMutate ? (
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              openCreateMasterFromCopy(row);
-                                            }}
-                                            className="mt-0.5 shrink-0 rounded-md border border-amber-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-amber-900 transition hover:border-amber-400 hover:bg-amber-50"
-                                            title="複製為新專案草稿（金額不帶入）"
-                                          >
-                                            複製
-                                          </button>
-                                        ) : null}
-                                      </div>
-                                    </div>
-                                  </td>
-                                );
-                              }
-                              if (k === "款項進度") {
-                                const fpid = String(row.專案ID ?? "").trim();
-                                const fr = fpid ? financeByProjectId.get(fpid) : undefined;
-                                const short = financeProgressShortLabel(fr);
-                                const detail = financeProgressDetail(fr);
-                                return (
-                                  <td key={k} className={`whitespace-nowrap px-4 py-3.5 ${cellBg}`} title={detail}>
+                            {(() => {
+                              const projectName = String(row.專案名稱 ?? "").trim() || "—";
+                              const kolName = String(row.KOL名稱 ?? "").trim();
+                              const vendorName = String(row.廠商名稱 ?? "").trim();
+                              const pmName = String(row.執行管理員 ?? "").trim();
+                              const openedOn = String(row.開案日期 ?? "").trim();
+                              const statusText = String(row.專案狀態 ?? "").trim();
+                              const childCount = projectChildren.length;
+                              const rowId = String(row.id ?? "").trim();
+                              const statusOptions = [...new Set([...projectStatusOptions, statusText].filter(Boolean))];
+                              const closedish = /結案|完成|取消/.test(statusText);
+                              const taskActive =
+                                String(selectedMaster?.專案ID ?? "").trim() === String(pid).trim() &&
+                                masterDetailPane === "tasks";
+                              return (
+                                <>
+                                  <div className="flex items-start justify-between gap-2">
+                                    <p className="min-w-0 break-words text-sm font-semibold leading-snug text-stone-900">{projectName}</p>
+                                    {depth > 0 ? (
+                                      <span className="shrink-0 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-800">子專案</span>
+                                    ) : null}
+                                  </div>
+                                  <p className="mt-1 text-[11px] leading-relaxed text-stone-500">
                                     <span
-                                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${financeProgressBadgeClass(short)}`}
+                                      className={kolName || vendorName ? "font-bold" : "font-medium text-stone-400"}
+                                      style={
+                                        kolName || vendorName
+                                          ? { color: "#40A0C8" }
+                                          : undefined
+                                      }
                                     >
-                                      {short}
+                                      {kolName || vendorName || "未填案主"}
                                     </span>
-                                  </td>
-                                );
-                              }
-                              if (k === "發票摘要") {
-                                const summary = invoiceSummary ?? buildInvoiceSummary([]);
-                                const hasInvoices = summary.count > 0;
-                                const badgeClass =
-                                  summary.status === "已收款"
-                                    ? "bg-emerald-100 text-emerald-800"
-                                    : summary.status === "部分收款"
-                                      ? "bg-amber-100 text-amber-800"
-                                      : summary.status === "已開票未收"
-                                        ? "bg-orange-100 text-orange-800"
-                                        : "bg-stone-100 text-stone-500";
-                                return (
-                                  <td key={k} className={`whitespace-nowrap px-4 py-2.5 text-xs text-stone-600 ${cellBg}`}>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (!hasInvoices) return;
-                                        setExpandedProjectId((prev) => (prev === pid ? null : pid));
-                                      }}
-                                      disabled={!hasInvoices}
-                                      className="group rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 text-left shadow-sm transition hover:border-amber-300 hover:bg-amber-50 disabled:cursor-default disabled:bg-stone-50 disabled:shadow-none"
-                                      title={hasInvoices ? "展開查看此專案發票明細" : "此專案尚無對應發票"}
-                                    >
-                                      <span className={`mb-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${badgeClass}`}>
-                                        {summary.status}
-                                      </span>
-                                      <span className="block font-semibold text-stone-800">
-                                        {hasInvoices ? `${summary.count} 張 / ${formatAmount(String(Math.round(summary.totalAmount)))}` : "尚無發票"}
-                                      </span>
-                                      {hasInvoices && (
-                                        <span className="block text-[10px] text-stone-500">
-                                          已收 {formatAmount(String(Math.round(summary.paidAmount)))} · 未收 {formatAmount(String(Math.round(summary.unpaidAmount)))}
-                                        </span>
-                                      )}
-                                    </button>
-                                  </td>
-                                );
-                              }
-                              if (k === MASTER_LIST_CONTENT_NOTES_KEY) {
-                                const content = String(row.專案內容 ?? "").trim();
-                                const note = String(row.備註 ?? "").trim();
-                                const teacherNote = String(row.老師備註 ?? "").trim();
-                                const titleBits = [
-                                  content && `內容：${content}`,
-                                  note && `備註：${note}`,
-                                  teacherNote && `給老師的備註：${teacherNote}`,
-                                ]
-                                  .filter(Boolean)
-                                  .join("\n\n");
-                                return (
-                                  <td
-                                    key={k}
-                                    className={`max-w-[11rem] px-3 py-2.5 align-top ${cellBg}`}
-                                    title={titleBits || undefined}
-                                  >
-                                    <div className="min-w-0 rounded-lg border border-stone-200/70 bg-white/70 px-2.5 py-2">
-                                      {content ? (
-                                        <p className="line-clamp-2 break-words text-sm leading-relaxed text-stone-800">
-                                          {content}
-                                        </p>
-                                      ) : (
-                                        <p className="text-sm italic text-stone-400">尚無專案內容</p>
-                                      )}
-                                      {note ? (
-                                        <div className="mt-1.5 border-t border-dashed border-amber-200/90 pt-1.5">
-                                          <p className="line-clamp-1 break-words text-xs leading-relaxed text-stone-600">
-                                            <span className="mr-1.5 inline-block rounded bg-amber-100/90 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-amber-900/90">
-                                              備註
-                                            </span>
-                                            {note}
-                                          </p>
-                                        </div>
-                                      ) : null}
-                                      {teacherNote ? (
-                                        <div className="mt-1.5 border-t border-dashed border-sky-200/90 pt-1.5">
-                                          <p className="line-clamp-1 break-words text-xs leading-relaxed text-stone-600">
-                                            <span className="mr-1.5 inline-block rounded bg-sky-100/90 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-sky-900/90">
-                                              給老師
-                                            </span>
-                                            {teacherNote}
-                                          </p>
-                                        </div>
-                                      ) : null}
-                                    </div>
-                                  </td>
-                                );
-                              }
-                              if (k === "專案狀態") {
-                                const rowId = String(row.id ?? "").trim();
-                                const current = String(row.專案狀態 ?? "");
-                                const statusOptions = [...new Set([...projectStatusOptions, current].filter(Boolean))];
-                                return (
-                                  <td
-                                    key={k}
-                                    className={`whitespace-nowrap px-4 py-2.5 text-sm font-medium text-stone-600 ${cellBg}`}
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
+                                    <span className="text-stone-300"> · </span>
+                                    <span>{pmName ? `${pmName}負責` : "未填專案PM"}</span>
+                                    <span className="text-stone-300"> · </span>
+                                    <span>{openedOn || "未填開案日"}</span>
+                                  </p>
+                                  <div className="mt-2 flex flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                                     <select
-                                      value={current}
+                                      value={statusText}
                                       disabled={inlineStatusSavingId === rowId}
                                       onChange={(e) => {
                                         void updateProjectStatusInline(row, e.target.value);
                                       }}
-                                      className="w-full min-w-[7rem] rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-sm text-stone-700 focus:border-amber-500/60 focus:outline-none disabled:opacity-60"
-                                      title={current || "未設定"}
+                                      className={`max-w-[10rem] rounded-full border px-2 py-0.5 text-[11px] font-semibold focus:outline-none disabled:opacity-60 ${
+                                        closedish
+                                          ? "border-emerald-300 bg-emerald-100 text-emerald-900"
+                                          : "border-amber-300 bg-amber-100 text-amber-950"
+                                      }`}
+                                      title={statusText || "未設定"}
                                     >
                                       <option value="">未設定</option>
                                       {statusOptions.map((s) => (
@@ -7991,435 +8376,69 @@ export default function DashboardPage() {
                                         </option>
                                       ))}
                                     </select>
-                                  </td>
-                                );
-                              }
-                              const cellText = masterTableCellText(row, k, partnerByKolName, financeByProjectId);
-                              const displayStr = cellText || "—";
-                              return (
-                                <td
-                                  key={k}
-                                  className={`whitespace-nowrap px-4 py-3.5 text-sm font-medium ${wrongModeRoleCol ? "text-stone-400" : "text-stone-600"} ${isAmount ? "tabular-nums" : ""} ${cellBg}`}
-                                >
-                                  {isAmount ? formatAmount(cellText) : displayStr}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          {isExpanded && (
-                            <tr key={`${pid}-tasks`}>
-                              <td colSpan={masterColsForDisplay.length || 15} className="border-t-0 bg-stone-50 px-4 py-4">
-                                <div className="rounded-xl border border-stone-200/90 bg-stone-50/90 p-4">
-                                  {depth > 0 ? (
-                                    <p className="mb-3 text-xs text-sky-800/90">
-                                      此為子專案任務。可在此新增／管理任務；點上方列可開啟專案詳情。
-                                    </p>
-                                  ) : projectChildren.length > 0 ? (
-                                    <p className="mb-3 text-xs text-sky-800/90">
-                                      本專案有 {projectChildren.length} 個子專案。
-                                      {treeOpen
-                                        ? "子專案已展開於上方列下方；"
-                                        : "點母案名稱上方的「展開子專案」可展開縮排列；"}
-                                      此區僅顯示本專案任務。
-                                    </p>
-                                  ) : null}
-                                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                                    <h3 className="text-sm font-bold uppercase tracking-wider text-amber-800">
-                                      此專案任務
-                                      <span className="ml-2 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-amber-900">
-                                        {expandedTasksShowCompleted
-                                          ? `${projectTasksAll.length} 筆`
-                                          : `進行中 ${projectTasksOpen.length}`}
-                                      </span>
-                                      {!expandedTasksShowCompleted && projectTasksDone.length > 0 ? (
-                                        <span className="ml-1 text-[10px] font-medium normal-case tracking-normal text-stone-500">
-                                          （已完成 {projectTasksDone.length} 筆已隱藏）
-                                        </span>
-                                      ) : null}
-                                    </h3>
-                                    {projectTasksDone.length > 0 ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => setExpandedTasksShowCompleted((v) => !v)}
-                                        className="rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-stone-600 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-900"
-                                      >
-                                        {expandedTasksShowCompleted ? "只看進行中" : "顯示已完成"}
-                                      </button>
-                                    ) : null}
-                                  </div>
-                                  <div className="mb-4 max-w-full overflow-x-auto rounded-lg border border-stone-200/90">
-                                    {/*
-                                      inline-table：避免在整欄寬的 td 內被撐成 100% 寬（與上方專案列無對齊需求）
-                                    */}
-                                    <table className="inline-table max-w-full align-top border-collapse divide-y divide-stone-200">
-                                      <thead className="bg-amber-100/80">
-                                        <tr>
-                                          <th className="w-[10rem] max-w-[11rem] px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">
-                                            任務
-                                          </th>
-                                          <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">
-                                            任務類型
-                                          </th>
-                                          <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">
-                                            任務負責人
-                                          </th>
-                                          <th className="max-w-[10rem] px-3 py-2 text-left text-xs font-semibold uppercase text-stone-500">
-                                            備註
-                                          </th>
-                                          <th className="whitespace-nowrap px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">
-                                            到期日
-                                          </th>
-                                          <th className="whitespace-nowrap px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">
-                                            開始時間
-                                          </th>
-                                          <th className="whitespace-nowrap px-3 py-2 text-center text-xs font-semibold uppercase text-stone-500">
-                                            完成時間
-                                          </th>
-                                          <th className="w-[7.5rem] min-w-[7.5rem] whitespace-nowrap px-2 py-2 text-center text-xs font-semibold uppercase text-stone-500">
-                                            完成
-                                          </th>
-                                          <th className="w-12 min-w-[2.75rem] whitespace-nowrap px-2 py-2 text-center text-xs font-semibold uppercase text-stone-500">
-                                            刪除
-                                          </th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-stone-200 bg-white/90">
-                                        {projectTasks.length === 0 ? (
-                                          <tr>
-                                            <td colSpan={9} className="px-3 py-4 text-center text-sm text-stone-500">
-                                              {projectTasksAll.length === 0
-                                                ? "尚無任務，請點「新增任務」新增"
-                                                : "目前沒有進行中任務（可點「顯示已完成」查看）"}
-                                            </td>
-                                          </tr>
-                                        ) : (
-                                          projectTasks.map((t, i) => (
-                                            <tr
-                                              key={t.任務ID ?? i}
-                                              className="cursor-pointer hover:bg-amber-50/80"
-                                              onClick={() => setSelectedTask(t)}
-                                            >
-                                              <td
-                                                className="w-[10rem] max-w-[11rem] px-3 py-2.5 text-sm text-stone-900 align-top"
-                                                title={t.任務 ? String(t.任務) : undefined}
-                                              >
-                                                <span className="line-clamp-2 break-words">{t.任務 ?? "—"}</span>
-                                              </td>
-                                              <td className="whitespace-nowrap px-3 py-2.5 text-sm text-stone-600">{t.任務類型 ?? "—"}</td>
-                                              <td className="whitespace-nowrap px-3 py-2.5 text-sm text-stone-600">
-                                                <span className="inline-flex items-center gap-1">
-                                                  {t.任務負責人 ?? "—"}
-                                                  {t.任務負責人 && t.任務ID && (
-                                                    <button
-                                                      type="button"
-                                                      onClick={async (ev) => {
-                                                        ev.stopPropagation();
-                                                        if (!t.任務ID) return;
-                                                        setRemindingTaskId(t.任務ID);
-                                                        try {
-                                                          await fetch("/api/tasks/remind", {
-                                                            method: "POST",
-                                                            headers: { "Content-Type": "application/json" },
-                                                            body: JSON.stringify({ 任務ID: t.任務ID }),
-                                                          });
-                                                        } finally {
-                                                          setRemindingTaskId(null);
-                                                        }
-                                                      }}
-                                                      disabled={remindingTaskId === t.任務ID}
-                                                      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-stone-300 bg-stone-50 text-stone-500 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800 disabled:opacity-50"
-                                                      title="發信提醒"
-                                                    >
-                                                      {remindingTaskId === t.任務ID ? (
-                                                        <span className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
-                                                      ) : (
-                                                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                                        </svg>
-                                                      )}
-                                                    </button>
-                                                  )}
-                                                </span>
-                                              </td>
-                                              <td className="max-w-[10rem] px-3 py-2.5 text-xs text-stone-600 align-top">
-                                                <span className="line-clamp-3 break-words" title={t.備註 ? String(t.備註) : undefined}>
-                                                  {t.備註?.trim() ? t.備註 : "—"}
-                                                </span>
-                                              </td>
-                                              <td
-                                                className="whitespace-nowrap px-3 py-2.5 text-center text-xs tabular-nums align-top"
-                                                onClick={(ev) => ev.stopPropagation()}
-                                              >
-                                                <input
-                                                  type="date"
-                                                  value={t.到期日?.trim() ? t.到期日.trim().slice(0, 10) : ""}
-                                                  onChange={async (ev) => {
-                                                    if (!t.任務ID) return;
-                                                    const v = ev.target.value.trim();
-                                                    try {
-                                                      const res = await fetch("/api/tasks", {
-                                                        method: "PATCH",
-                                                        headers: { "Content-Type": "application/json" },
-                                                        body: JSON.stringify({
-                                                          任務ID: t.任務ID,
-                                                          到期日: v || null,
-                                                        }),
-                                                      });
-                                                      const data = (await safeResJson(res)) as { ok?: boolean; task?: TaskRow };
-                                                      if (res.ok && data.ok && data.task) {
-                                                        setTasks((prev) => prev.map((x) => (x.任務ID === t.任務ID ? data.task! : x)));
-                                                      }
-                                                    } catch {
-                                                      /* 忽略 */
-                                                    }
-                                                  }}
-                                                  className={`max-w-[9.5rem] rounded border px-1.5 py-1 text-xs ${
-                                                    getTaskDueUiStatus(t.任務完成, t.到期日) === "overdue"
-                                                      ? "border-red-300 bg-red-50 text-red-900"
-                                                      : getTaskDueUiStatus(t.任務完成, t.到期日) === "soon"
-                                                        ? "border-amber-300 bg-amber-50 text-amber-900"
-                                                        : "border-stone-200 bg-white text-stone-800"
-                                                  }`}
-                                                  title="在此設定到期日；點列其餘處可開啟完整編輯"
-                                                />
-                                              </td>
-                                              <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs tabular-nums text-stone-600">
-                                                {formatTaskDisplayTime(t.開始時間)}
-                                              </td>
-                                              <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs tabular-nums text-stone-600">
-                                                {formatTaskDisplayTime(t.完成時間)}
-                                              </td>
-                                              <td className="w-[7.5rem] min-w-[7.5rem] px-1 py-2 text-center align-middle" onClick={(ev) => ev.stopPropagation()}>
-                                                <TaskCompleteActions
-                                                  task={t}
-                                                  compact
-                                                  busy={taskCompleteBusyId === t.任務ID}
-                                                  onToggleComplete={toggleTaskComplete}
-                                                  onCompleteAndAssignNext={openCompleteAndAssignNext}
-                                                />
-                                              </td>
-                                              <td className="w-12 min-w-[2.75rem] px-2 py-2.5 text-center align-middle" onClick={(ev) => ev.stopPropagation()}>
-                                                <TaskDeleteButton
-                                                  task={t}
-                                                  deleting={deletingTaskId === t.任務ID}
-                                                  onRequestDelete={() => setPendingDeleteTask(t)}
-                                                />
-                                              </td>
-                                            </tr>
-                                          ))
-                                        )}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                  {canViewMasterInvoiceSummary ? (
-                                  <div className="mb-4 rounded-lg border border-emerald-100 bg-white/90 p-3">
-                                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                      <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-800">此專案發票</h3>
-                                      {invoiceSummary && invoiceSummary.count > 0 && (
-                                        <p className="text-xs text-stone-500">
-                                          共 {invoiceSummary.count} 張，含稅合計 {formatAmount(String(Math.round(invoiceSummary.totalAmount)))}，
-                                          已收 {formatAmount(String(Math.round(invoiceSummary.paidAmount)))}，
-                                          未收 {formatAmount(String(Math.round(invoiceSummary.unpaidAmount)))}
-                                        </p>
-                                      )}
-                                    </div>
-                                    {projectInvoices.length === 0 ? (
-                                      <p className="rounded-lg bg-stone-50 px-3 py-3 text-sm text-stone-500">
-                                        尚無對應發票。可到「財務 / 發票清冊」將發票的對應專案設為此專案ID。
-                                      </p>
-                                    ) : (
-                                      <div className="max-w-full overflow-x-auto rounded-lg border border-stone-200/90">
-                                        <table className="min-w-full divide-y divide-stone-200 text-xs">
-                                          <thead className="bg-emerald-50">
-                                            <tr>
-                                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">發票號碼</th>
-                                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">發票日期</th>
-                                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">收款對象</th>
-                                              <th className="whitespace-nowrap px-3 py-2 text-right font-semibold text-stone-600">含稅金額</th>
-                                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">預計付款日</th>
-                                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">付款日期</th>
-                                              <th className="min-w-[10rem] px-3 py-2 text-left font-semibold text-stone-600">備註</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-stone-100 bg-white">
-                                            {projectInvoices.map((invoice, idx) => (
-                                              <tr key={invoice.id ?? `${pid}-invoice-${idx}`} className="hover:bg-emerald-50/50">
-                                                <td className="whitespace-nowrap px-3 py-2 font-medium text-stone-800">{invoice.發票號碼 || "—"}</td>
-                                                <td className="whitespace-nowrap px-3 py-2 text-stone-600">{invoice.發票日期 || "—"}</td>
-                                                <td className="whitespace-nowrap px-3 py-2 text-stone-600">{invoice.收款對象 || "—"}</td>
-                                                <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums text-stone-800">
-                                                  {formatAmount(invoice.發票金額含稅)}
-                                                </td>
-                                                <td className="whitespace-nowrap px-3 py-2 text-stone-600">{invoice.廠商預計付款日 || "—"}</td>
-                                                <td className="whitespace-nowrap px-3 py-2 text-stone-600">
-                                                  {invoice.廠商付款日期 ? (
-                                                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-800">
-                                                      {invoice.廠商付款日期}
-                                                    </span>
-                                                  ) : (
-                                                    <span className="rounded-full bg-orange-100 px-2 py-0.5 font-semibold text-orange-800">未收</span>
-                                                  )}
-                                                </td>
-                                                <td className="max-w-[16rem] px-3 py-2 text-stone-600">
-                                                  <span className="line-clamp-2 break-words">{invoice.備註 || "—"}</span>
-                                                </td>
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
-                                      </div>
-                                    )}
-                                    {projectInvoices.length > 0 && (
-                                      <div className="mt-3">
-                                        <PaymentCollectionLink 專案ID={pid} hasInvoices compact />
-                                      </div>
-                                    )}
-                                  </div>
-                                  ) : null}
-                                  {addingTaskFor === pid ? (
-                                    <form
-                                      className="flex flex-wrap items-end gap-3 rounded-lg border border-amber-200 bg-amber-500/5 p-4"
-                                      onSubmit={async (e) => {
-                                        e.preventDefault();
-                                        setAddTaskError(null);
-                                        if (!newTaskForm.任務名稱.trim()) {
-                                          setAddTaskError("請填寫任務名稱");
-                                          return;
-                                        }
-                                        setAddingTask(true);
-                                        try {
-                                          const res = await fetch("/api/tasks", {
-                                            method: "POST",
-                                            headers: { "Content-Type": "application/json" },
-                                            body: JSON.stringify({
-                                              專案ID: pid,
-                                              專案名稱: row.專案名稱 ?? "",
-                                              任務名稱: newTaskForm.任務名稱.trim(),
-                                              任務類型: newTaskForm.任務類型.trim() || null,
-                                              負責人: newTaskForm.任務負責人.trim() || null,
-                                              備註: newTaskForm.備註.trim() || null,
-                                              到期日: newTaskForm.到期日.trim() || null,
-                                            }),
-                                          });
-                                          const data = (await safeResJson(res)) as { ok?: boolean; error?: string; task?: TaskRow };
-                                          if (!res.ok || !data.ok) {
-                                            setAddTaskError(data.error ?? "新增失敗");
-                                            setAddingTask(false);
-                                            return;
-                                          }
-                                          setTasks((prev) => [data.task!, ...prev]);
-                                          setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
-                                          setAddingTaskFor(null);
-                                        } catch (err: unknown) {
-                                          setAddTaskError(err instanceof Error ? err.message : "新增失敗");
-                                        }
-                                        setAddingTask(false);
-                                      }}
-                                    >
-                                      {addTaskError && <p className="w-full text-sm text-amber-800">{addTaskError}</p>}
-                                      <div>
-                                        <label className="mb-1 block text-xs font-semibold text-stone-500">任務名稱</label>
-                                        <input
-                                          type="text"
-                                          value={newTaskForm.任務名稱}
-                                          onChange={(e) => setNewTaskForm((f) => ({ ...f, 任務名稱: e.target.value }))}
-                                          className="w-64 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
-                                          placeholder="輸入任務內容"
-                                        />
-                                      </div>
-                                      <div>
-                                        <label className="mb-1 block text-xs font-semibold text-stone-500">任務類型</label>
-                                        <select
-                                          value={newTaskForm.任務類型}
-                                          onChange={(e) => setNewTaskForm((f) => ({ ...f, 任務類型: e.target.value }))}
-                                          className="min-w-[8rem] rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
-                                        >
-                                          <option value="">—</option>
-                                          {taskTypeOptions.map((o) => (
-                                            <option key={o} value={o}>
-                                              {o}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </div>
-                                      <div>
-                                        <label className="mb-1 block text-xs font-semibold text-stone-500">任務負責人</label>
-                                        <select
-                                          value={newTaskForm.任務負責人}
-                                          onChange={(e) => setNewTaskForm((f) => ({ ...f, 任務負責人: e.target.value }))}
-                                          className="w-40 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
-                                        >
-                                          <option value="">— 未指定 —</option>
-                                          {employeeUserNames.map((name) => (
-                                            <option key={name} value={name}>
-                                              {name}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </div>
-                                      <div>
-                                        <label className="mb-1 block text-xs font-semibold text-stone-500">到期日</label>
-                                        <input
-                                          type="date"
-                                          value={newTaskForm.到期日}
-                                          onChange={(e) => setNewTaskForm((f) => ({ ...f, 到期日: e.target.value }))}
-                                          className="w-44 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
-                                        />
-                                      </div>
-                                      <div className="w-full basis-full">
-                                        <label className="mb-1 block text-xs font-semibold text-stone-500">備註</label>
-                                        <textarea
-                                          value={newTaskForm.備註}
-                                          onChange={(e) => setNewTaskForm((f) => ({ ...f, 備註: e.target.value }))}
-                                          rows={2}
-                                          className="w-full min-w-[min(100%,20rem)] rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400/70 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
-                                          placeholder="選填"
-                                        />
-                                      </div>
-                                      <div className="flex gap-2">
-                                        <button
-                                          type="submit"
-                                          disabled={addingTask}
-                                          className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 shadow-lg shadow-amber-200/30 transition hover:bg-amber-400 disabled:opacity-60"
-                                        >
-                                          {addingTask ? "新增中…" : "儲存"}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setAddingTaskFor(null);
-                                            setAddTaskError(null);
-                                            setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
-                                          }}
-                                          className="rounded-lg border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-100"
-                                        >
-                                          取消
-                                        </button>
-                                      </div>
-                                    </form>
-                                  ) : (
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        setAddingTaskFor(pid);
-                                        setAddTaskError(null);
-                                        setNewTaskForm({ 任務名稱: "", 任務類型: "", 任務負責人: "", 到期日: "", 備註: "" });
+                                        setSelectedMaster(row);
+                                        setIsEditingMaster(false);
+                                        setSaveMasterError(null);
+                                        setMasterDetailPane("tasks");
+                                        window.setTimeout(() => {
+                                          document.getElementById("master-detail-dock")?.scrollIntoView({
+                                            behavior: "smooth",
+                                            block: "nearest",
+                                          });
+                                        }, 50);
                                       }}
-                                      className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100/90"
+                                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                                        taskActive
+                                          ? "border-teal-600 bg-teal-700 text-white"
+                                          : projectTasksOpen.length > 0
+                                            ? "border-teal-200 bg-teal-50 text-teal-900 hover:bg-teal-100"
+                                            : "border-stone-200 bg-stone-50 text-stone-600 hover:bg-stone-100"
+                                      }`}
                                     >
-                                      + 新增任務
+                                      任務 {projectTasksOpen.length}
                                     </button>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
+                                    {childCount > 0 ? (
+                                      <button
+                                        type="button"
+                                        onClick={toggleMasterTree}
+                                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                                          treeOpen
+                                            ? "border-sky-500 bg-sky-600 text-white"
+                                            : "border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100"
+                                        }`}
+                                      >
+                                        {treeOpen ? "收合" : "子專案"} {childCount}
+                                      </button>
+                                    ) : null}
+                                    {row.長期案 ? (
+                                      <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-800">長期案</span>
+                                    ) : null}
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </div>
                         </Fragment>
                       );
                     })
                   )}
-                </tbody>
-              </table>
+                </div>
+              </div>
+              <div id="master-detail-dock" className="sticky top-4 min-h-[28rem] min-w-0">
+                <div
+                  ref={setMasterDetailHost}
+                  className={selectedMaster ? "min-h-[28rem]" : "hidden"}
+                />
+                {selectedMaster ? null : (
+                  <div className="rounded-2xl border border-dashed border-emerald-200 bg-gradient-to-br from-emerald-50/80 via-white to-amber-50/60 p-6">
+                    <p className="text-sm font-semibold text-emerald-900">選左邊的專案</p>
+                    <p className="mt-2 text-sm leading-relaxed text-stone-500">點一張卡片看這個專案。點卡片上的「任務」則直接看任務。</p>
+                  </div>
+                )}
+              </div>
             </div>
             {searchedMasterList.length > visibleMasterRows.length && (
               <p className="mt-2 text-right text-xs text-stone-500">載入中 {visibleMasterRows.length} / {searchedMasterList.length}</p>
@@ -9022,6 +9041,19 @@ export default function DashboardPage() {
                     </p>
                   </div>
                 )}
+                {createUserForm.role !== "KOL" ? (
+                  <div>
+                    <SearchableSelectField
+                      label="直屬主管"
+                      value={createUserForm.直屬主管}
+                      onChange={(v) => setCreateUserForm((f) => ({ ...f, 直屬主管: v }))}
+                      options={employeeUserNames.filter((name) => name !== createUserForm.name.trim())}
+                      searchPlaceholder="搜尋員工…"
+                      emptyHint="沒填的話，這個人新開的專案主管是 Andy"
+                    />
+                    <p className="mt-1 text-xs leading-relaxed text-stone-500">可以不填。主管自己開的案子，會同時拿專案PM 7.5% 和主管 2.5%，一共 10%。</p>
+                  </div>
+                ) : null}
               </div>
               <div className="mt-6 flex justify-end gap-3">
                 <button
@@ -10683,6 +10715,22 @@ export default function DashboardPage() {
                 </div>
               </div>
               <ListAmountSummary count={searchedPayout.length} amount={payoutListTotal} label="分潤金額合計" />
+              {payoutWorkflowTab === "settled" && payoutSettledDayGroups.length > 0 && (
+                <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {payoutSettledDayGroups.map((group) => (
+                    <div key={group.date} className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50/80 px-4 py-3">
+                      <div>
+                        <p className="text-[10px] font-bold tracking-wide text-emerald-800">匯款日</p>
+                        <p className="text-base font-bold tabular-nums text-stone-900">{group.date}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] font-medium text-emerald-800">{group.rows.length} 筆</p>
+                        <p className="text-lg font-bold tabular-nums text-emerald-950">{formatAmount(String(Math.round(group.total)))}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2">
                   {showPayoutClaimChecks ? (
@@ -10813,7 +10861,17 @@ export default function DashboardPage() {
                                 />
                               </p>
                             )}
+                            {payoutWorkflowTab === "settled" && (
+                              <p className="text-sm font-medium text-stone-700">
+                                <span className="text-stone-500">匯款日期</span> {String(row.分潤匯款日期 ?? "").trim() || "—"}
+                              </p>
+                            )}
                           </div>
+                        )}
+                        {payoutWorkflowTab === "settled" && !(showPct || showTitle) && (
+                          <p className={`text-sm font-medium text-stone-700 ${showAmt ? "mt-3" : ""}`}>
+                            <span className="text-stone-500">匯款日期</span> {String(row.分潤匯款日期 ?? "").trim() || "—"}
+                          </p>
                         )}
                         {/* 可摺疊：其餘可見欄位 */}
                         {hasExpandable && (
@@ -10842,9 +10900,6 @@ export default function DashboardPage() {
                                 )}
                                 {payoutVisibleCols.includes("廠商付款日期") && (
                                   <p><span className="text-stone-500">廠商付款日期</span> {String(r.廠商付款日期 ?? "—")}</p>
-                                )}
-                                {payoutWorkflowTab === "settled" && payoutVisibleCols.includes("分潤匯款日期") && (
-                                  <p><span className="text-stone-500">分潤匯款日期</span> {String(r.分潤匯款日期 ?? "—")}</p>
                                 )}
                                 {payoutVisibleCols.includes("分潤類型") && (
                                   <p>
@@ -11056,6 +11111,17 @@ export default function DashboardPage() {
               >
                 發票清冊
               </button>
+              {(me?.role === "董事長" || me?.role === "會計") && isInvoiceEInvoiceLive() ? (
+                <button
+                  type="button"
+                  onClick={() => setFinanceSubTab("invoiceReview")}
+                  className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                    financeSubTab === "invoiceReview" ? "bg-amber-500 text-slate-900 shadow shadow-amber-200/40" : "text-stone-500 hover:text-stone-900"
+                  }`}
+                >
+                  發票審核
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setFinanceSubTab("payments")}
@@ -11199,13 +11265,96 @@ export default function DashboardPage() {
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{financePayoutEditError}</p>
               )}
               <p className="mb-2 text-[11px] text-stone-500">
-                「已申請」是員工已經按下提領、還沒匯出的列。勾選後按下方「標記已付款」，<strong className="text-stone-600">僅董事長</strong>可操作。
+                {financeEmployeePayoutTab === "paid"
+                  ? "已付款依匯款日分開。看某一天匯出多少，對當天的銀行紀錄。"
+                  : "「已申請」是員工已經按下提領、還沒匯出的列。勾選後按下方「標記已付款」，僅董事長可操作。"}
               </p>
               <ListAmountSummary
                 count={searchedFinanceEmployeePayout.length}
                 amount={financeEmployeePayoutListTotal}
                 label="分潤金額合計"
               />
+              {financeEmployeePayoutTab === "paid" && financeEmployeePaidDayGroups.length > 0 ? (
+                <div className="space-y-4">
+                  {financeEmployeePaidDayGroups.map((group) => (
+                    <section key={group.date} className="overflow-hidden rounded-xl border border-emerald-200">
+                      <div className="flex items-center justify-between gap-4 bg-emerald-50 px-4 py-3">
+                        <div>
+                          <p className="text-[10px] font-bold tracking-wide text-emerald-800">匯款日</p>
+                          <p className="text-xl font-bold tabular-nums text-stone-900">{group.date}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs font-medium text-emerald-800">{group.rows.length} 筆</p>
+                          <p className="text-2xl font-bold tabular-nums text-emerald-950">{formatAmount(String(Math.round(group.total)))}</p>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-stone-200">
+                          <thead className="bg-stone-100">
+                            <tr>
+                              <th className="px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">已付款</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">專案</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">領取人</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">分潤類型</th>
+                              <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-stone-600">分潤金額</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-stone-600">廠商付款日</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-stone-200 bg-white">
+                            {group.rows.map((row) => {
+                              const id = String(row.id ?? "").trim();
+                              const saving = id !== "" && financePayoutSavingIds.includes(id);
+                              const pid = String(row.專案ID ?? "").trim();
+                              const pname = String(row.專案名稱 ?? "").trim();
+                              const canTogglePaid = me?.role === "董事長";
+                              return (
+                                <tr key={id || `${pid}-${row.領取人}-${row.分潤類型}`} className="hover:bg-emerald-50/40">
+                                  <td className="px-3 py-3 align-middle">
+                                    <label
+                                      className={`inline-flex items-center gap-2 text-xs text-stone-700 ${
+                                        canTogglePaid && id && !saving ? "cursor-pointer" : "cursor-not-allowed opacity-70"
+                                      }`}
+                                      title={canTogglePaid ? undefined : "僅董事長可勾選已付款"}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked
+                                        disabled={saving || !id || !canTogglePaid}
+                                        onChange={(e) => {
+                                          if (!canTogglePaid) return;
+                                          void persistEmployeePayoutPaid(row, e.target.checked);
+                                        }}
+                                        className="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400 disabled:opacity-50"
+                                      />
+                                      {saving ? "儲存中…" : "已付"}
+                                    </label>
+                                  </td>
+                                  <td className="px-4 py-3 text-sm">
+                                    <div className="max-w-xs truncate font-semibold text-stone-900" title={pname || pid || undefined}>
+                                      {pname || pid || "—"}
+                                    </div>
+                                    {pname && pid ? (
+                                      <div className="max-w-xs truncate text-[11px] text-stone-400" title={pid}>
+                                        {pid}
+                                      </div>
+                                    ) : null}
+                                  </td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-stone-900">{row.領取人 ?? "—"}</td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-600">{displayPayoutTypeLabel(row.分潤類型) || "—"}</td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold tabular-nums text-stone-900">
+                                    {formatAmount(row.分潤金額)}
+                                  </td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-stone-600">{row.廠商付款日期 ?? "—"}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              ) : (
               <div className="overflow-x-auto rounded-xl border border-stone-200/90">
                 {searchedFinanceEmployeePayout.length === 0 ? (
                   <p className="px-4 py-10 text-center text-sm text-stone-500">
@@ -11354,6 +11503,7 @@ export default function DashboardPage() {
                   </table>
                 )}
               </div>
+              )}
               {me?.role === "董事長" && financeEmployeePayoutTab !== "paid" && selectedFinancePayoutIds.length > 0 ? (
                 <div className="sticky bottom-4 z-40 mt-4">
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-white/95 px-4 py-3 shadow-xl ring-1 ring-emerald-100 backdrop-blur">
@@ -12253,10 +12403,31 @@ export default function DashboardPage() {
             </>
           )}
 
+          {financeSubTab === "invoiceReview" &&
+            isInvoiceEInvoiceLive() &&
+            (me?.role === "董事長" || me?.role === "會計") && (
+            <InvoiceReviewPanel canReview />
+          )}
+
           {financeSubTab === "invoices" && (
             <>
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap gap-2">
+                  {isInvoiceEInvoiceLive() ? (
+                  <Link
+                    href="/invoice"
+                    className="rounded-xl border border-sky-600 bg-sky-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-sky-700"
+                  >
+                    開立發票
+                  </Link>
+                  ) : (
+                    <span
+                      title={invoiceEInvoiceLockedMessage()}
+                      className="rounded-xl border border-stone-200 bg-stone-100 px-4 py-2 text-xs font-bold text-stone-400"
+                    >
+                      開立發票（{invoiceEInvoiceLaunchLabel()} 開放）
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -12660,6 +12831,7 @@ export default function DashboardPage() {
                                   );
                                 }
                                 const wide = k === "發票號碼";
+                                const voided = wide && invoiceIsVoided(inv);
                                 return (
                                   <td
                                     key={k}
@@ -12678,6 +12850,7 @@ export default function DashboardPage() {
                                       }}
                                       className={inputCls}
                                     />
+                                    {voided ? <p className="mt-1 text-[10px] font-bold text-red-700">已作廢</p> : null}
                                   </td>
                                 );
                               })}
@@ -12712,6 +12885,26 @@ export default function DashboardPage() {
                                       >
                                         {saving ? "存檔中…" : dirty ? "存檔" : "已儲存"}
                                       </button>
+                                      {isEInvoiceTrackNumber(String(inv.發票號碼 ?? "")) ? (
+                                        invoiceIsVoided(inv) ? (
+                                          <span className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
+                                            已作廢
+                                          </span>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            disabled={voidingInvoice}
+                                            onClick={() => {
+                                              setInvoiceEditError(null);
+                                              setVoidReason("");
+                                              setVoidInvoiceTarget({ number: String(inv.發票號碼 ?? "").trim().toUpperCase() });
+                                            }}
+                                            className="rounded-lg border border-red-300 bg-white px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50"
+                                          >
+                                            作廢
+                                          </button>
+                                        )
+                                      ) : null}
                                       <button
                                         type="button"
                                         disabled={deletingInvoiceIdSet.has(rowId)}
@@ -13135,6 +13328,48 @@ export default function DashboardPage() {
         )}
       </div>
       </div>
+
+      {voidInvoiceTarget ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-stone-900/40 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-5 shadow-2xl">
+            <h2 className="text-lg font-bold text-stone-900">作廢發票</h2>
+            <p className="mt-1 text-sm text-stone-600">
+              將作廢 <span className="font-semibold text-stone-900">{voidInvoiceTarget.number}</span>。清冊保留這筆，金額與付款日不變。
+            </p>
+            <label className="mt-4 block text-xs font-semibold text-stone-500">
+              作廢原因（最多 20 字）
+              <input
+                value={voidReason}
+                maxLength={20}
+                onChange={(e) => setVoidReason(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-900"
+                placeholder="例如：金額開錯"
+              />
+            </label>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={voidingInvoice}
+                onClick={() => {
+                  setVoidInvoiceTarget(null);
+                  setVoidReason("");
+                }}
+                className="rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-600"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={voidingInvoice || !voidReason.trim()}
+                onClick={() => void voidInvoiceOnAmego()}
+                className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50"
+              >
+                {voidingInvoice ? "作廢中…" : "確認作廢"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* 新增發票（可批次多列） */}
       {showInvoiceCreateModal && (
@@ -14010,18 +14245,22 @@ export default function DashboardPage() {
                 <section>
                   <h3 className="mb-3 text-base font-bold text-amber-800">人員與分潤設定</h3>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+                    <div>
+                      <Field label="專案PM" value={createForm.執行管理員 || "—"} />
+                      <p className="mt-1 text-xs text-stone-500">開立的人就是這個專案的專案PM，分潤 7.5%。</p>
+                    </div>
+                    <div>
+                      <Field label="主管" value={createForm.直屬主管 || "尚未設定"} />
+                      <p className="mt-1 text-xs text-stone-500">
+                        {createForm.直屬主管.trim().toLowerCase() === createForm.執行管理員.trim().toLowerCase() && createForm.直屬主管.trim()
+                          ? "開案的人自己就是主管，同時拿專案PM 7.5% 和主管 2.5%，一共 10%。每個主管開自己的案子都一樣。"
+                          : "這位專案PM的主管，分潤 2.5%。帳號沒填直屬主管時，主管是 Andy。"}
+                      </p>
+                    </div>
                     <SearchableSelectField
                       label="KOL名稱"
                       value={createForm.KOL名稱}
-                      onChange={(v) => {
-                        const p = partnerByKolName.get(v.trim());
-                        setCreateForm((f) => ({
-                          ...f,
-                          KOL名稱: v,
-                          主管: f.主管.trim() || p?.主管 || "",
-                          KOL開發者: f.KOL開發者.trim() || p?.KOL開發者 || "",
-                        }));
-                      }}
+                      onChange={(v) => setCreateForm((f) => ({ ...f, KOL名稱: v }))}
                       options={kolNameOptionsFromDb}
                       searchPlaceholder="搜尋 KOL…"
                       emptyHint="尚無合作夥伴資料時請先至「合作夥伴」新增 KOL"
@@ -14032,57 +14271,9 @@ export default function DashboardPage() {
                       acknowledged={createSimilarAck}
                       onAcknowledge={(on) => setCreateSimilarAckKey(on ? createSimilarKey : "")}
                     />
-                    <InputField label="廠商名稱" value={createForm.廠商名稱} onChange={(v) => setCreateForm((f) => ({ ...f, 廠商名稱: v }))} />
-                    {isPayoutModeB(createForm.專案類型) ? (
-                      <>
-                        <SelectField
-                          label="專案開發人"
-                          value={createForm.專案開發人}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, 專案開發人: v }))}
-                          options={employeeUserNames}
-                        />
-                        <SelectField
-                          label="經紀人"
-                          value={createForm.經紀人}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, 經紀人: v }))}
-                          options={[...new Set([...employeeUserNames, createForm.經紀人].filter(Boolean))]}
-                        />
-                        <SelectField
-                          label="主管"
-                          value={createForm.主管}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, 主管: v }))}
-                          options={[...new Set([...employeeUserNames, createForm.主管].filter(Boolean))]}
-                        />
-                        <SelectField
-                          label="KOL引薦人"
-                          value={createForm.KOL開發者}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, KOL開發者: v }))}
-                          options={[...new Set([...employeeUserNames, createForm.KOL開發者].filter(Boolean))]}
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <SelectField label="專案BDPM" value={createForm.專案BDPM} onChange={(v) => setCreateForm((f) => ({ ...f, 專案BDPM: v }))} options={employeeUserNames} />
-                        <SelectField
-                          label="專案引薦人"
-                          value={createForm.專案引薦人}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, 專案引薦人: v }))}
-                          options={employeeUserNames}
-                        />
-                        <SelectField
-                          label="專案管理員"
-                          value={createForm.專案管理員}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, 專案管理員: v }))}
-                          options={employeeUserNames}
-                        />
-                        <SelectField
-                          label="執行管理員"
-                          value={createForm.執行管理員}
-                          onChange={(v) => setCreateForm((f) => ({ ...f, 執行管理員: v }))}
-                          options={employeeUserNames}
-                        />
-                      </>
-                    )}
+                    <InputField label="廠商名稱（發票抬頭）" value={createForm.廠商名稱} onChange={(v) => setCreateForm((f) => ({ ...f, 廠商名稱: v }))} />
+                    <InputField label="統一編號" value={createForm.統一編號} onChange={(v) => setCreateForm((f) => ({ ...f, 統一編號: v.replace(/\D/g, "").slice(0, 8) }))} />
+                    <InputField label="收件人 Email" value={createForm.收件人Email} onChange={(v) => setCreateForm((f) => ({ ...f, 收件人Email: v }))} />
                   </div>
                 </section>
 
@@ -14254,8 +14445,22 @@ export default function DashboardPage() {
                       <p className="mt-1 text-xs leading-relaxed text-stone-500">經紀人常見：主管、* 或留空。</p>
                     </div>
                   )}
+                  {editUserForm.role !== "KOL" ? (
+                    <div className="sm:col-span-2">
+                      <SearchableSelectField
+                        label="直屬主管"
+                        value={editUserForm.直屬主管}
+                        onChange={(v) => setEditUserForm((f) => ({ ...f, 直屬主管: v }))}
+                        options={employeeUserNames.filter((name) => name !== editUserForm.name.trim())}
+                        searchPlaceholder="搜尋員工…"
+                        emptyHint="沒填的話，這個人新開的專案主管是 Andy"
+                      />
+                      <p className="mt-1 text-xs leading-relaxed text-stone-500">可以不填。沒填的人，之後新開的專案主管是 Andy，分潤 2.5%。主管自己開的案子，會同時拿專案PM 7.5% 和主管 2.5%，一共 10%。已開的專案不會改。</p>
+                    </div>
+                  ) : null}
                 </div>
-                <div className="mt-3 flex justify-end">
+                <div className="mt-3 flex items-center justify-end gap-3">
+                  {profileSavedHint ? <p className="text-sm font-semibold text-emerald-700">{profileSavedHint}</p> : null}
                   <button
                     type="button"
                     disabled={savingUser}
@@ -14281,6 +14486,7 @@ export default function DashboardPage() {
                             role,
                             dept: editUserForm.dept.trim() || undefined,
                             scope: editUserForm.scope.trim() || undefined,
+                            直屬主管: editUserForm.直屬主管.trim(),
                           }),
                         });
                         const data = (await safeResJson(res)) as { ok?: boolean; error?: string; user?: User };
@@ -14291,6 +14497,7 @@ export default function DashboardPage() {
                         }
                         setUsers((prev) => prev.map((u) => (u.email === selectedUserForVisibility.email ? data.user! : u)));
                         setSelectedUserForVisibility(data.user!);
+                        setProfileSavedHint("已儲存");
                         setSavingUser(false);
                       } catch (err) {
                         setEditUserError(err instanceof Error ? err.message : "儲存失敗");
@@ -14511,21 +14718,98 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 大總表 詳情抽屜 */}
+      {/* 大總表詳情：在大總表裡是右欄本身；其他分頁仍用原本的側欄 */}
       {selectedMaster && (
         <>
-        <div className="fixed inset-0 z-[60] flex items-start justify-end bg-stone-900/30 backdrop-blur-sm">
-          <div className="flex h-full w-full max-w-xl flex-col border-l border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80">
-            <header className="flex items-center justify-between border-b border-stone-200/90 bg-stone-100/90 px-6 py-4">
-              <div>
-                <h2 className="text-xl font-bold tracking-tight text-stone-900">
-                  專案詳情 · {selectedMaster.專案名稱 ?? selectedMaster.專案ID}
-                </h2>
-                <p className="mt-1.5 text-sm font-medium text-stone-500">
-                  專案ID：{selectedMaster.專案ID} · 狀態：{selectedMaster.專案狀態 ?? "—"}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
+        {(() => {
+          const panel = (
+          <div
+            className={
+              activeSection === "master"
+                ? "flex h-[calc(100vh-16rem)] min-h-[28rem] w-full flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white"
+                : "flex h-full w-full max-w-xl flex-col border-l border-stone-200/90 bg-white shadow-2xl ring-1 ring-stone-200/80"
+            }
+          >
+            <header className="border-b border-amber-100/80 bg-gradient-to-br from-amber-50/90 via-white to-emerald-50/40 px-5 py-4">
+              <h2 className="break-words text-base font-semibold tracking-tight text-stone-900">
+                {selectedMaster.專案名稱 ?? selectedMaster.專案ID}
+              </h2>
+              <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm leading-relaxed text-stone-600">
+                {(() => {
+                  const kol = String(selectedMaster.KOL名稱 ?? "").trim();
+                  const vendor = String(selectedMaster.廠商名稱 ?? "").trim();
+                  const client = kol || vendor;
+                  const pm = String(selectedMaster.執行管理員 ?? "").trim();
+                  const status = String(selectedMaster.專案狀態 || "未設定").trim();
+                  const closedish = /結案|完成|取消/.test(status);
+                  return (
+                    <>
+                      <span
+                        className={
+                          client
+                            ? "rounded-full px-2 py-0.5 text-[12px] font-bold"
+                            : "font-medium text-stone-500"
+                        }
+                        style={
+                          client
+                            ? { color: "#1F7A9A", backgroundColor: "#E6F5FA" }
+                            : undefined
+                        }
+                      >
+                        {client ? `這是${client}的案子` : "這筆案子"}
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                          closedish
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-amber-100 text-amber-900"
+                        }`}
+                      >
+                        {status}
+                      </span>
+                      {pm ? <span className="text-stone-500">{pm}負責</span> : null}
+                    </>
+                  );
+                })()}
+                <span className="text-xs text-stone-400">{selectedMaster.專案ID}</span>
+              </p>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                {activeSection === "master" ? (
+                  <div className="inline-flex h-8 items-center rounded-full border border-emerald-200/80 bg-emerald-50/80 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setMasterDetailPane("project")}
+                      className={`h-7 rounded-full px-3 text-xs font-semibold transition ${
+                        masterDetailPane === "project"
+                          ? "bg-emerald-800 text-white shadow-sm"
+                          : "text-emerald-900/70 hover:text-emerald-950"
+                      }`}
+                    >
+                      專案
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMasterDetailPane("tasks")}
+                      className={`h-7 rounded-full px-3 text-xs font-semibold transition ${
+                        masterDetailPane === "tasks"
+                          ? "bg-teal-700 text-white shadow-sm"
+                          : "text-teal-900/70 hover:text-teal-950"
+                      }`}
+                    >
+                      任務{" "}
+                      {
+                        tasks.filter(
+                          (t) =>
+                            String(t.專案ID ?? "").trim().toLowerCase() ===
+                              String(selectedMaster.專案ID ?? "").trim().toLowerCase() && !t.任務完成
+                        ).length
+                      }
+                    </button>
+                  </div>
+                ) : (
+                  <span />
+                )}
+              <div className="flex flex-wrap items-center gap-1.5">
                 {me?.role === "董事長" && (
                   <button
                     type="button"
@@ -14533,25 +14817,34 @@ export default function DashboardPage() {
                       setSaveMasterError(null);
                       setShowDeleteMasterConfirm(true);
                     }}
-                    className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100"
+                    className="inline-flex h-8 items-center rounded-full border border-red-200 bg-red-50 px-3 text-xs font-medium text-red-800 transition hover:bg-red-100"
                   >
-                    刪除專案
+                    刪除
                   </button>
                 )}
                 {canMutate && (
                   <button
                     type="button"
                     onClick={() => openCreateMasterFromCopy(selectedMaster)}
-                    className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
+                    className="inline-flex h-8 items-center rounded-full border border-amber-200 bg-amber-50 px-3 text-xs font-medium text-amber-900 transition hover:bg-amber-100"
                     title="複製為新專案草稿（金額不帶入）"
                   >
-                    複製專案
+                    複製
                   </button>
                 )}
+                {me?.role && me.role !== "KOL" && isInvoiceEInvoiceLive() ? (
+                  <Link
+                    href={`/invoice?project=${encodeURIComponent(String(selectedMaster.專案ID ?? ""))}`}
+                    className="inline-flex h-8 items-center rounded-full border border-sky-200 bg-sky-50 px-3 text-xs font-medium text-sky-900 transition hover:bg-sky-100"
+                  >
+                    開立發票
+                  </Link>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => {
                     if (!isEditingMaster) {
+                      setMasterDetailPane("project");
                       setIsEditingMaster(true);
                       setEditSimilarAckKey("");
                       setSaveMasterError(null);
@@ -14587,6 +14880,8 @@ export default function DashboardPage() {
                       主管: selectedMaster.主管 ?? "",
                       KOL開發者: selectedMaster.KOL開發者 ?? "",
                       廠商名稱: selectedMaster.廠商名稱 ?? "",
+                      統一編號: selectedMaster.統一編號 ?? "",
+                      收件人Email: selectedMaster.收件人Email ?? "",
                       專案BDPM: selectedMaster.專案BDPM ?? "",
                       專案BDPM分潤成數: selectedMaster.專案BDPM分潤成數 ?? "",
                       專案引薦人: selectedMaster.專案引薦人 ?? "",
@@ -14597,12 +14892,14 @@ export default function DashboardPage() {
                       專案管理員分潤成數: selectedMaster.專案管理員分潤成數 ?? "",
                       執行管理員: selectedMaster.執行管理員 ?? "",
                       執行管理員分潤成數: selectedMaster.執行管理員分潤成數 ?? "",
+                      直屬主管: selectedMaster.直屬主管 ?? "",
+                      直屬主管分潤成數: selectedMaster.直屬主管分潤成數 ?? "",
                       專案內容: selectedMaster.專案內容 ?? "",
                       備註: selectedMaster.備註 ?? "",
                       老師備註: selectedMaster.老師備註 ?? "",
                     });
                   }}
-                  className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
+                  className="inline-flex h-8 items-center rounded-full border border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 transition hover:border-amber-200 hover:bg-amber-50 hover:text-amber-900"
                 >
                   {isEditingMaster ? "取消編輯" : "編輯"}
                 </button>
@@ -14615,17 +14912,34 @@ export default function DashboardPage() {
                     setShowDeleteMasterConfirm(false);
                     setPendingDeleteMasterTaskTemplate(null);
                   }}
-                  className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-amber-50 hover:text-amber-800"
+                  className="inline-flex h-8 items-center rounded-full border border-transparent px-3 text-xs font-medium text-stone-500 transition hover:bg-stone-100 hover:text-stone-800"
                 >
                   關閉
                 </button>
               </div>
+              </div>
             </header>
 
             <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
+              {activeSection === "master" && masterDetailPane === "tasks" ? (
+                renderMasterSideTasks()
+              ) : (
+              <>
               {saveMasterError && (
                 <p className="rounded-lg bg-amber-100/90 px-3 py-2 text-sm font-medium text-amber-800">{saveMasterError}</p>
               )}
+
+              {(() => {
+                const pid = String(selectedMaster.專案ID ?? "").trim();
+                const invoiceSummary = invoiceSummaryByProjectId.get(pid);
+                return (
+                  <MasterProjectProgress
+                    專案狀態={isEditingMaster ? editMasterForm.專案狀態 : selectedMaster.專案狀態}
+                    開案日期={isEditingMaster ? editMasterForm.開案日期 : selectedMaster.開案日期}
+                    invoiceSummary={invoiceSummary ?? null}
+                  />
+                );
+              })()}
 
               {isEditingMaster && (
                 <div className="flex items-center justify-end">
@@ -14674,7 +14988,8 @@ export default function DashboardPage() {
                         }
                         setMasterList((prev) => prev.map((r) => (r.id === data.master!.id ? data.master! : r)));
                         setSelectedMaster(data.master);
-                        await fetchMasterEditLogs(data.master.專案ID);
+                        if (masterEditLogsOpen) await fetchMasterEditLogs(data.master.專案ID);
+                        else setMasterEditLogsLoadedFor("");
                         await refreshDashboardData(["master", "payout", "finance"]);
                         setIsEditingMaster(false);
                         setSavingMaster(false);
@@ -14810,6 +15125,78 @@ export default function DashboardPage() {
                   )}
                 </div>
               </section>
+
+              {(() => {
+                const pid = String(selectedMaster.專案ID ?? "").trim();
+                const invoiceSummary = invoiceSummaryByProjectId.get(pid);
+                const projectInvoices = invoiceSummary?.rows ?? [];
+                if (!canViewMasterInvoiceSummary) return null;
+                return (
+                  <div className="rounded-lg border border-emerald-100 bg-white/90 p-3">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-800">此專案發票</h3>
+                      {invoiceSummary && invoiceSummary.count > 0 && (
+                        <p className="text-xs text-stone-500">
+                          共 {invoiceSummary.count} 張，含稅合計 {formatAmount(String(Math.round(invoiceSummary.totalAmount)))}，
+                          已收 {formatAmount(String(Math.round(invoiceSummary.paidAmount)))}，
+                          未收 {formatAmount(String(Math.round(invoiceSummary.unpaidAmount)))}
+                        </p>
+                      )}
+                    </div>
+                    {projectInvoices.length === 0 ? (
+                      <p className="rounded-lg bg-stone-50 px-3 py-3 text-sm text-stone-500">
+                        尚無對應發票。可到「財務 / 發票清冊」將發票的對應專案設為此專案ID。
+                      </p>
+                    ) : (
+                      <div className="max-w-full overflow-x-auto rounded-lg border border-stone-200/90">
+                        <table className="min-w-full divide-y divide-stone-200 text-xs">
+                          <thead className="bg-emerald-50">
+                            <tr>
+                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">發票號碼</th>
+                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">發票日期</th>
+                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">收款對象</th>
+                              <th className="whitespace-nowrap px-3 py-2 text-right font-semibold text-stone-600">含稅金額</th>
+                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">預計付款日</th>
+                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">付款日期</th>
+                              <th className="min-w-[10rem] px-3 py-2 text-left font-semibold text-stone-600">備註</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-stone-100 bg-white">
+                            {projectInvoices.map((invoice, idx) => (
+                              <tr key={invoice.id ?? `${pid}-invoice-${idx}`} className="hover:bg-emerald-50/50">
+                                <td className="whitespace-nowrap px-3 py-2 font-medium text-stone-800">{invoice.發票號碼 || "—"}</td>
+                                <td className="whitespace-nowrap px-3 py-2 text-stone-600">{invoice.發票日期 || "—"}</td>
+                                <td className="whitespace-nowrap px-3 py-2 text-stone-600">{invoice.收款對象 || "—"}</td>
+                                <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums text-stone-800">
+                                  {formatAmount(invoice.發票金額含稅)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 text-stone-600">{invoice.廠商預計付款日 || "—"}</td>
+                                <td className="whitespace-nowrap px-3 py-2 text-stone-600">
+                                  {invoice.廠商付款日期 ? (
+                                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-800">
+                                      {invoice.廠商付款日期}
+                                    </span>
+                                  ) : (
+                                    <span className="rounded-full bg-orange-100 px-2 py-0.5 font-semibold text-orange-800">未收</span>
+                                  )}
+                                </td>
+                                <td className="max-w-[16rem] px-3 py-2 text-stone-600">
+                                  <span className="line-clamp-2 break-words">{invoice.備註 || "—"}</span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {showHiddenMasterBlocks && projectInvoices.length > 0 && (
+                      <div className="mt-3">
+                        <PaymentCollectionLink 專案ID={pid} hasInvoices compact />
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {(selectedMaster.長期案 || isEditingMaster) && (
                 <section>
@@ -15150,9 +15537,15 @@ export default function DashboardPage() {
               </section>
 
               {canViewSelectedMasterAmounts ? (
-                <MasterEditHistory logs={masterEditLogs} loading={masterEditLogsLoading} />
+                <MasterEditHistory
+                  logs={masterEditLogs}
+                  loading={masterEditLogsLoading}
+                  open={masterEditLogsOpen}
+                  onToggle={toggleMasterEditLogs}
+                />
               ) : null}
 
+              {showHiddenMasterBlocks && (
               <section>
                 <h3 className="mb-3 text-base font-bold text-amber-800">收款表單</h3>
                 <PaymentCollectionLink
@@ -15161,8 +15554,9 @@ export default function DashboardPage() {
                   showSubmissions
                 />
               </section>
+              )}
 
-              {String(selectedMaster.KOL名稱 ?? "").trim() && (
+              {showHiddenMasterBlocks && String(selectedMaster.KOL名稱 ?? "").trim() && (
                 <section>
                   <h3 className="mb-3 text-base font-bold text-amber-800">KOL 請款發票</h3>
                   <p className="mb-3 text-xs text-stone-500">
@@ -15341,19 +15735,35 @@ export default function DashboardPage() {
               <section>
                 <h3 className="mb-3 text-base font-bold text-amber-800">人員與分潤設定</h3>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  <Field
+                    label={isTwoRolePayoutProject(selectedMaster) ? "專案PM" : "執行PM"}
+                    value={
+                      String((isEditingMaster ? editMasterForm.執行管理員 : selectedMaster?.執行管理員) ?? "").trim()
+                        ? `${isEditingMaster ? editMasterForm.執行管理員 : selectedMaster?.執行管理員 ?? ""}${
+                            String((isEditingMaster ? editMasterForm.執行管理員分潤成數 : selectedMaster?.執行管理員分潤成數) ?? "").trim()
+                              ? ` · ${isEditingMaster ? editMasterForm.執行管理員分潤成數 : selectedMaster?.執行管理員分潤成數 ?? ""}`
+                              : ""
+                          }`
+                        : "—"
+                    }
+                  />
+                  <Field
+                    label={isTwoRolePayoutProject(selectedMaster) ? "主管" : "直屬主管"}
+                    value={
+                      String((isEditingMaster ? editMasterForm.直屬主管 : selectedMaster?.直屬主管) ?? "").trim()
+                        ? `${isEditingMaster ? editMasterForm.直屬主管 : selectedMaster?.直屬主管 ?? ""}${
+                            String((isEditingMaster ? editMasterForm.直屬主管分潤成數 : selectedMaster?.直屬主管分潤成數) ?? "").trim()
+                              ? ` · ${isEditingMaster ? editMasterForm.直屬主管分潤成數 : selectedMaster?.直屬主管分潤成數 ?? ""}`
+                              : ""
+                          }`
+                        : "—"
+                    }
+                  />
                   {isEditingMaster ? (
                     <SearchableSelectField
                       label="KOL名稱"
                       value={editMasterForm.KOL名稱}
-                      onChange={(v) => {
-                        const p = partnerByKolName.get(v.trim());
-                        setEditMasterForm((f) => ({
-                          ...f,
-                          KOL名稱: v,
-                          主管: f.主管.trim() || p?.主管 || "",
-                          KOL開發者: f.KOL開發者.trim() || p?.KOL開發者 || "",
-                        }));
-                      }}
+                      onChange={(v) => setEditMasterForm((f) => ({ ...f, KOL名稱: v }))}
                       options={[...new Set([...kolNameOptionsFromDb, editMasterForm.KOL名稱].filter(Boolean))].sort((a, b) =>
                         a.localeCompare(b, "zh-Hant")
                       )}
@@ -15372,36 +15782,34 @@ export default function DashboardPage() {
                     />
                   )}
                   {isEditingMaster ? (
-                    <InputField label="廠商名稱" value={editMasterForm.廠商名稱} onChange={(v) => setEditMasterForm((f) => ({ ...f, 廠商名稱: v }))} />
+                    <InputField label="廠商名稱（發票抬頭）" value={editMasterForm.廠商名稱} onChange={(v) => setEditMasterForm((f) => ({ ...f, 廠商名稱: v }))} />
                   ) : (
-                    <Field label="廠商名稱" value={selectedMaster.廠商名稱} />
+                    <Field label="廠商名稱（發票抬頭）" value={selectedMaster.廠商名稱} />
                   )}
-                  {isPayoutModeB(isEditingMaster ? editMasterForm.專案類型 : selectedMaster.專案類型 ?? "") ? (
+                  {isEditingMaster ? (
+                    <InputField
+                      label="統一編號"
+                      value={editMasterForm.統一編號}
+                      onChange={(v) => setEditMasterForm((f) => ({ ...f, 統一編號: v.replace(/\D/g, "").slice(0, 8) }))}
+                    />
+                  ) : (
+                    <Field label="統一編號" value={selectedMaster.統一編號} />
+                  )}
+                  {isEditingMaster ? (
+                    <InputField
+                      label="收件人 Email"
+                      value={editMasterForm.收件人Email}
+                      onChange={(v) => setEditMasterForm((f) => ({ ...f, 收件人Email: v }))}
+                    />
+                  ) : (
+                    <Field label="收件人 Email" value={selectedMaster.收件人Email} />
+                  )}
+                  {!isTwoRolePayoutProject(selectedMaster) && (isPayoutModeB(isEditingMaster ? editMasterForm.專案類型 : selectedMaster.專案類型 ?? "") ? (
                     <>
                       {isEditingMaster ? (
                         <SelectField label="專案開發人" value={editMasterForm.專案開發人} onChange={(v) => setEditMasterForm((f) => ({ ...f, 專案開發人: v }))} options={employeeUserNames} />
                       ) : (
                         <Field label="專案開發人" value={selectedMaster.專案開發人} />
-                      )}
-                      {isEditingMaster ? (
-                        <SelectField
-                          label="經紀人"
-                          value={editMasterForm.經紀人}
-                          onChange={(v) => setEditMasterForm((f) => ({ ...f, 經紀人: v }))}
-                          options={[...new Set([...employeeUserNames, editMasterForm.經紀人].filter(Boolean))]}
-                        />
-                      ) : (
-                        <Field label="經紀人" value={selectedMaster.經紀人} />
-                      )}
-                      {isEditingMaster ? (
-                        <SelectField
-                          label="主管"
-                          value={editMasterForm.主管}
-                          onChange={(v) => setEditMasterForm((f) => ({ ...f, 主管: v }))}
-                          options={[...new Set([...employeeUserNames, editMasterForm.主管].filter(Boolean))]}
-                        />
-                      ) : (
-                        <Field label="主管" value={selectedMaster.主管 || selectedMasterPartner?.主管} />
                       )}
                       {isEditingMaster ? (
                         <SelectField
@@ -15436,19 +15844,22 @@ export default function DashboardPage() {
                       ) : (
                         <Field label="專案管理員" value={selectedMaster.專案管理員} />
                       )}
-                      {isEditingMaster ? (
-                        <SelectField label="執行管理員" value={editMasterForm.執行管理員} onChange={(v) => setEditMasterForm((f) => ({ ...f, 執行管理員: v }))} options={employeeUserNames} />
-                      ) : (
-                        <Field label="執行管理員" value={selectedMaster.執行管理員} />
-                      )}
                     </>
-                  )}
+                  ))}
                 </div>
               </section>
 
               <section>
-                <h3 className="mb-1 text-base font-bold text-amber-800">額外獎金</h3>
-                <p className="mb-3 text-xs text-stone-500">
+                <button
+                  type="button"
+                  onClick={() => setExtraBonusOpen((open) => !open)}
+                  className="rounded-full border border-stone-200 bg-white px-3 py-1 text-xs font-semibold text-stone-600 hover:bg-stone-50"
+                >
+                  {extraBonusOpen ? "收合額外獎金" : "查看額外獎金"}
+                </button>
+                {extraBonusOpen ? (
+                <>
+                <p className="mb-3 mt-3 text-xs text-stone-500">
                   可新增多筆、不同領取人；成數空白、金額手填。重算分潤不會覆蓋。僅董事長／會計可改。
                 </p>
                 {selectedMasterExtraBonuses.length > 0 ? (
@@ -15556,6 +15967,8 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 ) : null}
+                </>
+                ) : null}
               </section>
 
               <section id="master-project-content">
@@ -15591,9 +16004,15 @@ export default function DashboardPage() {
                   </div>
                 )}
               </section>
+              </>
+              )}
             </div>
           </div>
-        </div>
+          );
+          // 大總表詳情只進右欄，絕不改成浮窗；host 尚未掛上時這輪先不畫，下一輪會補上
+          if (activeSection !== "master" || !masterDetailHost) return null;
+          return createPortal(panel, masterDetailHost);
+        })()}
 
         {showDeleteMasterConfirm && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-sm">
@@ -15952,7 +16371,15 @@ export default function DashboardPage() {
               </div>
               <div className="space-y-4">
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500">任務名稱</label>
+                  <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-stone-500">
+                    任務名稱
+                    <TaskProjectInfoButton
+                      project={masterByProjectId.get(String(selectedTask.專案ID ?? "").trim())}
+                      showAmounts={canViewMasterAmountsForRow(
+                        masterByProjectId.get(String(selectedTask.專案ID ?? "").trim())
+                      )}
+                    />
+                  </label>
                   <input
                     type="text"
                     value={editTaskForm.任務名稱}

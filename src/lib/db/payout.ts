@@ -6,7 +6,7 @@
 import { getSupabase } from "@/lib/supabase/server";
 import { log } from "@/lib/log";
 import { parsePayoutRate, parseAmount } from "@/lib/payout-utils";
-import { isPayoutModeB } from "@/config/master-payout-defaults";
+import { isPayoutModeB, isTwoRolePayoutProject } from "@/config/master-payout-defaults";
 import { calc專案營收 } from "@/config/project-types";
 import type { MasterRow } from "@/lib/db/master";
 import { getMasterList, todayYmdTaipei } from "@/lib/db/master";
@@ -19,6 +19,7 @@ import {
   extraBonusPayoutTypeForRecipient,
   isExtraBonusPayoutType,
   normalizeRecipientForDedupe,
+  canonicalPayoutRoleKey,
 } from "@/lib/payout-dedupe";
 import { normalizeDecimalString } from "@/lib/number-normalize";
 
@@ -387,12 +388,18 @@ export async function insertPayoutRows(rows: PayoutInsertRow[]): Promise<void> {
 
 type PayoutDefaults = Record<string, string>;
 
-/** 同步前依「領取人」保留分潤匯款日（去重後仍對應同一人） */
+/** 同步前依「領取人 + 分潤類型」保留匯款日。同一人的專案PM與主管要分開，不能把其中一筆的付款日寫到另一筆。 */
+function payoutPersonRoleKey(recipient: unknown, payoutType: unknown): string {
+  const person = normalizeRecipientForDedupe(recipient as string | null) || "__empty__";
+  const role = canonicalPayoutRoleKey(String(payoutType ?? ""));
+  return `${person}||${role}`;
+}
+
 async function snapshotRemitDatesByRecipient(專案ID: string): Promise<Map<string, string>> {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("分潤表")
-    .select('"領取人", "分潤匯款日期"')
+    .select('"領取人", "分潤類型", "分潤匯款日期"')
     .eq("專案ID", 專案ID);
   if (error) {
     if (error.code === "42P01") return new Map();
@@ -402,7 +409,7 @@ async function snapshotRemitDatesByRecipient(專案ID: string): Promise<Map<stri
   for (const r of data ?? []) {
     const remit = String((r as Record<string, unknown>)["分潤匯款日期"] ?? "").trim();
     if (!remit) continue;
-    const key = normalizeRecipientForDedupe((r as Record<string, unknown>)["領取人"] as string | null) || "__empty__";
+    const key = payoutPersonRoleKey((r as Record<string, unknown>)["領取人"], (r as Record<string, unknown>)["分潤類型"]);
     out.set(key, remit);
   }
   return out;
@@ -459,7 +466,7 @@ async function fillEmptyPayoutVendorDate(專案ID: string, vendorPaid: string): 
 /** 重寫前保留提領申請日（欄位尚未建立時略過） */
 async function snapshotClaimDatesByRecipient(專案ID: string): Promise<Map<string, string>> {
   const supabase = getSupabase();
-  const { data, error } = await supabase.from("分潤表").select('"領取人", "提領申請日"').eq("專案ID", 專案ID);
+  const { data, error } = await supabase.from("分潤表").select('"領取人", "分潤類型", "提領申請日"').eq("專案ID", 專案ID);
   if (error) {
     if (error.code === "42P01" || error.code === "42703") return new Map();
     throw error;
@@ -468,7 +475,7 @@ async function snapshotClaimDatesByRecipient(專案ID: string): Promise<Map<stri
   for (const r of data ?? []) {
     const claimed = String((r as Record<string, unknown>)["提領申請日"] ?? "").trim();
     if (!claimed) continue;
-    const key = normalizeRecipientForDedupe((r as Record<string, unknown>)["領取人"] as string | null) || "__empty__";
+    const key = payoutPersonRoleKey((r as Record<string, unknown>)["領取人"], (r as Record<string, unknown>)["分潤類型"]);
     out.set(key, claimed);
   }
   return out;
@@ -477,7 +484,7 @@ async function snapshotClaimDatesByRecipient(專案ID: string): Promise<Map<stri
 async function restoreClaimDatesByRecipient(專案ID: string, snapshots: Map<string, string>): Promise<void> {
   if (snapshots.size === 0) return;
   const supabase = getSupabase();
-  const { data, error } = await supabase.from("分潤表").select('id, "領取人"').eq("專案ID", 專案ID);
+  const { data, error } = await supabase.from("分潤表").select('id, "領取人", "分潤類型"').eq("專案ID", 專案ID);
   if (error) {
     if (error.code === "42P01") return;
     throw error;
@@ -485,7 +492,7 @@ async function restoreClaimDatesByRecipient(專案ID: string, snapshots: Map<str
   for (const r of data ?? []) {
     const id = String((r as Record<string, unknown>).id ?? "").trim();
     if (!id) continue;
-    const key = normalizeRecipientForDedupe((r as Record<string, unknown>)["領取人"] as string | null) || "__empty__";
+    const key = payoutPersonRoleKey((r as Record<string, unknown>)["領取人"], (r as Record<string, unknown>)["分潤類型"]);
     const claimed = snapshots.get(key);
     if (!claimed) continue;
     const { error: upErr } = await supabase.from("分潤表").update({ 提領申請日: claimed }).eq("id", id).is("提領申請日", null);
@@ -496,7 +503,7 @@ async function restoreClaimDatesByRecipient(專案ID: string, snapshots: Map<str
 async function restoreRemitDatesByRecipient(專案ID: string, snapshots: Map<string, string>): Promise<void> {
   if (snapshots.size === 0) return;
   const supabase = getSupabase();
-  const { data, error } = await supabase.from("分潤表").select('id, "領取人"').eq("專案ID", 專案ID);
+  const { data, error } = await supabase.from("分潤表").select('id, "領取人", "分潤類型"').eq("專案ID", 專案ID);
   if (error) {
     if (error.code === "42P01") return;
     throw error;
@@ -504,13 +511,46 @@ async function restoreRemitDatesByRecipient(專案ID: string, snapshots: Map<str
   for (const r of data ?? []) {
     const id = String((r as Record<string, unknown>).id ?? "").trim();
     if (!id) continue;
-    const key =
-      normalizeRecipientForDedupe((r as Record<string, unknown>)["領取人"] as string | null) || "__empty__";
+    const key = payoutPersonRoleKey((r as Record<string, unknown>)["領取人"], (r as Record<string, unknown>)["分潤類型"]);
     const remit = snapshots.get(key);
     if (!remit) continue;
     const { error: upErr } = await supabase.from("分潤表").update({ 分潤匯款日期: remit }).eq("id", id);
     if (upErr && upErr.code !== "42P01") throw upErr;
   }
+}
+
+/** 只用專案上已寫下的成數。成數空白就不產生列，避免舊專案被新預設補上。 */
+function pushStoredRole(
+  rows: PayoutInsertRow[],
+  input: {
+    專案ID: string;
+    專案名稱: string | null;
+    專案總金額未稅: string | null;
+    專案營收: string | null;
+    廠商預計付款日: string | null;
+    amount: number;
+    分潤類型: string;
+    領取人: string | null | undefined;
+    成數: string | null | undefined;
+  }
+) {
+  const person = String(input.領取人 ?? "").trim();
+  const rateStr = String(input.成數 ?? "").trim();
+  if (!person || !rateStr) return;
+  const rate = parsePayoutRate(rateStr);
+  rows.push({
+    專案ID: input.專案ID,
+    專案名稱: input.專案名稱,
+    專案總金額未稅: input.專案總金額未稅,
+    專案營收: input.專案營收,
+    廠商預計付款日: input.廠商預計付款日,
+    廠商付款日期: null,
+    分潤匯款日期: null,
+    分潤類型: input.分潤類型,
+    分潤成數: rateStr,
+    分潤金額: String(Math.round(input.amount * rate)),
+    領取人: person,
+  });
 }
 
 async function buildPayoutRowsForMaster(
@@ -528,6 +568,32 @@ async function buildPayoutRowsForMaster(
   const 專案類型 = (master.專案類型 ?? "").trim();
   const 廠商預計付款日 = master.廠商預計付款日?.trim() || null;
   const rows: PayoutInsertRow[] = [];
+
+  if (isTwoRolePayoutProject(master)) {
+    pushStoredRole(rows, {
+      專案ID,
+      專案名稱,
+      專案總金額未稅,
+      專案營收,
+      廠商預計付款日,
+      amount,
+      分潤類型: "專案PM",
+      領取人: master.執行管理員,
+      成數: master.執行管理員分潤成數,
+    });
+    pushStoredRole(rows, {
+      專案ID,
+      專案名稱,
+      專案總金額未稅,
+      專案營收,
+      廠商預計付款日,
+      amount,
+      分潤類型: "主管",
+      領取人: master.直屬主管,
+      成數: master.直屬主管分潤成數,
+    });
+    return rows;
+  }
 
   if (isPayoutModeB(專案類型)) {
     const 專案開發人 = master.專案開發人 ?? null;
@@ -557,7 +623,7 @@ async function buildPayoutRowsForMaster(
       {
         key: "主管分潤成數",
         分潤類型: "主管",
-        領取人: master.主管?.trim() || kol?.主管?.trim() || null,
+        領取人: master.主管?.trim() || null,
       },
       {
         key: "KOL開發者分潤成數",
@@ -612,6 +678,31 @@ async function buildPayoutRowsForMaster(
         領取人,
       });
     }
+  }
+
+  pushStoredRole(rows, {
+    專案ID,
+    專案名稱,
+    專案總金額未稅,
+    專案營收,
+    廠商預計付款日,
+    amount,
+    分潤類型: "直屬主管",
+    領取人: master.直屬主管,
+    成數: master.直屬主管分潤成數,
+  });
+  if (isPayoutModeB(專案類型)) {
+    pushStoredRole(rows, {
+      專案ID,
+      專案名稱,
+      專案總金額未稅,
+      專案營收,
+      廠商預計付款日,
+      amount,
+      分潤類型: "執行管理員",
+      領取人: master.執行管理員,
+      成數: master.執行管理員分潤成數,
+    });
   }
 
   return rows;

@@ -15,6 +15,7 @@ import {
   createMaster,
   getMasterById,
   getMasterList,
+  masterDbErrorMessage,
   todayYmdTaipei,
   updateMaster,
   type NewMasterInput,
@@ -32,8 +33,10 @@ import { getSystemConfig } from "@/lib/db/system-config";
 import { syncPayoutForProject } from "@/lib/db/payout";
 import { syncFinanceForProject } from "@/lib/db/finance";
 import { requireEmployee } from "@/lib/auth/api";
+import { getUserByEmail, getUsers } from "@/lib/db/users";
 import { partnerEditorLabel } from "@/lib/partners/editor-label";
 import { findSimilarProjectNames } from "@/lib/master/similar-name";
+import { TWO_ROLE_PAYOUT_SCHEME, isCompanySupervisor, isTwoRolePayoutProject, projectSupervisorForOpener } from "@/config/master-payout-defaults";
 
 export async function GET(request: NextRequest) {
   const auth = await requireEmployee(request);
@@ -44,7 +47,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("GET /api/master error:", error);
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "Unknown error" },
+      { ok: false, error: masterDbErrorMessage(error, "讀取大總表失敗") },
       { status: 500 }
     );
   }
@@ -108,22 +111,46 @@ export async function POST(request: NextRequest) {
       KOL開發者: (body?.KOL開發者 as string) ?? null,
       專案費用類型: (body?.專案費用類型 as string) ?? null,
       廠商名稱: (body?.廠商名稱 as string) ?? null,
+      統一編號: (body?.統一編號 as string) ?? null,
+      收件人Email: (body?.收件人Email as string) ?? null,
       廠商預計付款日: (body?.廠商預計付款日 as string) ?? null,
       專案內容: (body?.專案內容 as string) ?? null,
       備註: (body?.備註 as string) ?? null,
       老師備註: (body?.老師備註 as string) ?? null,
-      專案BDPM: (body?.專案BDPM as string) ?? null,
-      專案BDPM分潤成數: (body?.專案BDPM分潤成數 as string) ?? master_payout_defaults.專案BDPM分潤成數,
-      專案引薦人: (body?.專案引薦人 as string) ?? null,
-      專案開發人: (body?.專案開發人 as string) ?? null,
-      專案管理員: (body?.專案管理員 as string) ?? null,
+      專案BDPM: null,
+      專案BDPM分潤成數: null,
+      專案引薦人: null,
+      專案開發人: null,
+      專案管理員: null,
       執行管理員: (body?.執行管理員 as string) ?? null,
       專案資料夾: (body?.專案資料夾 as string) ?? null,
-      專案引薦人分潤成數: (body?.專案引薦人分潤成數 as string) ?? master_payout_defaults.專案引薦人分潤成數,
-      專案開發人分潤成數: (body?.專案開發人分潤成數 as string) ?? master_payout_defaults.專案開發人分潤成數,
-      專案管理員分潤成數: (body?.專案管理員分潤成數 as string) ?? master_payout_defaults.專案管理員分潤成數,
+      專案引薦人分潤成數: null,
+      專案開發人分潤成數: null,
+      專案管理員分潤成數: null,
       執行管理員分潤成數: (body?.執行管理員分潤成數 as string) ?? master_payout_defaults.執行管理員分潤成數,
+      直屬主管: null,
+      直屬主管分潤成數: null,
+      分潤制度: TWO_ROLE_PAYOUT_SCHEME,
     };
+    const creator = await getUserByEmail(auth.user.email);
+    const pmName = String(creator?.name || auth.user.name || auth.user.email).trim();
+    const staff = await getUsers();
+    const boss = projectSupervisorForOpener(
+      pmName,
+      creator?.直屬主管,
+      isCompanySupervisor(
+        pmName,
+        staff.map((user) => user.直屬主管 ?? "")
+      )
+    );
+    payload.經紀人 = null;
+    payload.主管 = null;
+    payload.KOL開發者 = null;
+    payload.執行管理員 = pmName || null;
+    payload.執行管理員分潤成數 = "7.5%";
+    payload.直屬主管 = boss || null;
+    payload.直屬主管分潤成數 = boss ? "2.5%" : null;
+    payload.分潤制度 = TWO_ROLE_PAYOUT_SCHEME;
 
     const master = await createMaster(payload);
     const editor = partnerEditorLabel(auth.user);
@@ -134,7 +161,8 @@ export async function POST(request: NextRequest) {
       變更內容: masterCreateSnapshot(payload),
     });
     try {
-      await syncPayoutForProject(master, master_payout_defaults);
+      const masterForPayout = { ...master, 分潤制度: TWO_ROLE_PAYOUT_SCHEME };
+      await syncPayoutForProject(masterForPayout, master_payout_defaults);
       await syncFinanceForProject(master);
     } catch (e) {
       console.error("syncPayoutForProject after POST /api/master", e);
@@ -143,7 +171,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("POST /api/master error:", error);
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "Unknown error" },
+      { ok: false, error: masterDbErrorMessage(error, "新增大總表失敗") },
       { status: 500 }
     );
   }
@@ -215,6 +243,14 @@ export async function PATCH(request: NextRequest) {
       KOL開發者: (body?.KOL開發者 as string) ?? null,
       專案費用類型: (body?.專案費用類型 as string) ?? null,
       廠商名稱: (body?.廠商名稱 as string) ?? null,
+      統一編號:
+        body && Object.prototype.hasOwnProperty.call(body, "統一編號")
+          ? ((body.統一編號 as string) ?? null)
+          : (existing.統一編號 ?? null),
+      收件人Email:
+        body && Object.prototype.hasOwnProperty.call(body, "收件人Email")
+          ? ((body.收件人Email as string) ?? null)
+          : (existing.收件人Email ?? null),
       廠商預計付款日: (body?.廠商預計付款日 as string) ?? null,
       專案內容: (body?.專案內容 as string) ?? null,
       備註: (body?.備註 as string) ?? null,
@@ -229,7 +265,30 @@ export async function PATCH(request: NextRequest) {
       專案管理員: (body?.專案管理員 as string) ?? null,
       執行管理員: (body?.執行管理員 as string) ?? null,
       專案資料夾: (body?.專案資料夾 as string) ?? null,
+      直屬主管:
+        body && Object.prototype.hasOwnProperty.call(body, "直屬主管")
+          ? ((body.直屬主管 as string) ?? null)
+          : (existing.直屬主管 ?? null),
+      直屬主管分潤成數:
+        body && Object.prototype.hasOwnProperty.call(body, "直屬主管分潤成數")
+          ? ((body.直屬主管分潤成數 as string) ?? null)
+          : (existing.直屬主管分潤成數 ?? null),
     };
+
+    if (isTwoRolePayoutProject(existing)) {
+      rawPayload.分潤制度 = TWO_ROLE_PAYOUT_SCHEME;
+      rawPayload.專案BDPM = null;
+      rawPayload.專案引薦人 = null;
+      rawPayload.專案開發人 = null;
+      rawPayload.專案管理員 = null;
+      rawPayload.經紀人 = null;
+      rawPayload.主管 = null;
+      rawPayload.KOL開發者 = null;
+      rawPayload.專案BDPM分潤成數 = null;
+      rawPayload.專案引薦人分潤成數 = null;
+      rawPayload.專案開發人分潤成數 = null;
+      rawPayload.專案管理員分潤成數 = null;
+    }
 
     const payload = applyMasterNumericFieldPolicy(
       rawPayload as unknown as Record<string, unknown>,
@@ -261,7 +320,7 @@ export async function PATCH(request: NextRequest) {
   } catch (error) {
     console.error("PATCH /api/master error:", error);
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "Unknown error" },
+      { ok: false, error: masterDbErrorMessage(error, "更新大總表失敗") },
       { status: 500 }
     );
   }

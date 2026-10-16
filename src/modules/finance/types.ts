@@ -14,6 +14,9 @@ export interface InvoiceRow {
   廠商預計付款日?: string;
   廠商付款日期?: string;
   備註?: string;
+  /** 光貿作廢成功後寫入；空值表示未作廢 */
+  作廢時間?: string;
+  作廢原因?: string;
   [key: string]: string | undefined;
 }
 

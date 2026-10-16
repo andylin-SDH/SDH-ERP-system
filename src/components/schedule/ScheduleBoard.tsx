@@ -78,43 +78,69 @@ export function ScheduleBoard({
 }: {
   canEdit: boolean;
 }) {
-  const [weeks, setWeeks] = useState<ScheduleWeekPayload[] | null>(null);
-  const [anchor, setAnchor] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState<"near" | "future" | "follow">("near");
+  const [nearWeeks, setNearWeeks] = useState<ScheduleWeekPayload[] | null>(null);
+  const [futureWeeks, setFutureWeeks] = useState<ScheduleWeekPayload[] | null>(null);
+  const [futureAnchor, setFutureAnchor] = useState("");
+  const [loadingNear, setLoadingNear] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [editingPerson, setEditingPerson] = useState<string>("");
+  const [gridWeek, setGridWeek] = useState(0);
 
-  const load = useCallback(async (weekStart: string, force = false) => {
-    setLoading(true);
+  const loadPair = useCallback(async (weekStart: string, force: boolean) => {
+    const loaded = await Promise.all([weekStart, addDays(weekStart, 7)].map((date) => fetchWeek(date, force)));
+    if (loaded.some((item) => !item)) return null;
+    return loaded as ScheduleWeekPayload[];
+  }, []);
+
+  const loadNear = useCallback(async (force = false) => {
+    setLoadingNear(true);
     setError(null);
-    const start = weekStart || taipeiMonday();
-    const loaded = await Promise.all([start, addDays(start, 7)].map((date) => fetchWeek(date, force)));
-    setLoading(false);
-    if (loaded.some((item) => !item)) {
+    const next = await loadPair(taipeiMonday(), force);
+    setLoadingNear(false);
+    if (!next) {
       setError("讀取班表失敗");
       return;
     }
-    const next = loaded as ScheduleWeekPayload[];
-    setWeeks(next);
+    setNearWeeks(next);
     setEditingPerson((prev) => {
       const first = next[0];
       if (first.me.canEditAnyone && prev && first.config.people.some((person) => person.name === prev)) return prev;
       return first.me.person ?? "";
     });
-  }, []);
+  }, [loadPair]);
+
+  const loadFuture = useCallback(async (weekStart: string, force = false) => {
+    setError(null);
+    const next = await loadPair(weekStart, force);
+    if (!next) {
+      setError("讀取班表失敗");
+      return;
+    }
+    setFutureWeeks(next);
+  }, [loadPair]);
 
   useEffect(() => {
-    void load(anchor);
-  }, [anchor, load]);
+    void loadNear();
+  }, [loadNear]);
+
+  const futureStart = futureAnchor || addDays(taipeiMonday(), 14);
+  useEffect(() => {
+    if (page !== "future") return;
+    void loadFuture(futureStart);
+  }, [futureStart, loadFuture, page]);
 
   function replaceWeek(next: ScheduleWeekPayload) {
-    setWeeks((prev) => prev?.map((item) => (item.weekStart === next.weekStart ? next : item)) ?? prev);
+    const apply = (prev: ScheduleWeekPayload[] | null) =>
+      prev?.some((item) => item.weekStart === next.weekStart) ? prev.map((item) => (item.weekStart === next.weekStart ? next : item)) : prev;
+    setNearWeeks(apply);
+    setFutureWeeks(apply);
   }
 
   async function writeClaims(weekStart: string, person: string, items: { date: string; slot: string; place: string }[], on: boolean) {
-    if (!canEdit || !weeks) return;
+    if (!canEdit) return;
     setSaving(true);
     setNotice(null);
     setError(null);
@@ -133,7 +159,7 @@ export function ScheduleBoard({
   }
 
   async function preset(weekStart: string) {
-    if (!canEdit || !weeks) return;
+    if (!canEdit) return;
     setSaving(true);
     setError(null);
     const response = await fetch("/api/schedule/preset", {
@@ -151,36 +177,55 @@ export function ScheduleBoard({
     setNotice(body.data.presetAdded ? `已補上 ${body.data.presetAdded} 個整點` : "沒有要補的空白時段");
   }
 
-  function shiftPair(direction: -1 | 1) {
-    if (!weeks?.[0]) return;
-    setAnchor(addDays(weeks[0].weekStart, direction * 14));
+  function shiftFuture(direction: -1 | 1) {
+    const min = addDays(taipeiMonday(), 14);
+    const next = addDays(futureStart, direction * 14);
+    if (next < min) return;
+    setFutureAnchor(next);
+    setGridWeek(0);
   }
 
-  if (loading && !weeks) {
-    return <p className="text-sm text-stone-500">正在讀取班表…</p>;
-  }
-  if (!weeks) {
-    return <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-800">{error || "讀不到班表"}</p>;
-  }
-
-  const week = weeks[0];
-  const actor = week.me.canEditAnyone ? editingPerson : week.me.person;
+  const identity = nearWeeks?.[0] ?? futureWeeks?.[0] ?? null;
+  const actor = identity ? (identity.me.canEditAnyone ? editingPerson : identity.me.person) : null;
   const canToggle = canEdit && !!actor;
+  const futureReady = futureWeeks?.[0]?.weekStart === futureStart;
+  const activeWeeks = page === "future" ? (futureReady ? futureWeeks : null) : nearWeeks;
+  const activeLoading = page === "future" ? !futureReady : loadingNear && !nearWeeks;
+  const tabs = [
+    { id: "near" as const, label: "近兩週班表" },
+    { id: "future" as const, label: "未來班表" },
+    { id: "follow" as const, label: "跟錄名單" },
+  ];
 
   return (
     <section className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-stone-900">班表</h2>
-          <p className="mt-1 text-sm text-stone-600">
-            {week.me.person
-              ? `你是${week.me.person}。一天分早、午、晚，按鈕只會加上或拿掉${week.me.canEditAnyone ? "你選的那一位" : "你"}。`
-              : "你不在排班名單裡，可以看，不能改。"}
-          </p>
-        </div>
+      <div>
+        <h2 className="text-lg font-semibold text-stone-900">班表</h2>
+        <p className="mt-1 text-sm text-stone-600">
+          {identity?.me.person
+            ? `你是${identity.me.person}。一天分早、午、晚，按鈕只會加上或拿掉${identity.me.canEditAnyone ? "你選的那一位" : "你"}。`
+            : identity
+              ? "你不在排班名單裡，可以看，不能改。"
+              : "正在讀取班表…"}
+        </p>
       </div>
 
-      {week.me.canEditAnyone && canEdit && (
+      <div className="flex flex-wrap gap-1 rounded-xl border border-stone-200 bg-stone-100 p-1">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setPage(tab.id)}
+            className={`rounded-lg px-4 py-2.5 text-sm font-semibold ${
+              page === tab.id ? "bg-stone-900 text-white" : "text-stone-600 hover:bg-white hover:text-stone-900"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {page !== "follow" && identity?.me.canEditAnyone && canEdit && (
         <label className="flex items-center gap-2 text-sm text-stone-700">
           正在排
           <select
@@ -188,7 +233,7 @@ export function ScheduleBoard({
             value={editingPerson}
             onChange={(event) => setEditingPerson(event.target.value)}
           >
-            {week.config.people.map((person) => (
+            {identity.config.people.map((person) => (
               <option key={person.name} value={person.name}>
                 {person.name}
               </option>
@@ -198,89 +243,38 @@ export function ScheduleBoard({
       )}
 
       {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
-      {notice && <p className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">{notice}</p>}
-      {week.warnings.map((warning) => (
-        <p key={warning} className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-          {warning}
-        </p>
-      ))}
-
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stone-300 bg-white px-4 py-3">
-        <div>
-          <p className="text-xs font-semibold text-stone-500">一次看兩週</p>
-          <p className="text-sm font-semibold text-stone-900">
-            {weekRangeLabel([weeks[0].dates[0], weeks[1].dates[6]])}
+      {notice && page !== "follow" && <p className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">{notice}</p>}
+      {page !== "follow" &&
+        activeWeeks?.[0]?.warnings.map((warning) => (
+          <p key={warning} className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            {warning}
           </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button type="button" className="rounded-lg bg-stone-900 px-3 py-2 text-sm font-semibold text-white hover:bg-stone-700 active:bg-black" onClick={() => shiftPair(-1)}>
-            ← 前兩週
-          </button>
-          {weeks[0].weekStart !== taipeiMonday() && (
-            <button type="button" className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-stone-950 hover:bg-amber-300 active:bg-amber-500" onClick={() => setAnchor(taipeiMonday())}>
-              回到現在
-            </button>
-          )}
-          <button type="button" className="rounded-lg bg-stone-900 px-3 py-2 text-sm font-semibold text-white hover:bg-stone-700 active:bg-black" onClick={() => shiftPair(1)}>
-            後兩週 →
-          </button>
-          <button
-            type="button"
-            className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100 active:bg-stone-200"
-            onClick={() => void load(weeks[0].weekStart, true)}
-          >
-            重新整理
-          </button>
-        </div>
-      </div>
-
-      <div className="grid items-start gap-4 lg:grid-cols-2">
-        {weeks.map((item) => (
-          <WeekPlan
-            key={item.weekStart}
-            week={item}
-            actor={actor}
-            canToggle={canToggle}
-            saving={saving}
-            onPickPerson={item.me.canEditAnyone && canEdit ? setEditingPerson : undefined}
-            onToggle={(items, on) => {
-              if (actor) void writeClaims(item.weekStart, actor, items, on);
-            }}
-          />
         ))}
-      </div>
 
-      {weeks.map((item) => {
-        const keys = conflictKeysOf(item);
-        return (
-          <div key={`${item.weekStart}-grid`} className="space-y-4">
-            <p className="text-sm font-semibold text-stone-900">
-              {weekCaption(item.weekStart)}的格子　{weekRangeLabel(item.dates)}
-            </p>
-            <ConflictList week={item} />
-            {item.config.places.map((place) => (
-              <PlaceGrid
-                key={`${item.weekStart}-${place.id}`}
-                placeId={place.id}
-                week={item}
-                actor={actor}
-                canToggle={canToggle}
-                conflictKeys={keys}
-                onToggle={(slots, on) => {
-                  if (actor) void writeClaims(item.weekStart, actor, slots, on);
-                }}
-              />
-            ))}
-            {canToggle && item.config.presetPeople.length > 0 && (item.me.canEditAnyone || item.config.presetPeople.includes(item.me.person ?? "")) && (
-              <button type="button" className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm" onClick={() => void preset(item.weekStart)} disabled={saving}>
-                預排{item.config.presetPeople.join("、")}{weekCaption(item.weekStart)}的時間
-              </button>
-            )}
-          </div>
-        );
-      })}
-
-      <FollowList people={week.config.people.map((person) => person.name)} canMutate={canEdit} />
+      {page === "follow" ? (
+        <FollowList people={identity?.config.people.map((person) => person.name) ?? []} canMutate={canEdit} />
+      ) : activeLoading || !activeWeeks ? (
+        <p className="text-sm text-stone-500">正在讀取班表…</p>
+      ) : (
+        <SchedulePair
+          weeks={activeWeeks}
+          actor={actor}
+          canToggle={canToggle}
+          saving={saving}
+          gridWeek={Math.min(gridWeek, activeWeeks.length - 1)}
+          onGridWeek={setGridWeek}
+          onPickPerson={identity?.me.canEditAnyone && canEdit ? setEditingPerson : undefined}
+          onToggle={(weekStart, items, on) => {
+            if (actor) void writeClaims(weekStart, actor, items, on);
+          }}
+          onPreset={(weekStart) => void preset(weekStart)}
+          onRefresh={() => void (page === "future" ? loadFuture(futureStart, true) : loadNear(true))}
+          earlierLabel={page === "future" && futureStart > addDays(taipeiMonday(), 14) ? "← 前兩週" : undefined}
+          laterLabel={page === "future" ? "後兩週 →" : undefined}
+          onEarlier={() => shiftFuture(-1)}
+          onLater={() => shiftFuture(1)}
+        />
+      )}
     </section>
   );
 }
@@ -422,14 +416,119 @@ function periodGroups(week: ScheduleWeekPayload, date: string, rows: BookingRow[
   );
 }
 
-function officeNames(week: ScheduleWeekPayload, date: string, placeId: string): string[] {
-  return [
-    ...new Set(
-      week.claims
-        .filter((claim) => !claim.auto && claim.date === date && claim.place === placeId)
-        .map((claim) => claim.person)
-    ),
-  ];
+function SchedulePair({
+  weeks,
+  actor,
+  canToggle,
+  saving,
+  gridWeek,
+  onGridWeek,
+  onPickPerson,
+  onToggle,
+  onPreset,
+  onRefresh,
+  earlierLabel,
+  laterLabel,
+  onEarlier,
+  onLater,
+}: {
+  weeks: ScheduleWeekPayload[];
+  actor: string | null;
+  canToggle: boolean;
+  saving: boolean;
+  gridWeek: number;
+  onGridWeek: (index: number) => void;
+  onPickPerson?: (name: string) => void;
+  onToggle: (weekStart: string, items: { date: string; slot: string; place: string }[], on: boolean) => void;
+  onPreset: (weekStart: string) => void;
+  onRefresh: () => void;
+  earlierLabel?: string;
+  laterLabel?: string;
+  onEarlier: () => void;
+  onLater: () => void;
+}) {
+  const gridItem = weeks[gridWeek] ?? weeks[0];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stone-300 bg-white px-4 py-3">
+        <p className="text-sm font-semibold text-stone-900">{weekRangeLabel([weeks[0].dates[0], weeks[weeks.length - 1].dates[6]])}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          {earlierLabel ? (
+            <button type="button" className="rounded-lg bg-stone-900 px-3 py-2 text-sm font-semibold text-white hover:bg-stone-700" onClick={onEarlier}>
+              {earlierLabel}
+            </button>
+          ) : null}
+          {laterLabel ? (
+            <button type="button" className="rounded-lg bg-stone-900 px-3 py-2 text-sm font-semibold text-white hover:bg-stone-700" onClick={onLater}>
+              {laterLabel}
+            </button>
+          ) : null}
+          <button type="button" className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100" onClick={onRefresh}>
+            重新整理
+          </button>
+        </div>
+      </div>
+
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        {weeks.map((item) => (
+          <WeekPlan
+            key={item.weekStart}
+            week={item}
+            actor={actor}
+            canToggle={canToggle}
+            saving={saving}
+            onPickPerson={onPickPerson}
+            onToggle={(items, on) => onToggle(item.weekStart, items, on)}
+          />
+        ))}
+      </div>
+
+      {gridItem ? (
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {weeks.map((item, index) => (
+              <button
+                key={item.weekStart}
+                type="button"
+                onClick={() => onGridWeek(index)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
+                  index === gridWeek ? "bg-stone-900 text-white" : "bg-white text-stone-700 ring-1 ring-stone-300"
+                }`}
+              >
+                {weekCaption(item.weekStart)}
+              </button>
+            ))}
+          </div>
+          <p className="text-sm font-semibold text-stone-900">
+            {weekCaption(gridItem.weekStart)}　{weekRangeLabel(gridItem.dates)}
+          </p>
+          <ConflictList week={gridItem} />
+          {gridItem.config.places.map((place) => (
+            <PlaceGrid
+              key={`${gridItem.weekStart}-${place.id}`}
+              placeId={place.id}
+              week={gridItem}
+              actor={actor}
+              canToggle={canToggle}
+              conflictKeys={conflictKeysOf(gridItem)}
+              onToggle={(slots, on) => onToggle(gridItem.weekStart, slots, on)}
+            />
+          ))}
+          {canToggle && gridItem.config.presetPeople.length > 0 && (gridItem.me.canEditAnyone || gridItem.config.presetPeople.includes(gridItem.me.person ?? "")) && (
+            <button type="button" className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm" onClick={() => onPreset(gridItem.weekStart)} disabled={saving}>
+              預排{gridItem.config.presetPeople.join("、")}{weekCaption(gridItem.weekStart)}的時間
+            </button>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function bookingLabel(titles: string[]): string {
+  const names = titles.map((title) => title.replace(/^(跟錄 |自錄 )/, "")).filter((title) => title && title !== "Busy");
+  return names.length ? names.join("、") : "行事曆有預約";
 }
 
 function WeekPlan({
@@ -465,8 +564,6 @@ function WeekPlan({
       : mine?.met
         ? `你的${caption}排完了`
         : `你的${caption}`;
-  const offices = week.config.places.filter((place) => place.kind === "office");
-
   return (
     <div className="overflow-hidden rounded-2xl border-2 border-stone-900 bg-stone-100 shadow-md">
       <div className="bg-stone-900 px-4 py-4 text-white sm:px-5">
@@ -482,14 +579,52 @@ function WeekPlan({
       <div className="space-y-4 p-3 sm:p-4">
 
       {seeAll && (
-      <div className="grid gap-2 sm:grid-cols-2">
-        <p className={`rounded-xl px-3 py-2 text-sm ${pendingCount ? "bg-red-50 text-red-800" : "bg-emerald-50 text-emerald-900"}`}>
-          {upcoming.length === 0
-            ? "這週剩下的日期都已經過了"
-            : pendingCount
-              ? `錄音室還有 ${pendingCount} 個時段沒人`
-              : "還沒過的錄音室時段都已經有人"}
-        </p>
+      <div className="space-y-2">
+        {week.config.places
+          .filter((place) => place.kind === "studio")
+          .map((place) => {
+            const open = upcoming.flatMap((date) => {
+              const parts = weekdayParts(date);
+              return periodGroups(week, date, rows)
+                .filter((group) => group.placeId === place.id && group.open.length > 0)
+                .map((group) => ({ ...group, dateLabel: `${parts.name} ${parts.day}` }));
+            });
+            return (
+              <div key={place.id} className={`rounded-xl px-3 py-2 text-sm ${open.length ? "bg-red-50 text-red-950" : "bg-emerald-50 text-emerald-950"}`}>
+                <p className="font-semibold">
+                  {place.name}
+                  {upcoming.length === 0 ? "　這週剩下的日期都過了" : open.length ? `　還有 ${open.length} 個時段沒人` : "　還沒過的預約都有人"}
+                </p>
+                {open.length > 0 ? (
+                  <ul className="mt-2 space-y-1.5">
+                    {open.map((group) => (
+                      <li key={`${group.dateLabel}-${group.key}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white/80 px-2 py-1.5 text-stone-900">
+                        <div>
+                          <p className="text-sm font-semibold">
+                            {group.dateLabel}　{group.label}　{group.time}
+                          </p>
+                          <p className="text-xs text-stone-600">
+                            {bookingLabel(group.titles)}
+                            {group.names.length ? `　已有 ${group.names.join("、")}` : "　還沒有人"}
+                          </p>
+                        </div>
+                        {canToggle ? (
+                          <button
+                            type="button"
+                            disabled={saving}
+                            onClick={() => onToggle(group.open.map((slot) => ({ date: slot.date, slot: slot.slot, place: group.placeId })), true)}
+                            className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white"
+                          >
+                            我來排
+                          </button>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            );
+          })}
         <p className={`rounded-xl px-3 py-2 text-sm ${shortPeople.length ? "bg-red-50 text-red-800" : "bg-emerald-50 text-emerald-900"}`}>
           {shortPeople.length
             ? `辦公室天數還沒到：${shortPeople.map((stat) => `${stat.name}差 ${Math.max(0, (stat.need ?? 0) - stat.officeDays)} 天`).join("、")}`
@@ -526,99 +661,12 @@ function WeekPlan({
           );
         })}
       </ul>
-      <p className="mt-2 text-xs text-stone-500">錄音室時數是這週已經排進去的小時，不算進辦公室天數。辦公室要到下面的新辦公室、小辦公室自己點。</p>
-
-      {seeAll && (
-      <div className="space-y-4">
-        {upcoming.length === 0 ? <p className="rounded-xl bg-white px-3 py-3 text-sm text-stone-600">已經過的日期不排了。</p> : null}
-        {upcoming.map((date) => {
-          const groups = periodGroups(week, date, rows);
-          const openGroups = groups.filter((group) => group.open.length > 0);
-          const doneGroups = groups.filter((group) => group.open.length === 0);
-          const info = week.dayInfo[date];
-          const parts = weekdayParts(date);
-          const isToday = date === today;
-          const headerTone = isToday ? "bg-amber-400 text-stone-950" : openGroups.length ? "bg-red-600 text-white" : "bg-stone-800 text-white";
-          return (
-            <section key={date} className="overflow-hidden rounded-2xl border-2 border-stone-800 bg-white">
-              <div className={`flex flex-wrap items-center justify-between gap-2 px-3 py-2 ${headerTone}`}>
-                <p className="flex items-baseline gap-2">
-                  <span className="text-xl font-bold">{parts.name}</span>
-                  <span className="text-base font-semibold">{parts.day}</span>
-                  {isToday ? <span className="rounded-full bg-stone-950 px-2 py-0.5 text-xs font-bold text-white">今天</span> : null}
-                  {info?.holiday ? <span className="text-sm font-semibold">{info.holiday}</span> : null}
-                </p>
-                <p className="text-sm font-bold">
-                  {groups.length === 0 ? "這天沒有錄音室預約" : openGroups.length ? `錄音室還有 ${openGroups.length} 個時段沒人` : "這天錄音室都有人"}
-                </p>
-              </div>
-              <div className="px-3 py-3">
-              <p className="text-xs text-stone-600">
-                {offices
-                  .map((place) => {
-                    const names = officeNames(week, date, place.id);
-                    return `${place.name}　${names.length ? names.join("、") : "沒有人"}`;
-                  })
-                  .join("　／　")}
-              </p>
-              {openGroups.length > 0 && (
-                <ul className="mt-2 space-y-2">
-                  {openGroups.map((group) => (
-                    <li key={group.key} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 px-2 py-2">
-                      <div>
-                        <p className="text-sm font-semibold text-stone-900">
-                          {group.label}　{group.time}　{group.placeName}
-                        </p>
-                        <p className="text-xs text-stone-600">
-                          {group.titles.join("、")}
-                          {group.names.length ? `　已有 ${group.names.join("、")}` : "　還沒有人"}
-                        </p>
-                      </div>
-                      {canToggle && (
-                        <button
-                          type="button"
-                          disabled={saving}
-                          onClick={() => onToggle(group.open.map((slot) => ({ date: slot.date, slot: slot.slot, place: group.placeId })), true)}
-                          className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white"
-                        >
-                          我來排
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {doneGroups.length > 0 && (
-                <ul className="mt-2 space-y-1">
-                  {doneGroups.map((group) => (
-                    <li key={`${group.key}-done`} className="flex flex-wrap items-center justify-between gap-2 text-xs text-stone-600">
-                      <span>
-                        {group.label}　{group.time}　{group.placeName}　{group.names.join("、") || "已有人"}
-                      </span>
-                      {canToggle && group.mine.length > 0 && (
-                        <button
-                          type="button"
-                          disabled={saving}
-                          className="underline"
-                          onClick={() => onToggle(group.mine.map((slot) => ({ date: slot.date, slot: slot.slot, place: group.placeId })), false)}
-                        >
-                          取消我的
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              </div>
-            </section>
-          );
-        })}
-      </div>
-      )}
+      <p className="mt-2 text-xs text-stone-500">錄音室時數是這週已經排進去的小時，不算進辦公室天數。辦公室在下面的新辦公室、小辦公室自己點。</p>
       </div>
     </div>
   );
 }
+
 
 function ConflictList({ week }: { week: ScheduleWeekPayload }) {
   const today = taipeiToday();

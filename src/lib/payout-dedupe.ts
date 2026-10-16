@@ -22,6 +22,8 @@ const PAYOUT_ROLE_SYNONYM_GROUPS: string[][] = [
   ["專案開發人", "開發人"],
   ["專案管理員", "管理員"],
   ["執行管理員"],
+  ["專案PM"],
+  ["直屬主管"],
   ["經紀人"],
   ["主管"],
   ["KOL開發者", "KOL開發者", "kol開發者"],
@@ -78,9 +80,17 @@ export function extraBonusPayoutTypeForRecipient(recipient: string): string {
 }
 
 /**
- * 同一專案內，同一領取人僅保留一列：取分潤成數最高者；成數相同則取分潤金額較大者。
+ * 同一專案內，同一領取人只留分潤成數最高的一列。
+ * 例外：新專案的「專案PM」和「主管」要加總。主管自己開案時兩筆都留，7.5% + 2.5% = 10%。
  * 「額外獎金」列一律保留，不參與同人去重。
  */
+const STACKED_PAYOUT_ROLES = new Set(["專案PM", "主管"]);
+
+function stackedPayoutRole(type: string | null | undefined): string {
+  const key = canonicalPayoutRoleKey(type);
+  return STACKED_PAYOUT_ROLES.has(key) ? key : "";
+}
+
 export function applyHighestRatePerRecipient<
   T extends {
     分潤成數?: string | null;
@@ -125,6 +135,38 @@ export function applyHighestRatePerRecipient<
       }
     }
     keep.add(best);
+  }
+
+  const stackedByPerson = new Map<string, { pm: number[]; boss: number[] }>();
+  for (const i of regularIndices) {
+    const role = stackedPayoutRole(rows[i].分潤類型);
+    if (!role) continue;
+    const person = normalizeRecipientForDedupe(rows[i].領取人) || "__empty__";
+    if (!stackedByPerson.has(person)) stackedByPerson.set(person, { pm: [], boss: [] });
+    const bucket = stackedByPerson.get(person)!;
+    if (role === "專案PM") bucket.pm.push(i);
+    else bucket.boss.push(i);
+  }
+  const keepBest = (indices: number[]) => {
+    let best = indices[0];
+    let bestRate = parsePayoutRate(rows[best].分潤成數);
+    let bestAmount = parseAmount(rows[best].分潤金額);
+    for (let k = 1; k < indices.length; k++) {
+      const idx = indices[k];
+      const rate = parsePayoutRate(rows[idx].分潤成數);
+      const amount = parseAmount(rows[idx].分潤金額);
+      if (rate > bestRate || (rate === bestRate && amount > bestAmount)) {
+        best = idx;
+        bestRate = rate;
+        bestAmount = amount;
+      }
+    }
+    keep.add(best);
+  };
+  for (const bucket of stackedByPerson.values()) {
+    if (bucket.pm.length === 0 || bucket.boss.length === 0) continue;
+    keepBest(bucket.pm);
+    keepBest(bucket.boss);
   }
 
   return rows.filter((_, i) => keep.has(i));

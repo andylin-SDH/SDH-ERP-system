@@ -39,6 +39,10 @@ export async function POST(request: NextRequest) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(userEmail)) {
       return NextResponse.json({ ok: false, error: "帳號必須為有效的 Email 格式（供發信通知使用）" }, { status: 400 });
     }
+    const boss = String(body?.直屬主管 ?? "").trim();
+    if (boss && boss === name) {
+      return NextResponse.json({ ok: false, error: "直屬主管不能是自己" }, { status: 400 });
+    }
 
     const user = await createUser({
       email: userEmail,
@@ -47,6 +51,7 @@ export async function POST(request: NextRequest) {
       role,
       dept: body?.dept?.trim() || undefined,
       scope: body?.scope?.trim() || undefined,
+      直屬主管: boss || undefined,
     });
     return NextResponse.json({ ok: true, user });
   } catch (error) {
@@ -72,6 +77,13 @@ export async function PATCH(request: NextRequest) {
     if (body?.role !== undefined) payload.role = String(body.role).trim();
     if (body?.dept !== undefined) payload.dept = String(body.dept ?? "").trim() || undefined;
     if (body?.scope !== undefined) payload.scope = String(body.scope ?? "").trim() || undefined;
+    if (body?.直屬主管 !== undefined) {
+      const boss = String(body.直屬主管 ?? "").trim();
+      if (boss && boss === String(body.name ?? "").trim()) {
+        return NextResponse.json({ ok: false, error: "直屬主管不能是自己" }, { status: 400 });
+      }
+      payload.直屬主管 = boss;
+    }
 
     const passwordRaw = body?.password !== undefined ? String(body.password).trim() : "";
     if (passwordRaw && passwordRaw.length < 6) {

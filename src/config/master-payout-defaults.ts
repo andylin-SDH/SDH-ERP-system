@@ -28,3 +28,44 @@ export function isPayoutModeB(projectType: string): boolean {
     .trim();
   return (PAYOUT_MODE_B_PROJECT_TYPES as readonly string[]).includes(t);
 }
+
+/** 這個日期之後新開的專案只留兩個分潤角色。舊專案此欄為空，沿用原來的角色。 */
+export const TWO_ROLE_PAYOUT_SCHEME = "兩角色";
+
+export function isTwoRolePayoutProject(row: { 分潤制度?: string | null } | null | undefined): boolean {
+  return String(row?.分潤制度 ?? "").trim() === TWO_ROLE_PAYOUT_SCHEME;
+}
+
+/** 帳號沒填直屬主管時，新專案的主管用這個人。對應 users.姓名。 */
+export const DEFAULT_DIRECT_SUPERVISOR_NAME = "Andy";
+
+function samePersonName(a: string | null | undefined, b: string | null | undefined): boolean {
+  return String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+}
+
+/** Andy，以及有被別人填成直屬主管的人，都算公司裡的主管。 */
+export function isCompanySupervisor(personName: string | null | undefined, assignedSupervisorNames: Iterable<string>): boolean {
+  const name = String(personName ?? "").trim();
+  if (!name) return false;
+  if (samePersonName(name, DEFAULT_DIRECT_SUPERVISOR_NAME)) return true;
+  for (const assigned of assignedSupervisorNames) {
+    if (samePersonName(name, assigned)) return true;
+  }
+  return false;
+}
+
+/**
+ * 主管自己開案：主管就是開案者，專案PM 7.5% 再加主管 2.5%，一共 10%。
+ * 其他人有填直屬主管就用填的；沒填則是 Andy。
+ */
+export function projectSupervisorForOpener(
+  personName: string | null | undefined,
+  storedBoss: string | null | undefined,
+  openerIsSupervisor: boolean
+): string {
+  const name = String(personName ?? "").trim();
+  if (openerIsSupervisor && name) return name;
+  const boss = String(storedBoss ?? "").trim();
+  if (boss) return boss;
+  return DEFAULT_DIRECT_SUPERVISOR_NAME;
+}
