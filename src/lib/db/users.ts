@@ -1,6 +1,9 @@
 /**
  * Users 資料層（Supabase）
  * 支援兩種欄位命名：英文 email/name/password 或 中文 帳號/姓名/密碼
+ *
+ * 直屬主管：DB 可能尚未建欄。所有查詢一律先帶這欄，缺欄就重查不含該欄。
+ * 回傳列一律先當成 Record，避免 Supabase select 字串字面型別互相不相容。
  */
 
 import { getSupabase } from "@/lib/supabase/server";
@@ -19,10 +22,47 @@ function rowToUser(r: Record<string, unknown>): User {
   return { email, name, role, dept, scope, activeFlag, 直屬主管: 直屬主管 || undefined };
 }
 
-/** 只認「直屬主管」這一欄還沒建。不能把所有 42703 都當成這欄，否則中文帳號表（沒有 email 欄）會在改查帳號前就被丟出。 */
+/** 只認「直屬主管」這一欄還沒建。不能把所有 42703 都當成這欄。 */
 function missingSupervisorColumn(error: { code?: string; message?: string } | null): boolean {
   const message = String(error?.message ?? "");
   return message.includes("直屬主管");
+}
+
+type QueryResult = {
+  data: Record<string, unknown> | Record<string, unknown>[] | null;
+  error: { code?: string; message?: string } | null;
+};
+
+/** 把 PostgREST 結果收成 Record，切斷 select 字串字面型別。 */
+function asRecordResult(result: {
+  data: unknown;
+  error: { code?: string; message?: string } | null;
+}): QueryResult {
+  return {
+    data: (result.data ?? null) as Record<string, unknown> | Record<string, unknown>[] | null,
+    error: result.error,
+  };
+}
+
+const EN_COLS = "email, name, role, dept, scope, active_flag, 直屬主管";
+const EN_COLS_BASE = "email, name, role, dept, scope, active_flag";
+const ZH_COLS = '"帳號","姓名","角色","部門","scope","active_flag","直屬主管"';
+const ZH_COLS_BASE = '"帳號","姓名","角色","部門","scope","active_flag"';
+
+/**
+ * 先查含直屬主管；若欄位不存在，改用不含該欄的 select 再查一次。
+ * 永遠回傳 Record，呼叫端不必再處理兩種型別。
+ */
+async function selectUsersWithSupervisorFallback(
+  run: (columns: string) => PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null }>,
+  withSupervisor: string,
+  withoutSupervisor: string
+): Promise<QueryResult> {
+  const first = asRecordResult(await run(withSupervisor));
+  if (first.error && missingSupervisorColumn(first.error)) {
+    return asRecordResult(await run(withoutSupervisor));
+  }
+  return first;
 }
 
 export interface CreateUserInput {
@@ -58,7 +98,7 @@ export async function createUser(payload: CreateUserInput): Promise<User> {
     throw new Error("帳號必須為有效的 Email 格式（供發信通知使用）");
   }
   const supabase = getSupabase();
-  const insertEn = {
+  const insertEn: Record<string, unknown> = {
     email,
     name: name || email,
     password,
@@ -68,7 +108,7 @@ export async function createUser(payload: CreateUserInput): Promise<User> {
     active_flag: true,
     直屬主管: payload.直屬主管?.trim() || null,
   };
-  const insertZh = {
+  const insertZh: Record<string, unknown> = {
     帳號: email,
     姓名: name || email,
     密碼: password,
@@ -78,40 +118,37 @@ export async function createUser(payload: CreateUserInput): Promise<User> {
     active_flag: true,
     直屬主管: payload.直屬主管?.trim() || null,
   };
-  const { data: dataEn, error: errEn } = await supabase.from("users").insert(insertEn).select("email, name, role, dept, scope, active_flag, 直屬主管").maybeSingle();
-  if (errEn && missingSupervisorColumn(errEn)) {
-    delete (insertEn as { 直屬主管?: string | null }).直屬主管;
-    const retry = await supabase.from("users").insert(insertEn).select("email, name, role, dept, scope, active_flag").maybeSingle();
-    if (retry.error) throw retry.error;
-    if (!retry.data) throw new Error("新增使用者失敗");
-    return rowToUser(retry.data as unknown as Record<string, unknown>);
-  }
-  if (!errEn && dataEn) {
+
+  const en = await selectUsersWithSupervisorFallback(
+    async (cols) => {
+      const payloadInsert = { ...insertEn };
+      if (cols === EN_COLS_BASE) delete payloadInsert.直屬主管;
+      return supabase.from("users").insert(payloadInsert).select(cols).maybeSingle();
+    },
+    EN_COLS,
+    EN_COLS_BASE
+  );
+  if (!en.error && en.data && !Array.isArray(en.data)) {
     log("users.db", "createUser 成功（英文欄位）", { email });
-    return rowToUser(dataEn as unknown as Record<string, unknown>);
+    return rowToUser(en.data);
   }
-  const { data, error } = await supabase
-    .from("users")
-    .insert(insertZh)
-    .select('"帳號","姓名","角色","部門","scope","active_flag","直屬主管"')
-    .maybeSingle();
-  if (error && missingSupervisorColumn(error)) {
-    delete (insertZh as { 直屬主管?: string | null }).直屬主管;
-    const retry = await supabase
-      .from("users")
-      .insert(insertZh)
-      .select('"帳號","姓名","角色","部門","scope","active_flag"')
-      .maybeSingle();
-    if (retry.error) throw retry.error;
-    if (!retry.data) throw new Error("新增使用者失敗");
-    return rowToUser(retry.data as unknown as Record<string, unknown>);
+
+  const zh = await selectUsersWithSupervisorFallback(
+    async (cols) => {
+      const payloadInsert = { ...insertZh };
+      if (cols === ZH_COLS_BASE) delete payloadInsert.直屬主管;
+      return supabase.from("users").insert(payloadInsert).select(cols).maybeSingle();
+    },
+    ZH_COLS,
+    ZH_COLS_BASE
+  );
+  if (zh.error) {
+    log("users.db", "createUser 失敗", { error: String(zh.error.message) });
+    throw zh.error;
   }
-  if (error) {
-    log("users.db", "createUser 失敗", { error: String(error?.message) });
-    throw error;
-  }
+  if (!zh.data || Array.isArray(zh.data)) throw new Error("新增使用者失敗");
   log("users.db", "createUser 成功（中文欄位）", { email });
-  return rowToUser(data as unknown as Record<string, unknown>);
+  return rowToUser(zh.data);
 }
 
 /** 依 email（帳號）更新使用者資料，支援中英文欄位 */
@@ -136,59 +173,36 @@ export async function updateUser(email: string, payload: UpdateUserInput): Promi
   if (payload.直屬主管 !== undefined) updatesZh.直屬主管 = payload.直屬主管?.trim() || null;
   if (payload.password !== undefined && payload.password.trim()) updatesZh.密碼 = payload.password.trim();
 
-  const { data: dataEn, error: errEn } = await supabase
-    .from("users")
-    .update(updatesEn)
-    .eq("email", raw)
-    .select("email, name, role, dept, scope, active_flag, 直屬主管")
-    .maybeSingle();
-
-  if (errEn && missingSupervisorColumn(errEn)) {
-    delete updatesEn.直屬主管;
-    const retry = await supabase
-      .from("users")
-      .update(updatesEn)
-      .eq("email", raw)
-      .select("email, name, role, dept, scope, active_flag")
-      .maybeSingle();
-    if (retry.error) throw retry.error;
-    if (retry.data) return rowToUser(retry.data as unknown as Record<string, unknown>);
-  }
-
-  if (!errEn && dataEn) {
+  const en = await selectUsersWithSupervisorFallback(
+    async (cols) => {
+      const patch = { ...updatesEn };
+      if (cols === EN_COLS_BASE) delete patch.直屬主管;
+      return supabase.from("users").update(patch).eq("email", raw).select(cols).maybeSingle();
+    },
+    EN_COLS,
+    EN_COLS_BASE
+  );
+  if (!en.error && en.data && !Array.isArray(en.data)) {
     log("users.db", "updateUser 成功（英文欄位）", { email: raw?.slice(0, 25) });
-    return rowToUser(dataEn as unknown as Record<string, unknown>);
+    return rowToUser(en.data);
   }
 
-  const updated = await supabase
-    .from("users")
-    .update(updatesZh)
-    .eq("帳號", raw)
-    .select('"帳號","姓名","角色","部門","scope","active_flag","直屬主管"')
-    .maybeSingle();
-  if (updated.error && missingSupervisorColumn(updated.error)) {
-    delete updatesZh.直屬主管;
-    const retry = await supabase
-      .from("users")
-      .update(updatesZh)
-      .eq("帳號", raw)
-      .select('"帳號","姓名","角色","部門","scope","active_flag"')
-      .maybeSingle();
-    if (retry.error) {
-      log("users.db", "updateUser 失敗", { error: String(retry.error.message) });
-      throw retry.error;
-    }
-    if (!retry.data) return null;
-    log("users.db", "updateUser 成功（中文欄位）", { email: raw?.slice(0, 25) });
-    return rowToUser(retry.data as unknown as Record<string, unknown>);
+  const zh = await selectUsersWithSupervisorFallback(
+    async (cols) => {
+      const patch = { ...updatesZh };
+      if (cols === ZH_COLS_BASE) delete patch.直屬主管;
+      return supabase.from("users").update(patch).eq("帳號", raw).select(cols).maybeSingle();
+    },
+    ZH_COLS,
+    ZH_COLS_BASE
+  );
+  if (zh.error) {
+    log("users.db", "updateUser 失敗", { error: String(zh.error.message) });
+    throw zh.error;
   }
-  if (updated.error) {
-    log("users.db", "updateUser 失敗", { error: String(updated.error.message) });
-    throw updated.error;
-  }
-  if (!updated.data) return null;
+  if (!zh.data || Array.isArray(zh.data)) return null;
   log("users.db", "updateUser 成功（中文欄位）", { email: raw?.slice(0, 25) });
-  return rowToUser(updated.data as unknown as Record<string, unknown>);
+  return rowToUser(zh.data);
 }
 
 /**
@@ -228,33 +242,23 @@ export async function updateUserPassword(email: string, newPassword: string): Pr
 
 export async function getUsers(): Promise<User[]> {
   const supabase = getSupabase();
-  const { data: dataEn, error: errEn } = await supabase
-    .from("users")
-    .select("email, name, role, dept, scope, active_flag, 直屬主管")
-    .eq("active_flag", true)
-    .order("email");
-  if (errEn && missingSupervisorColumn(errEn)) {
-    const retry = await supabase
-      .from("users")
-      .select("email, name, role, dept, scope, active_flag")
-      .eq("active_flag", true)
-      .order("email");
-    if (retry.error) throw retry.error;
-    return (retry.data ?? []).map((r) => rowToUser(r as unknown as Record<string, unknown>));
+  const en = await selectUsersWithSupervisorFallback(
+    (cols) => supabase.from("users").select(cols).eq("active_flag", true).order("email"),
+    EN_COLS,
+    EN_COLS_BASE
+  );
+  if (!en.error && Array.isArray(en.data) && en.data.length > 0) {
+    return en.data.map((r) => rowToUser(r));
   }
-  if (!errEn && dataEn?.length) {
-    return (dataEn ?? []).map((r) => rowToUser(r as unknown as Record<string, unknown>));
-  }
-  const zhSelect = '"帳號","姓名","角色","部門","scope","active_flag","直屬主管"';
-  const zhSelectBase = '"帳號","姓名","角色","部門","scope","active_flag"';
-  const zh = await supabase.from("users").select(zhSelect).eq("active_flag", true).order("帳號");
-  if (zh.error && missingSupervisorColumn(zh.error)) {
-    const retry = await supabase.from("users").select(zhSelectBase).eq("active_flag", true).order("帳號");
-    if (retry.error) throw retry.error;
-    return (retry.data ?? []).map((r) => rowToUser(r as unknown as Record<string, unknown>));
-  }
+
+  const zh = await selectUsersWithSupervisorFallback(
+    (cols) => supabase.from("users").select(cols).eq("active_flag", true).order("帳號"),
+    ZH_COLS,
+    ZH_COLS_BASE
+  );
   if (zh.error) throw zh.error;
-  return (zh.data ?? []).map((r) => rowToUser(r as unknown as Record<string, unknown>));
+  const rows = Array.isArray(zh.data) ? zh.data : zh.data ? [zh.data] : [];
+  return rows.map((r) => rowToUser(r));
 }
 
 function normalizeEmail(s: string): string {
@@ -281,64 +285,42 @@ export async function getUserByEmail(email: string): Promise<User | null> {
   }
 
   const supabase = getSupabase();
-  const { data: dataEn, error: errEn } = await supabase
-    .from("users")
-    .select("email, name, role, dept, scope, active_flag, 直屬主管")
-    .eq("email", raw)
-    .maybeSingle();
-  if (errEn && missingSupervisorColumn(errEn)) {
-    const retry = await supabase
-      .from("users")
-      .select("email, name, role, dept, scope, active_flag")
-      .eq("email", raw)
-      .maybeSingle();
-    if (retry.error) throw retry.error;
-    if (!retry.data) return null;
-    return rowToUser(retry.data as unknown as Record<string, unknown>);
-  }
-  if (!errEn && dataEn) {
-    const foundRecord = dataEn as unknown as Record<string, unknown>;
+  const en = await selectUsersWithSupervisorFallback(
+    (cols) => supabase.from("users").select(cols).eq("email", raw).maybeSingle(),
+    EN_COLS,
+    EN_COLS_BASE
+  );
+  if (!en.error && en.data && !Array.isArray(en.data)) {
     log("users.db", "getUserByEmail 找到使用者（英文欄位）", {
-      email: foundRecord.email,
-      role: foundRecord.role,
+      email: en.data.email,
+      role: en.data.role,
     });
-    return rowToUser(foundRecord);
+    return rowToUser(en.data);
   }
-  if (errEn) {
-    log("users.db", "getUserByEmail 英文查詢錯誤（改試中文帳號）", { error: String(errEn?.message) });
+  if (en.error) {
+    log("users.db", "getUserByEmail 英文查詢錯誤（改試中文帳號）", { error: String(en.error.message) });
   } else {
     log("users.db", "getUserByEmail 英文欄位無列，改試帳號", { raw });
   }
-  const zhSelect = '"帳號","姓名","角色","部門","scope","active_flag","直屬主管"';
-  const { data: dataZh, error: errZh } = await supabase
-    .from("users")
-    .select(zhSelect)
-    .eq("帳號", raw)
-    .maybeSingle();
-  if (errZh && missingSupervisorColumn(errZh)) {
-    const retry = await supabase
-      .from("users")
-      .select('"帳號","姓名","角色","部門","scope","active_flag"')
-      .eq("帳號", raw)
-      .maybeSingle();
-    if (retry.error) throw retry.error;
-    if (!retry.data) return null;
-    return rowToUser(retry.data as unknown as Record<string, unknown>);
+
+  const zh = await selectUsersWithSupervisorFallback(
+    (cols) => supabase.from("users").select(cols).eq("帳號", raw).maybeSingle(),
+    ZH_COLS,
+    ZH_COLS_BASE
+  );
+  if (zh.error) {
+    log("users.db", "getUserByEmail 查詢錯誤", { error: String(zh.error.message) });
+    throw zh.error;
   }
-  if (errZh) {
-    log("users.db", "getUserByEmail 查詢錯誤", { error: String(errZh?.message) });
-    throw errZh;
-  }
-  if (!dataZh) {
+  if (!zh.data || Array.isArray(zh.data)) {
     log("users.db", "getUserByEmail 中文欄位未找到", { raw });
     return null;
   }
-  const foundRecord = dataZh as unknown as Record<string, unknown>;
   log("users.db", "getUserByEmail 找到使用者（中文欄位）", {
-    email: foundRecord["帳號"],
-    role: foundRecord["角色"],
+    email: zh.data["帳號"],
+    role: zh.data["角色"],
   });
-  return rowToUser(foundRecord);
+  return rowToUser(zh.data);
 }
 
 export async function verifyCredentials(
