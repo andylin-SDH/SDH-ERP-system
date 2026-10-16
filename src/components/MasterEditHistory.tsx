@@ -33,21 +33,24 @@ function formatEditLogTime(iso?: string): string {
 export function MasterEditHistory({
   logs,
   loading,
+  open,
+  onToggle,
 }: {
   logs: MasterEditLogItem[];
   loading: boolean;
+  open: boolean;
+  onToggle: () => void;
 }) {
   return (
     <section className="mt-2">
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h3 className="text-base font-bold text-amber-800">修改紀錄</h3>
-          <p className="mt-0.5 text-xs text-stone-500">
-            任何人變更金額或專案欄位都會留下紀錄；金額異動以橘色標示。
-          </p>
-        </div>
-      </div>
-      {loading ? (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="rounded-full border border-stone-200 bg-white px-3 py-1 text-xs font-semibold text-stone-600 hover:bg-stone-50"
+      >
+        {open ? "收合修改紀錄" : "查看修改紀錄"}
+      </button>
+      {!open ? null : loading ? (
         <p className="text-sm text-stone-400">載入中…</p>
       ) : logs.length === 0 ? (
         <p className="rounded-xl border border-dashed border-stone-200 bg-stone-50/80 px-3 py-4 text-sm text-stone-400">

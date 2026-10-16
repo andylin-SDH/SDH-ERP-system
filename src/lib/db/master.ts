@@ -36,6 +36,10 @@ export interface MasterRow {
   KOL開發者: string | null;
   專案費用類型: string | null;
   廠商名稱: string | null;
+  /** 廠商統一編號（發票抬頭對應統編；開立發票可帶入） */
+  統一編號: string | null;
+  /** 發票收件人 Email（開立發票買受人 Email 可帶入） */
+  收件人Email: string | null;
   /** 可編輯；同步至財務與分潤表「廠商預計付款日」 */
   廠商預計付款日: string | null;
   專案內容: string | null;
@@ -91,6 +95,8 @@ function rowToMaster(r: Record<string, unknown>): MasterRow {
     KOL開發者: (r.KOL開發者 as string) ?? null,
     專案費用類型: (r.專案費用類型 as string) ?? null,
     廠商名稱: (r.廠商名稱 as string) ?? null,
+    統一編號: (r.統一編號 as string) ?? null,
+    收件人Email: (r.收件人Email as string) ?? null,
     廠商預計付款日: (r.廠商預計付款日 as string) ?? null,
     專案內容: (r.專案內容 as string) ?? null,
     備註: (r.備註 as string) ?? null,
@@ -141,6 +147,8 @@ function dropMissingMasterColumns(data: Record<string, unknown>, error: { messag
   const groups = [
     ["直屬主管", "直屬主管分潤成數"],
     ["分潤制度"],
+    ["統一編號"],
+    ["收件人Email"],
   ];
   let dropped = false;
   for (const keys of groups) {
@@ -149,6 +157,17 @@ function dropMissingMasterColumns(data: Record<string, unknown>, error: { messag
     dropped = true;
   }
   return dropped;
+}
+
+/** PostgREST／Supabase 錯誤常是純物件，不是 Error。 */
+export function masterDbErrorMessage(error: unknown, fallback = "更新失敗"): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (error && typeof error === "object") {
+    const msg = String((error as { message?: unknown }).message ?? "").trim();
+    if (msg) return msg;
+  }
+  if (typeof error === "string" && error.trim()) return error;
+  return fallback;
 }
 
 export async function getMasterList(): Promise<MasterRow[]> {
@@ -225,6 +244,8 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     KOL開發者: payload.KOL開發者 ?? null,
     專案費用類型: payload.專案費用類型 ?? null,
     廠商名稱: payload.廠商名稱 ?? null,
+    統一編號: payload.統一編號 ?? null,
+    收件人Email: payload.收件人Email ?? null,
     廠商預計付款日: payload.廠商預計付款日 ?? null,
     專案內容: payload.專案內容 ?? null,
     備註: payload.備註 ?? null,
@@ -250,7 +271,7 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     .insert(insertData)
     .select("*")
     .maybeSingle();
-  for (let attempt = 0; attempt < 2 && error && dropMissingMasterColumns(insertData, error); attempt += 1) {
+  for (let attempt = 0; attempt < 4 && error && dropMissingMasterColumns(insertData, error); attempt += 1) {
     const retry = await getSupabase().from("大總表").insert(insertData).select("*").maybeSingle();
     data = retry.data;
     error = retry.error;
@@ -258,7 +279,7 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
 
   if (error) {
     log("master.db", "createMaster 新增失敗", { error: String(error?.message) });
-    throw error;
+    throw new Error(masterDbErrorMessage(error, "新增大總表失敗"));
   }
   if (!data) {
     throw new Error("新增大總表失敗，未取得資料");
@@ -296,6 +317,8 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
     KOL開發者: payload.KOL開發者 ?? null,
     專案費用類型: payload.專案費用類型 ?? null,
     廠商名稱: payload.廠商名稱 ?? null,
+    統一編號: payload.統一編號 ?? null,
+    收件人Email: payload.收件人Email ?? null,
     廠商預計付款日: payload.廠商預計付款日 ?? null,
     專案內容: payload.專案內容 ?? null,
     備註: payload.備註 ?? null,
@@ -330,7 +353,7 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
     .eq("id", id)
     .select("*")
     .maybeSingle();
-  for (let attempt = 0; attempt < 2 && error && dropMissingMasterColumns(updateData, error); attempt += 1) {
+  for (let attempt = 0; attempt < 4 && error && dropMissingMasterColumns(updateData, error); attempt += 1) {
     const retry = await getSupabase().from("大總表").update(updateData).eq("id", id).select("*").maybeSingle();
     data = retry.data;
     error = retry.error;
@@ -338,7 +361,7 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
 
   if (error) {
     log("master.db", "updateMaster 更新失敗", { id, error: String(error?.message) });
-    throw error;
+    throw new Error(masterDbErrorMessage(error, "更新大總表失敗"));
   }
   if (!data) {
     throw new Error("更新大總表失敗，未取得資料");

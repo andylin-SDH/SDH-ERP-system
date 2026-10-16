@@ -19,6 +19,7 @@ import {
   extraBonusPayoutTypeForRecipient,
   isExtraBonusPayoutType,
   normalizeRecipientForDedupe,
+  canonicalPayoutRoleKey,
 } from "@/lib/payout-dedupe";
 import { normalizeDecimalString } from "@/lib/number-normalize";
 
@@ -387,12 +388,18 @@ export async function insertPayoutRows(rows: PayoutInsertRow[]): Promise<void> {
 
 type PayoutDefaults = Record<string, string>;
 
-/** 同步前依「領取人」保留分潤匯款日（去重後仍對應同一人） */
+/** 同步前依「領取人 + 分潤類型」保留匯款日。同一人的專案PM與主管要分開，不能把其中一筆的付款日寫到另一筆。 */
+function payoutPersonRoleKey(recipient: unknown, payoutType: unknown): string {
+  const person = normalizeRecipientForDedupe(recipient as string | null) || "__empty__";
+  const role = canonicalPayoutRoleKey(String(payoutType ?? ""));
+  return `${person}||${role}`;
+}
+
 async function snapshotRemitDatesByRecipient(專案ID: string): Promise<Map<string, string>> {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("分潤表")
-    .select('"領取人", "分潤匯款日期"')
+    .select('"領取人", "分潤類型", "分潤匯款日期"')
     .eq("專案ID", 專案ID);
   if (error) {
     if (error.code === "42P01") return new Map();
@@ -402,7 +409,7 @@ async function snapshotRemitDatesByRecipient(專案ID: string): Promise<Map<stri
   for (const r of data ?? []) {
     const remit = String((r as Record<string, unknown>)["分潤匯款日期"] ?? "").trim();
     if (!remit) continue;
-    const key = normalizeRecipientForDedupe((r as Record<string, unknown>)["領取人"] as string | null) || "__empty__";
+    const key = payoutPersonRoleKey((r as Record<string, unknown>)["領取人"], (r as Record<string, unknown>)["分潤類型"]);
     out.set(key, remit);
   }
   return out;
@@ -459,7 +466,7 @@ async function fillEmptyPayoutVendorDate(專案ID: string, vendorPaid: string): 
 /** 重寫前保留提領申請日（欄位尚未建立時略過） */
 async function snapshotClaimDatesByRecipient(專案ID: string): Promise<Map<string, string>> {
   const supabase = getSupabase();
-  const { data, error } = await supabase.from("分潤表").select('"領取人", "提領申請日"').eq("專案ID", 專案ID);
+  const { data, error } = await supabase.from("分潤表").select('"領取人", "分潤類型", "提領申請日"').eq("專案ID", 專案ID);
   if (error) {
     if (error.code === "42P01" || error.code === "42703") return new Map();
     throw error;
@@ -468,7 +475,7 @@ async function snapshotClaimDatesByRecipient(專案ID: string): Promise<Map<stri
   for (const r of data ?? []) {
     const claimed = String((r as Record<string, unknown>)["提領申請日"] ?? "").trim();
     if (!claimed) continue;
-    const key = normalizeRecipientForDedupe((r as Record<string, unknown>)["領取人"] as string | null) || "__empty__";
+    const key = payoutPersonRoleKey((r as Record<string, unknown>)["領取人"], (r as Record<string, unknown>)["分潤類型"]);
     out.set(key, claimed);
   }
   return out;
@@ -477,7 +484,7 @@ async function snapshotClaimDatesByRecipient(專案ID: string): Promise<Map<stri
 async function restoreClaimDatesByRecipient(專案ID: string, snapshots: Map<string, string>): Promise<void> {
   if (snapshots.size === 0) return;
   const supabase = getSupabase();
-  const { data, error } = await supabase.from("分潤表").select('id, "領取人"').eq("專案ID", 專案ID);
+  const { data, error } = await supabase.from("分潤表").select('id, "領取人", "分潤類型"').eq("專案ID", 專案ID);
   if (error) {
     if (error.code === "42P01") return;
     throw error;
@@ -485,7 +492,7 @@ async function restoreClaimDatesByRecipient(專案ID: string, snapshots: Map<str
   for (const r of data ?? []) {
     const id = String((r as Record<string, unknown>).id ?? "").trim();
     if (!id) continue;
-    const key = normalizeRecipientForDedupe((r as Record<string, unknown>)["領取人"] as string | null) || "__empty__";
+    const key = payoutPersonRoleKey((r as Record<string, unknown>)["領取人"], (r as Record<string, unknown>)["分潤類型"]);
     const claimed = snapshots.get(key);
     if (!claimed) continue;
     const { error: upErr } = await supabase.from("分潤表").update({ 提領申請日: claimed }).eq("id", id).is("提領申請日", null);
@@ -496,7 +503,7 @@ async function restoreClaimDatesByRecipient(專案ID: string, snapshots: Map<str
 async function restoreRemitDatesByRecipient(專案ID: string, snapshots: Map<string, string>): Promise<void> {
   if (snapshots.size === 0) return;
   const supabase = getSupabase();
-  const { data, error } = await supabase.from("分潤表").select('id, "領取人"').eq("專案ID", 專案ID);
+  const { data, error } = await supabase.from("分潤表").select('id, "領取人", "分潤類型"').eq("專案ID", 專案ID);
   if (error) {
     if (error.code === "42P01") return;
     throw error;
@@ -504,8 +511,7 @@ async function restoreRemitDatesByRecipient(專案ID: string, snapshots: Map<str
   for (const r of data ?? []) {
     const id = String((r as Record<string, unknown>).id ?? "").trim();
     if (!id) continue;
-    const key =
-      normalizeRecipientForDedupe((r as Record<string, unknown>)["領取人"] as string | null) || "__empty__";
+    const key = payoutPersonRoleKey((r as Record<string, unknown>)["領取人"], (r as Record<string, unknown>)["分潤類型"]);
     const remit = snapshots.get(key);
     if (!remit) continue;
     const { error: upErr } = await supabase.from("分潤表").update({ 分潤匯款日期: remit }).eq("id", id);

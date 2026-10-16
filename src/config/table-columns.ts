@@ -49,7 +49,9 @@ export const TABLE_COLUMNS: Record<string, Array<{ key: string; label: string }>
     { key: "專案成本", label: "專案額外成本" },
     { key: "KOL名稱", label: "KOL名稱" },
     { key: "專案費用類型", label: "專案費用類型" },
-    { key: "廠商名稱", label: "廠商名稱" },
+    { key: "廠商名稱", label: "廠商名稱（發票抬頭）" },
+    { key: "統一編號", label: "統一編號" },
+    { key: "收件人Email", label: "收件人 Email" },
     { key: "廠商預計付款日", label: "廠商預計付款日" },
     /** 模式 A（製作／活動） */
     { key: "專案引薦人", label: "專案引薦人（製作／活動）" },

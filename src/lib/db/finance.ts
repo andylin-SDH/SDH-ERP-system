@@ -2,6 +2,7 @@
  * Finance 資料層（Supabase）
  */
 
+import { INVOICE_VOID_MARK } from "@/lib/invoice/ledger";
 import { getSupabase } from "@/lib/supabase/server";
 import type { FinanceRow, InvoiceRow, PaymentRecordRow } from "@/modules/finance/types";
 import { normalizeDecimalString } from "@/lib/number-normalize";
@@ -45,6 +46,8 @@ function mapInvoiceRecord(r: Record<string, unknown>): InvoiceRow {
     廠商預計付款日: r.廠商預計付款日 != null ? String(r.廠商預計付款日) : undefined,
     廠商付款日期: r.廠商付款日期 != null ? String(r.廠商付款日期) : undefined,
     備註: r.備註 != null ? String(r.備註) : undefined,
+    作廢時間: r.作廢時間 != null ? String(r.作廢時間) : undefined,
+    作廢原因: r.作廢原因 != null ? String(r.作廢原因) : undefined,
   };
 }
 
@@ -682,6 +685,103 @@ export async function deleteKolPaymentRecordsForProject(專案ID: string): Promi
 
   if (ids.length === 0) return 0;
   return deletePaymentRecordsByIds(ids);
+}
+
+/** 光貿開立成功後寫入清冊。同一發票號碼已存在則不新增。有指定專案才綁專案 ID。 */
+export async function insertIssuedInvoice(input: {
+  projectId?: string | null;
+  發票號碼: string;
+  發票日期: string;
+  收款對象: string;
+  發票金額含稅: string;
+  備註: string;
+}): Promise<{ invoices: InvoiceRow[]; alreadyExists: boolean }> {
+  const number = input.發票號碼.trim();
+  const supabase = getSupabase();
+  const { data: existing, error: existingErr } = await supabase
+    .from("發票")
+    .select("*")
+    .eq("發票號碼", number);
+  if (existingErr) throw existingErr;
+  if ((existing ?? []).length > 0) {
+    return {
+      invoices: (existing ?? []).map((r: Record<string, unknown>) => mapInvoiceRecord(r)),
+      alreadyExists: true,
+    };
+  }
+
+  const requested = String(input.projectId ?? "").trim();
+  let 專案ID: string | null = null;
+  if (requested) {
+    const { data: master, error: masterErr } = await supabase
+      .from("大總表")
+      .select("專案ID")
+      .eq("專案ID", requested)
+      .maybeSingle();
+    if (masterErr) throw masterErr;
+    if (master && String((master as { 專案ID?: string }).專案ID ?? "").trim()) {
+      專案ID = requested;
+    }
+  }
+
+  const created = await createInvoicesBatch([
+    {
+      專案ID,
+      發票號碼: number,
+      發票日期: input.發票日期,
+      收款對象: input.收款對象,
+      發票金額含稅: input.發票金額含稅,
+      備註: input.備註.trim() || null,
+    },
+  ]);
+  return { invoices: created, alreadyExists: false };
+}
+
+/**
+ * 作廢標記。優先寫作廢時間／原因；欄位尚未建立時，只在備註後面追加標記，不改金額與付款日。
+ */
+export async function markInvoicesVoided(
+  invoiceNumber: string,
+  reason: string
+): Promise<InvoiceRow[]> {
+  const number = invoiceNumber.trim();
+  const when = new Date().toISOString();
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("發票")
+    .update({ 作廢時間: when, 作廢原因: reason })
+    .eq("發票號碼", number)
+    .select("*");
+
+  if (!error) {
+    return (data ?? []).map((r: Record<string, unknown>) => mapInvoiceRecord(r));
+  }
+
+  const missingColumn = error.code === "42703" || /作廢/.test(String(error.message ?? ""));
+  if (!missingColumn) throw error;
+
+  const { data: rows, error: readErr } = await supabase.from("發票").select("*").eq("發票號碼", number);
+  if (readErr) throw readErr;
+  const updated: InvoiceRow[] = [];
+  for (const raw of rows ?? []) {
+    const row = raw as Record<string, unknown>;
+    const id = String(row.id ?? "").trim();
+    const note = String(row.備註 ?? "");
+    if (!id || note.includes(INVOICE_VOID_MARK)) {
+      updated.push(mapInvoiceRecord(row));
+      continue;
+    }
+    const nextNote = `${note.trim()}${note.trim() ? "\n" : ""}${INVOICE_VOID_MARK}${reason}`.trim();
+    const { data: saved, error: noteErr } = await supabase
+      .from("發票")
+      .update({ 備註: nextNote })
+      .eq("id", id)
+      .select("*")
+      .maybeSingle();
+    if (noteErr) throw noteErr;
+    updated.push(mapInvoiceRecord((saved ?? { ...row, 備註: nextNote }) as Record<string, unknown>));
+  }
+  return updated;
 }
 
 export async function getFinance(): Promise<FinanceRow[]> {
