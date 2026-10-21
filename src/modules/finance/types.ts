@@ -17,6 +17,9 @@ export interface InvoiceRow {
   /** 光貿作廢成功後寫入；空值表示未作廢 */
   作廢時間?: string;
   作廢原因?: string;
+  /** 光貿上傳狀態（處理中／完成／錯誤等）；手動刷新才更新 */
+  光貿上傳狀態?: string;
+  光貿狀態更新時間?: string;
   [key: string]: string | undefined;
 }
 

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { InvoiceRequestProjectSummary, InvoiceRequestRow } from "@/lib/db/invoice-requests";
+import { invoiceEInvoiceLaunchLabel, isInvoiceEInvoiceLive } from "@/lib/invoice/launch";
 
 const STATUS = ["待審核", "已放行", "已退回"] as const;
 
@@ -74,6 +75,7 @@ function ProjectSummaryBlock({ project }: { project: InvoiceRequestProjectSummar
 }
 
 export function InvoiceReviewPanel({ canReview, reloadToken = 0 }: { canReview: boolean; reloadToken?: number }) {
+  const issueLive = isInvoiceEInvoiceLive();
   const [rows, setRows] = useState<InvoiceRequestRow[]>([]);
   const [status, setStatus] = useState<(typeof STATUS)[number]>("待審核");
   const [error, setError] = useState<string | null>(null);
@@ -148,6 +150,11 @@ export function InvoiceReviewPanel({ canReview, reloadToken = 0 }: { canReview: 
           </button>
         ))}
       </div>
+      {!issueLive ? (
+        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          申請會先留在這裡。{invoiceEInvoiceLaunchLabel()} 起才能按「放行並開立」，在那之前不會向光貿開立。
+        </p>
+      ) : null}
       {error ? <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
       {loading ? <p className="text-sm text-stone-500">載入申請…</p> : null}
       {!loading && !error && visible.length === 0 ? <p className="py-8 text-center text-sm text-stone-500">沒有{status}的申請</p> : null}
@@ -161,7 +168,7 @@ export function InvoiceReviewPanel({ canReview, reloadToken = 0 }: { canReview: 
                 <div className="min-w-0">
                   <p className="break-words text-base font-bold text-stone-900">{title}</p>
                   <p className="mt-1 text-xs text-stone-500">
-                    {row.專案ID || "未綁專案"} · {row.申請人 || row.申請人Email} · {taxLabel(row.課稅別, row.單價模式)}
+                    {row.外部單號 ? `錄音室預約 ${row.外部單號.replace(/^booking:/, "")}` : row.專案ID || "未綁專案"} · {row.申請人 || row.申請人Email} · {taxLabel(row.課稅別, row.單價模式)}
                     {row.申請時間 ? ` · ${row.申請時間.slice(0, 16).replace("T", " ")}` : ""}
                   </p>
                 </div>
@@ -230,7 +237,11 @@ export function InvoiceReviewPanel({ canReview, reloadToken = 0 }: { canReview: 
                   <ProjectSummaryBlock project={project} />
                 ) : (
                   <div className="rounded-xl border border-dashed border-stone-200 bg-stone-50/80 p-3 text-sm text-stone-500">
-                    {row.專案ID ? `找不到專案 ${row.專案ID} 的大總表資料` : "這筆申請沒有綁專案"}
+                    {row.外部單號
+                      ? "這筆來自錄音室預約，沒有對應大總表專案。放行後會開立並進入發票清冊。"
+                      : row.專案ID
+                        ? `找不到專案 ${row.專案ID} 的大總表資料`
+                        : "這筆申請沒有綁專案"}
                   </div>
                 )}
               </div>
@@ -246,11 +257,11 @@ export function InvoiceReviewPanel({ canReview, reloadToken = 0 }: { canReview: 
                 <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-stone-100 pt-3">
                   <button
                     type="button"
-                    disabled={busyId === row.id}
-                    onClick={() => void review(row.id, "approve")}
+                    disabled={!issueLive || busyId === row.id}
+                    onClick={() => issueLive && void review(row.id, "approve")}
                     className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-60"
                   >
-                    {busyId === row.id ? "處理中…" : "放行並開立"}
+                    {busyId === row.id ? "處理中…" : issueLive ? "放行並開立" : `${invoiceEInvoiceLaunchLabel()} 才能開立`}
                   </button>
                   {rejectId === row.id ? (
                     <>

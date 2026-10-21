@@ -266,17 +266,25 @@ export default function InvoiceIssuePage() {
   }
   if (!isInvoiceEInvoiceLive()) {
     return (
-      <div className="min-h-screen bg-[#f7f8fa] px-4 py-16 text-stone-900">
-        <div className="mx-auto max-w-lg rounded-2xl border border-stone-200 bg-white px-6 py-8 text-center shadow-sm">
-          <h1 className="text-xl font-bold">開立發票</h1>
-          <p className="mt-3 text-sm text-stone-600">{invoiceEInvoiceLockedMessage()}</p>
-          <p className="mt-1 text-xs text-stone-400">預計開放日：{invoiceEInvoiceLaunchLabel()}（台北時間）</p>
-          <Link
-            href="/dashboard"
-            className="mt-6 inline-flex rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-          >
-            回專案
-          </Link>
+      <div className="min-h-screen bg-[#f7f8fa] px-4 py-10 text-stone-900">
+        <div className="mx-auto max-w-3xl">
+          <div className="rounded-2xl border border-stone-200 bg-white px-6 py-8 text-center shadow-sm">
+            <h1 className="text-xl font-bold">開立發票</h1>
+            <p className="mt-3 text-sm text-stone-600">{invoiceEInvoiceLockedMessage()}</p>
+            <p className="mt-1 text-xs text-stone-400">錄音室預約的申請會先進入下面的待審核，{invoiceEInvoiceLaunchLabel()}（台北時間）起才能放行開立。</p>
+            <Link
+              href="/dashboard"
+              className="mt-6 inline-flex rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm font-semibold text-stone-700 hover:bg-stone-50"
+            >
+              回專案
+            </Link>
+          </div>
+          {canReview ? (
+            <section className="mt-8">
+              <h2 className="mb-3 text-base font-bold text-stone-900">開立申請</h2>
+              <InvoiceReviewPanel canReview={canReview} reloadToken={requestTick} />
+            </section>
+          ) : null}
         </div>
       </div>
     );

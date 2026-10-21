@@ -59,6 +59,7 @@ export type InvoiceRequestRow = {
   隨機碼: string;
   開立錯誤: string;
   已有發票: boolean;
+  外部單號: string;
   專案摘要: InvoiceRequestProjectSummary | null;
 };
 
@@ -76,6 +77,8 @@ export type InvoiceRequestInput = {
   items: InvoiceRequestLine[];
   申請人Email: string;
   申請人: string;
+  /** 外部來源訂單編號。有值時同一單號只建一筆，已存在則原樣回傳。 */
+  外部單號?: string;
 };
 
 function text(value: unknown): string {
@@ -128,6 +131,7 @@ function mapRow(
     隨機碼: text(row.隨機碼),
     開立錯誤: text(row.開立錯誤),
     已有發票: projectId !== "" && issuedProjectIds.has(projectId),
+    外部單號: text(row.外部單號),
     專案摘要: projectId ? projectById.get(projectId) ?? null : null,
   };
 }
@@ -202,6 +206,11 @@ function missingTable(error: { code?: string; message?: string } | null): boolea
   return error?.code === "42P01" || /發票開立申請/.test(message);
 }
 
+function missingExternalOrderColumn(error: { code?: string; message?: string } | null): boolean {
+  const message = String(error?.message ?? "");
+  return error?.code === "42703" || /外部單號/.test(message);
+}
+
 async function issuedProjectIds(): Promise<Set<string>> {
   const { data, error } = await getSupabase().from("發票").select("專案ID");
   if (error) return new Set();
@@ -260,13 +269,51 @@ export async function createInvoiceRequest(input: InvoiceRequestInput): Promise<
     發票總金額: String(totals.totalAmount),
     申請人Email: input.申請人Email,
     申請人: input.申請人 || input.申請人Email,
+    ...(input.外部單號 ? { 外部單號: input.外部單號 } : {}),
   };
   const { data, error } = await getSupabase().from("發票開立申請").insert(payload).select("*").single();
   if (error) {
     if (missingTable(error)) throw new Error("發票開立申請表還沒建立，請先執行 migration 076");
+    if (input.外部單號 && missingExternalOrderColumn(error)) {
+      throw new Error("發票開立申請尚未有外部單號欄位，請先執行 migration 083");
+    }
     throw error;
   }
   return mapRow(data as Record<string, unknown>, await issuedProjectIds());
+}
+
+export async function findInvoiceRequestByExternalOrder(externalOrderId: string): Promise<InvoiceRequestRow | null> {
+  const key = externalOrderId.trim();
+  if (!key) return null;
+  const { data, error } = await getSupabase().from("發票開立申請").select("*").eq("外部單號", key).maybeSingle();
+  if (error) {
+    if (missingExternalOrderColumn(error)) {
+      throw new Error("發票開立申請尚未有外部單號欄位，請先執行 migration 083");
+    }
+    throw error;
+  }
+  if (!data) return null;
+  return mapRow(data as Record<string, unknown>, await issuedProjectIds());
+}
+
+/** 同一外部單號已有申請就原樣回傳，不更新金額或買受人。 */
+export async function ingestExternalInvoiceRequest(
+  input: InvoiceRequestInput & { 外部單號: string }
+): Promise<{ request: InvoiceRequestRow; alreadyExists: boolean }> {
+  const key = input.外部單號.trim();
+  const existing = await findInvoiceRequestByExternalOrder(key);
+  if (existing) return { request: existing, alreadyExists: true };
+  try {
+    const created = await createInvoiceRequest({ ...input, 外部單號: key });
+    return { request: created, alreadyExists: false };
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === "23505") {
+      const again = await findInvoiceRequestByExternalOrder(key);
+      if (again) return { request: again, alreadyExists: true };
+    }
+    throw error;
+  }
 }
 
 export async function rejectInvoiceRequest(id: string, reason: string, reviewer: string): Promise<InvoiceRequestRow> {

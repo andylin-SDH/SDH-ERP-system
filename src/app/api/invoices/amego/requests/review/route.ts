@@ -7,7 +7,6 @@ import { canReviewInvoice } from "@/lib/invoice/review-access";
 export async function POST(request: NextRequest) {
   const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
-  if (!isInvoiceEInvoiceLive()) return invoiceEInvoiceNotLiveResponse();
   if (!canReviewInvoice(auth.user.role)) {
     return NextResponse.json({ ok: false, error: "只有董事長和會計可以審核" }, { status: 403 });
   }
@@ -23,6 +22,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, request: updated });
     }
     if (body.action === "approve") {
+      if (!isInvoiceEInvoiceLive()) return invoiceEInvoiceNotLiveResponse();
       const updated = await approveInvoiceRequest(id, reviewer);
       return NextResponse.json({ ok: true, request: updated });
     }

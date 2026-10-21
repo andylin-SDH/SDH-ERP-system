@@ -2,7 +2,15 @@
  * Finance 資料層（Supabase）
  */
 
-import { INVOICE_VOID_MARK } from "@/lib/invoice/ledger";
+import {
+  AMEGO_UPLOAD_STATUS_PROCESSING,
+  AMEGO_UPLOAD_STATUS_VOID_PENDING,
+  AMEGO_UPLOAD_STATUS_VOIDED,
+  INVOICE_VOID_MARK,
+  invoiceIsVoided,
+  invoiceNeedsAmegoStatusRefresh,
+} from "@/lib/invoice/ledger";
+import { amegoIsVoidConfirmed, amegoUploadStatusLabel, getInvoiceStatuses } from "@/lib/invoice/amego";
 import { getSupabase } from "@/lib/supabase/server";
 import type { FinanceRow, InvoiceRow, PaymentRecordRow } from "@/modules/finance/types";
 import { normalizeDecimalString } from "@/lib/number-normalize";
@@ -21,6 +29,8 @@ export type InvoiceInsertInput = {
   廠商預計付款日?: string | null;
   廠商付款日期?: string | null;
   備註?: string | null;
+  /** 僅光貿開立寫入；一般清冊存檔不會帶此欄 */
+  光貿上傳狀態?: string | null;
 };
 
 /** 付款記錄（單筆／批次共用欄位） */
@@ -48,6 +58,8 @@ function mapInvoiceRecord(r: Record<string, unknown>): InvoiceRow {
     備註: r.備註 != null ? String(r.備註) : undefined,
     作廢時間: r.作廢時間 != null ? String(r.作廢時間) : undefined,
     作廢原因: r.作廢原因 != null ? String(r.作廢原因) : undefined,
+    光貿上傳狀態: r.光貿上傳狀態 != null ? String(r.光貿上傳狀態) : undefined,
+    光貿狀態更新時間: r.光貿狀態更新時間 != null ? String(r.光貿狀態更新時間) : undefined,
   };
 }
 
@@ -469,24 +481,44 @@ function normalizeMoneyOrNull(v: string | null | undefined): string | null {
  * 批次新增發票（至少一筆須填發票號碼；專案ID 可空）
  */
 export async function createInvoicesBatch(rows: InvoiceInsertInput[]): Promise<InvoiceRow[]> {
+  const nowIso = new Date().toISOString();
   const payload = rows
-    .map((row) => ({
-      專案ID: trimOrNull(row.專案ID ?? undefined),
-      發票號碼: trimOrNull(row.發票號碼 ?? undefined),
-      發票日期: trimOrNull(row.發票日期 ?? undefined),
-      收款對象: trimOrNull(row.收款對象 ?? undefined),
-      發票金額含稅: normalizeMoneyOrNull(row.發票金額含稅 ?? undefined),
-      廠商預計付款日: trimOrNull(row.廠商預計付款日 ?? undefined),
-      廠商付款日期: trimOrNull(row.廠商付款日期 ?? undefined),
-      備註: trimOrNull(row.備註 ?? undefined),
-    }))
+    .map((row) => {
+      const base: Record<string, string | null> = {
+        專案ID: trimOrNull(row.專案ID ?? undefined),
+        發票號碼: trimOrNull(row.發票號碼 ?? undefined),
+        發票日期: trimOrNull(row.發票日期 ?? undefined),
+        收款對象: trimOrNull(row.收款對象 ?? undefined),
+        發票金額含稅: normalizeMoneyOrNull(row.發票金額含稅 ?? undefined),
+        廠商預計付款日: trimOrNull(row.廠商預計付款日 ?? undefined),
+        廠商付款日期: trimOrNull(row.廠商付款日期 ?? undefined),
+        備註: trimOrNull(row.備註 ?? undefined),
+      };
+      const upload = trimOrNull(row.光貿上傳狀態 ?? undefined);
+      if (upload) {
+        base.光貿上傳狀態 = upload;
+        base.光貿狀態更新時間 = nowIso;
+      }
+      return base;
+    })
     .filter((r) => r.發票號碼 != null);
 
   if (payload.length === 0) {
     throw new Error("請至少填寫一筆發票號碼");
   }
 
-  const { data, error } = await getSupabase().from("發票").insert(payload).select("*");
+  let { data, error } = await getSupabase().from("發票").insert(payload).select("*");
+  if (error && (error.code === "42703" || /光貿/.test(String(error.message ?? "")))) {
+    const stripped = payload.map((row) => {
+      const next = { ...row };
+      delete next.光貿上傳狀態;
+      delete next.光貿狀態更新時間;
+      return next;
+    });
+    const retry = await getSupabase().from("發票").insert(stripped).select("*");
+    data = retry.data;
+    error = retry.error;
+  }
   if (error) throw error;
   const created = (data ?? []).map((r: Record<string, unknown>) => mapInvoiceRecord(r));
   await syncFinanceVendorDatesForInvoiceProjectIds(
@@ -732,9 +764,111 @@ export async function insertIssuedInvoice(input: {
       收款對象: input.收款對象,
       發票金額含稅: input.發票金額含稅,
       備註: input.備註.trim() || null,
+      光貿上傳狀態: AMEGO_UPLOAD_STATUS_PROCESSING,
     },
   ]);
   return { invoices: created, alreadyExists: false };
+}
+
+/**
+ * 手動刷新：只對「字軌 + 尚未完成／作廢」的發票打光貿；查到結果才寫回狀態。
+ * 不輪詢；已完成／已作廢略過。
+ */
+export async function refreshAmegoUploadStatuses(): Promise<{
+  checked: number;
+  updated: InvoiceRow[];
+  unchanged: number;
+}> {
+  const all = await getInvoices();
+  const targets = all.filter((row) => invoiceNeedsAmegoStatusRefresh(row));
+  if (targets.length === 0) {
+    return { checked: 0, updated: [], unchanged: 0 };
+  }
+
+  const numbers = targets
+    .map((row) => String(row.發票號碼 ?? "").trim().toUpperCase())
+    .filter(Boolean);
+  const statuses = await getInvoiceStatuses(numbers);
+  const byNumber = new Map(statuses.map((s) => [s.invoiceNumber, s]));
+  const when = new Date().toISOString();
+  const supabase = getSupabase();
+  const updated: InvoiceRow[] = [];
+  let unchanged = 0;
+
+  for (const row of targets) {
+    const number = String(row.發票號碼 ?? "").trim().toUpperCase();
+    const id = String(row.id ?? "").trim();
+    if (!number || !id) {
+      unchanged += 1;
+      continue;
+    }
+    const remote = byNumber.get(number);
+    const pendingVoid = String(row.光貿上傳狀態 ?? "").trim() === AMEGO_UPLOAD_STATUS_VOID_PENDING;
+    const remoteType = String(remote?.type ?? "").trim().toUpperCase();
+    // 作廢已送出但光貿還沒改成作廢類型：維持「作廢處理中」，等下次刷新再查
+    if (pendingVoid && remote && !amegoIsVoidConfirmed(remote) && (remoteType === "C0401" || remoteType === "NOT_FOUND")) {
+      unchanged += 1;
+      continue;
+    }
+    const nextLabel = remote ? amegoUploadStatusLabel(remote) : null;
+    if (!nextLabel) {
+      unchanged += 1;
+      continue;
+    }
+    const prev = String(row.光貿上傳狀態 ?? "").trim();
+    const stampVoid = nextLabel === AMEGO_UPLOAD_STATUS_VOIDED && !invoiceIsVoided(row);
+    if (prev === nextLabel && !stampVoid) {
+      unchanged += 1;
+      continue;
+    }
+    const patch: Record<string, string> = {
+      光貿上傳狀態: nextLabel,
+      光貿狀態更新時間: when,
+    };
+    if (stampVoid) {
+      patch.作廢時間 = when;
+      if (!String(row.作廢原因 ?? "").trim()) patch.作廢原因 = "光貿狀態已確認作廢";
+    }
+    const { data, error } = await supabase
+      .from("發票")
+      .update(patch)
+      .eq("id", id)
+      .select("*")
+      .maybeSingle();
+    if (error) {
+      const missing = error.code === "42703" || /光貿/.test(String(error.message ?? ""));
+      if (missing) {
+        throw new Error("發票表尚未建立「光貿上傳狀態」欄位，請先執行 migration 081");
+      }
+      throw error;
+    }
+    if (data) updated.push(mapInvoiceRecord(data as Record<string, unknown>));
+  }
+
+  return { checked: targets.length, updated, unchanged };
+}
+
+/**
+ * 作廢 API 已送出。清冊先標「作廢處理中」，不寫作廢時間；等按刷新且光貿類型已是作廢，才標已作廢。
+ */
+export async function markInvoiceVoidUnconfirmed(
+  invoiceNumber: string,
+  reason: string
+): Promise<InvoiceRow[]> {
+  const number = invoiceNumber.trim();
+  const when = new Date().toISOString();
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("發票")
+    .update({
+      光貿上傳狀態: AMEGO_UPLOAD_STATUS_VOID_PENDING,
+      光貿狀態更新時間: when,
+      作廢原因: reason,
+    })
+    .eq("發票號碼", number)
+    .select("*");
+  if (error) throw error;
+  return (data ?? []).map((r: Record<string, unknown>) => mapInvoiceRecord(r));
 }
 
 /**
@@ -749,7 +883,12 @@ export async function markInvoicesVoided(
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("發票")
-    .update({ 作廢時間: when, 作廢原因: reason })
+    .update({
+      作廢時間: when,
+      作廢原因: reason,
+      光貿上傳狀態: AMEGO_UPLOAD_STATUS_VOIDED,
+      光貿狀態更新時間: when,
+    })
     .eq("發票號碼", number)
     .select("*");
 
@@ -757,7 +896,22 @@ export async function markInvoicesVoided(
     return (data ?? []).map((r: Record<string, unknown>) => mapInvoiceRecord(r));
   }
 
-  const missingColumn = error.code === "42703" || /作廢/.test(String(error.message ?? ""));
+  // 舊庫可能尚無光貿狀態欄：至少寫作廢時間
+  const missingUploadCols = error.code === "42703" && /光貿/.test(String(error.message ?? ""));
+  if (missingUploadCols) {
+    const { data: voidOnly, error: voidErr } = await supabase
+      .from("發票")
+      .update({ 作廢時間: when, 作廢原因: reason })
+      .eq("發票號碼", number)
+      .select("*");
+    if (!voidErr) {
+      return (voidOnly ?? []).map((r: Record<string, unknown>) => mapInvoiceRecord(r));
+    }
+    const missingVoid = voidErr.code === "42703" || /作廢/.test(String(voidErr.message ?? ""));
+    if (!missingVoid) throw voidErr;
+  }
+
+  const missingColumn = error.code === "42703" || /作廢|光貿/.test(String(error.message ?? ""));
   if (!missingColumn) throw error;
 
   const { data: rows, error: readErr } = await supabase.from("發票").select("*").eq("發票號碼", number);

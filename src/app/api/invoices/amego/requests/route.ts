@@ -13,7 +13,6 @@ function num(raw: unknown): number {
 export async function GET(request: NextRequest) {
   const auth = await requireEmployee(request);
   if (auth instanceof NextResponse) return auth;
-  if (!isInvoiceEInvoiceLive()) return invoiceEInvoiceNotLiveResponse();
   try {
     const mine = canReviewInvoice(auth.user.role) ? undefined : auth.user.email;
     const requests = await listInvoiceRequests(mine);

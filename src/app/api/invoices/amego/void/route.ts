@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireEmployee } from "@/lib/auth/api";
-import { markInvoicesVoided } from "@/lib/db/finance";
-import { voidInvoice } from "@/lib/invoice/amego";
+import { markInvoiceVoidUnconfirmed } from "@/lib/db/finance";
+import {
+  amegoCanVoid,
+  amegoVoidBlockReason,
+  getInvoiceStatus,
+  voidInvoice,
+} from "@/lib/invoice/amego";
 import { isEInvoiceTrackNumber } from "@/lib/invoice/ledger";
 
 /** 作廢不套 11/1 開立閘門：清冊上已有字軌發票時，仍須能作廢，以免卡住進行中對帳。 */
@@ -20,8 +25,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "請填作廢原因，最多 20 字" }, { status: 400 });
     }
 
+    // 確認當下再查一次（使用者開彈窗到送出之間狀態可能變）；不寫 DB、不輪詢
+    const status = await getInvoiceStatus(invoiceNumber);
+    if (!amegoCanVoid(status)) {
+      return NextResponse.json(
+        { ok: false, error: amegoVoidBlockReason(status) ?? "目前無法作廢", status },
+        { status: 409 }
+      );
+    }
+
     await voidInvoice(invoiceNumber, reason);
-    const invoices = await markInvoicesVoided(invoiceNumber, reason);
+    const invoices = await markInvoiceVoidUnconfirmed(invoiceNumber, reason);
     return NextResponse.json({ ok: true, invoiceNumber, invoices });
   } catch (error) {
     console.error("POST /api/invoices/amego/void error:", error);

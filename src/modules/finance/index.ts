@@ -15,4 +15,5 @@ export {
   createPaymentRecordsBatch,
   updatePaymentRecordById,
   deletePaymentRecordsByIds,
+  refreshAmegoUploadStatuses,
 } from "./api";

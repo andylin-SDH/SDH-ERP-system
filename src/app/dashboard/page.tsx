@@ -25,13 +25,14 @@ import { formatTaipeiDateTime, getTaipeiDateString } from "@/lib/taiwan-date";
 import { downloadTableAsExcelCsv } from "@/lib/export/download-table-excel";
 import type { InvoiceRow, InvoiceInsertInput, FinanceRow, PaymentRecordInput, PaymentRecordRow } from "@/modules/finance";
 import { sortInvoicesByInvoiceNumber, sortInvoicesForLedger } from "@/modules/finance";
-import { invoiceIsVoided, isEInvoiceTrackNumber } from "@/lib/invoice/ledger";
+import { AMEGO_UPLOAD_STATUS_VOID_PENDING, invoiceIsVoided, isEInvoiceTrackNumber } from "@/lib/invoice/ledger";
 import {
   invoiceEInvoiceLaunchLabel,
   invoiceEInvoiceLockedMessage,
   isInvoiceEInvoiceLive,
 } from "@/lib/invoice/launch";
 import { InvoiceReviewPanel } from "@/components/invoice/InvoiceReviewPanel";
+import { VoidInvoiceModal } from "@/components/invoice/VoidInvoiceModal";
 import type { FinanceUpdateFields } from "@/lib/db/finance";
 import type { PayoutRow } from "@/lib/db/payout";
 import {
@@ -2393,9 +2394,16 @@ export default function DashboardPage() {
   /** 發票清冊排序（獨立下拉，不點表頭） */
   const [invoiceListDateSortMode, setInvoiceListDateSortMode] = useState<InvoiceListDateSortMode>("dateDesc");
   const [showInvoiceCreateModal, setShowInvoiceCreateModal] = useState(false);
-  const [voidInvoiceTarget, setVoidInvoiceTarget] = useState<{ number: string } | null>(null);
-  const [voidReason, setVoidReason] = useState("");
+  const [voidInvoiceTarget, setVoidInvoiceTarget] = useState<{
+    number: string;
+    statusLabel: string;
+    typeLabel: string;
+  } | null>(null);
   const [voidingInvoice, setVoidingInvoice] = useState(false);
+  /** 按「作廢」當下才打光貿查狀態；不清冊輪詢 */
+  const [checkingVoidStatusNumber, setCheckingVoidStatusNumber] = useState<string | null>(null);
+  const [refreshingAmegoStatus, setRefreshingAmegoStatus] = useState(false);
+  const [amegoStatusRefreshMessage, setAmegoStatusRefreshMessage] = useState<string | null>(null);
   const [showInvoicePasteImportModal, setShowInvoicePasteImportModal] = useState(false);
   const [invoicePasteText, setInvoicePasteText] = useState("");
   const [invoiceDraftRows, setInvoiceDraftRows] = useState<Array<Record<string, string>>>([]);
@@ -3162,6 +3170,16 @@ export default function DashboardPage() {
           const idx = merged.indexOf("專案ID");
           if (idx !== -1) merged.splice(idx + 1, 0, "專案名稱");
           else merged.unshift("專案名稱");
+        }
+        return merged.filter((k) => allKeys.includes(k));
+      }
+      /** 發票清冊：光貿狀態緊接發票號碼後（舊 ③ 設定未勾選時仍顯示） */
+      if (tableKey === "invoices") {
+        const merged = [...normalized];
+        if (allKeys.includes("光貿上傳狀態") && !merged.includes("光貿上傳狀態")) {
+          const idx = merged.indexOf("發票號碼");
+          if (idx !== -1) merged.splice(idx + 1, 0, "光貿上傳狀態");
+          else merged.push("光貿上傳狀態");
         }
         return merged.filter((k) => allKeys.includes(k));
       }
@@ -5431,37 +5449,131 @@ export default function DashboardPage() {
     [masterUntaxedByProjectId, refreshDashboardData]
   );
 
-  const voidInvoiceOnAmego = useCallback(async () => {
-    const number = String(voidInvoiceTarget?.number ?? "").trim();
-    const reason = voidReason.trim();
-    if (!number || !reason || voidingInvoice) return;
-    setVoidingInvoice(true);
+  /** 手動刷新：只對尚未完成的字軌發票打光貿；平常不主動查。 */
+  const refreshAmegoInvoiceStatuses = useCallback(async () => {
+    if (refreshingAmegoStatus) return;
+    setRefreshingAmegoStatus(true);
+    setAmegoStatusRefreshMessage(null);
     setInvoiceEditError(null);
     try {
-      const res = await fetch("/api/invoices/amego/void", {
+      const res = await fetch("/api/invoices/amego/status/refresh", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ invoiceNumber: number, reason }),
+        credentials: "include",
       });
-      const data = (await safeResJson(res)) as { ok?: boolean; error?: string; invoices?: InvoiceRow[] };
+      const data = (await safeResJson(res)) as {
+        ok?: boolean;
+        error?: string;
+        checked?: number;
+        updatedCount?: number;
+        invoices?: InvoiceRow[];
+      };
       if (!res.ok || data.ok === false) {
-        setInvoiceEditError(String(data.error ?? "作廢失敗"));
+        setInvoiceEditError(String(data.error ?? "刷新光貿狀態失敗"));
         return;
       }
       const byId = new Map((data.invoices ?? []).filter((row) => row.id).map((row) => [String(row.id), row]));
       if (byId.size > 0) {
         setInvoices((prev) =>
-          sortInvoicesByInvoiceNumber(prev.map((row) => (row.id && byId.has(row.id) ? { ...row, ...byId.get(row.id) } : row)))
+          sortInvoicesByInvoiceNumber(
+            prev.map((row) => (row.id && byId.has(row.id) ? { ...row, ...byId.get(row.id) } : row))
+          )
         );
       }
-      setVoidInvoiceTarget(null);
-      setVoidReason("");
+      const checked = Number(data.checked ?? 0);
+      const updatedCount = Number(data.updatedCount ?? 0);
+      setAmegoStatusRefreshMessage(
+        checked === 0
+          ? "沒有需要查詢的發票（皆已完成／作廢，或非字軌號碼）"
+          : `已查詢 ${checked} 張，更新 ${updatedCount} 張`
+      );
     } catch (e) {
-      setInvoiceEditError(e instanceof Error ? e.message : "作廢失敗");
+      setInvoiceEditError(e instanceof Error ? e.message : "刷新光貿狀態失敗");
     } finally {
-      setVoidingInvoice(false);
+      setRefreshingAmegoStatus(false);
     }
-  }, [voidInvoiceTarget, voidReason, voidingInvoice]);
+  }, [refreshingAmegoStatus]);
+
+  /** 作廢鈕按下才查光貿一次；可作廢再開彈窗，否則只顯示原因。不輪詢。 */
+  const beginVoidInvoice = useCallback(async (invoiceNumber: string) => {
+    const number = String(invoiceNumber ?? "").trim().toUpperCase();
+    if (!number || checkingVoidStatusNumber) return;
+    setCheckingVoidStatusNumber(number);
+    setInvoiceEditError(null);
+    try {
+      const res = await fetch("/api/invoices/amego/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ invoiceNumber: number }),
+      });
+      const data = (await safeResJson(res)) as {
+        ok?: boolean;
+        error?: string;
+        canVoid?: boolean;
+        blockReason?: string | null;
+        statusLabel?: string;
+        typeLabel?: string;
+      };
+      if (!res.ok || data.ok === false) {
+        setInvoiceEditError(String(data.error ?? "查詢光貿狀態失敗"));
+        return;
+      }
+      if (!data.canVoid) {
+        setInvoiceEditError(String(data.blockReason ?? "目前無法作廢"));
+        return;
+      }
+      setVoidInvoiceTarget({
+        number,
+        statusLabel: String(data.statusLabel ?? "完成"),
+        typeLabel: String(data.typeLabel ?? "發票開立"),
+      });
+    } catch (e) {
+      setInvoiceEditError(e instanceof Error ? e.message : "查詢光貿狀態失敗");
+    } finally {
+      setCheckingVoidStatusNumber(null);
+    }
+  }, [checkingVoidStatusNumber]);
+
+  const voidInvoiceOnAmego = useCallback(
+    async (reason: string) => {
+      const number = String(voidInvoiceTarget?.number ?? "").trim();
+      const why = reason.trim();
+      if (!number || !why || voidingInvoice) return;
+      setVoidingInvoice(true);
+      setInvoiceEditError(null);
+      try {
+        const res = await fetch("/api/invoices/amego/void", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ invoiceNumber: number, reason: why }),
+        });
+        const data = (await safeResJson(res)) as {
+          ok?: boolean;
+          error?: string;
+          invoices?: InvoiceRow[];
+        };
+        const byId = new Map((data.invoices ?? []).filter((row) => row.id).map((row) => [String(row.id), row]));
+        if (byId.size > 0) {
+          setInvoices((prev) =>
+            sortInvoicesByInvoiceNumber(prev.map((row) => (row.id && byId.has(row.id) ? { ...row, ...byId.get(row.id) } : row)))
+          );
+        }
+        if (!res.ok || data.ok === false) {
+          setInvoiceEditError(String(data.error ?? "作廢失敗"));
+          setVoidInvoiceTarget(null);
+          return;
+        }
+        setAmegoStatusRefreshMessage("作廢已送出，目前為作廢處理中。按「刷新光貿狀態」才會再向光貿確認。");
+        setVoidInvoiceTarget(null);
+      } catch (e) {
+        setInvoiceEditError(e instanceof Error ? e.message : "作廢失敗");
+      } finally {
+        setVoidingInvoice(false);
+      }
+    },
+    [voidInvoiceTarget, voidingInvoice]
+  );
 
   /** 同一張發票再綁另一專案（新增一列；金額依該專案總金額未稅×1.05） */
   const bindInvoiceToAnotherProject = useCallback(
@@ -6756,7 +6868,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (financeSubTab !== "invoiceReview" || !me) return;
-    if (!isInvoiceEInvoiceLive() || (me.role !== "董事長" && me.role !== "會計")) {
+    if (me.role !== "董事長" && me.role !== "會計") {
       setFinanceSubTab("invoices");
     }
   }, [financeSubTab, me]);
@@ -11028,7 +11140,7 @@ export default function DashboardPage() {
               >
                 發票清冊
               </button>
-              {(me?.role === "董事長" || me?.role === "會計") && isInvoiceEInvoiceLive() ? (
+              {(me?.role === "董事長" || me?.role === "會計") ? (
                 <button
                   type="button"
                   onClick={() => setFinanceSubTab("invoiceReview")}
@@ -12321,7 +12433,6 @@ export default function DashboardPage() {
           )}
 
           {financeSubTab === "invoiceReview" &&
-            isInvoiceEInvoiceLive() &&
             (me?.role === "董事長" || me?.role === "會計") && (
             <InvoiceReviewPanel canReview />
           )}
@@ -12345,6 +12456,15 @@ export default function DashboardPage() {
                       開立發票（{invoiceEInvoiceLaunchLabel()} 開放）
                     </span>
                   )}
+                  <button
+                    type="button"
+                    disabled={refreshingAmegoStatus}
+                    onClick={() => void refreshAmegoInvoiceStatuses()}
+                    title="只對尚未「完成／作廢」的字軌發票向光貿查詢上傳狀態；平常不會自動查"
+                    className="rounded-xl border border-sky-300 bg-white px-4 py-2 text-xs font-bold text-sky-900 shadow-sm transition hover:bg-sky-50 disabled:opacity-60"
+                  >
+                    {refreshingAmegoStatus ? "刷新狀態中…" : "刷新光貿狀態"}
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -12495,6 +12615,9 @@ export default function DashboardPage() {
               {invoiceEditError && (
                 <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{invoiceEditError}</p>
               )}
+              {amegoStatusRefreshMessage && !invoiceEditError ? (
+                <p className="mb-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900">{amegoStatusRefreshMessage}</p>
+              ) : null}
               {invoiceAmountMismatchNotice && (
                 <div
                   role="status"
@@ -12638,6 +12761,28 @@ export default function DashboardPage() {
                                           );
                                         }}
                                       />
+                                    </td>
+                                  );
+                                }
+                                if (k === "光貿上傳狀態") {
+                                  const statusText = invoiceIsVoided(inv)
+                                    ? String(inv.光貿上傳狀態 ?? "").trim() || "已作廢"
+                                    : val.trim();
+                                  const badge =
+                                    statusText === "完成"
+                                      ? "bg-emerald-100 text-emerald-800"
+                                      : statusText === "錯誤" || statusText === "類型錯誤"
+                                        ? "bg-red-100 text-red-800"
+                                        : statusText === "已作廢" || statusText === "已註銷"
+                                          ? "bg-stone-200 text-stone-700"
+                                          : statusText
+                                            ? "bg-amber-100 text-amber-900"
+                                            : "bg-stone-100 text-stone-400";
+                                  return (
+                                    <td key={k} className="whitespace-nowrap px-2 py-2 align-middle">
+                                      <span className={`inline-block rounded-md px-2 py-0.5 text-[11px] font-semibold ${badge}`}>
+                                        {statusText || "—"}
+                                      </span>
                                     </td>
                                   );
                                 }
@@ -12807,18 +12952,27 @@ export default function DashboardPage() {
                                           <span className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
                                             已作廢
                                           </span>
+                                        ) : String(inv.光貿上傳狀態 ?? "").trim() === AMEGO_UPLOAD_STATUS_VOID_PENDING ? (
+                                          <span className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900">
+                                            作廢處理中
+                                          </span>
                                         ) : (
                                           <button
                                             type="button"
-                                            disabled={voidingInvoice}
-                                            onClick={() => {
-                                              setInvoiceEditError(null);
-                                              setVoidReason("");
-                                              setVoidInvoiceTarget({ number: String(inv.發票號碼 ?? "").trim().toUpperCase() });
-                                            }}
+                                            disabled={
+                                              voidingInvoice ||
+                                              checkingVoidStatusNumber ===
+                                                String(inv.發票號碼 ?? "").trim().toUpperCase()
+                                            }
+                                            onClick={() =>
+                                              void beginVoidInvoice(String(inv.發票號碼 ?? "").trim().toUpperCase())
+                                            }
                                             className="rounded-lg border border-red-300 bg-white px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50"
                                           >
-                                            作廢
+                                            {checkingVoidStatusNumber ===
+                                            String(inv.發票號碼 ?? "").trim().toUpperCase()
+                                              ? "查狀態…"
+                                              : "作廢"}
                                           </button>
                                         )
                                       ) : null}
@@ -13247,45 +13401,12 @@ export default function DashboardPage() {
       </div>
 
       {voidInvoiceTarget ? (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-stone-900/40 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-5 shadow-2xl">
-            <h2 className="text-lg font-bold text-stone-900">作廢發票</h2>
-            <p className="mt-1 text-sm text-stone-600">
-              將作廢 <span className="font-semibold text-stone-900">{voidInvoiceTarget.number}</span>。清冊保留這筆，金額與付款日不變。
-            </p>
-            <label className="mt-4 block text-xs font-semibold text-stone-500">
-              作廢原因（最多 20 字）
-              <input
-                value={voidReason}
-                maxLength={20}
-                onChange={(e) => setVoidReason(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-900"
-                placeholder="例如：金額開錯"
-              />
-            </label>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={voidingInvoice}
-                onClick={() => {
-                  setVoidInvoiceTarget(null);
-                  setVoidReason("");
-                }}
-                className="rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-600"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                disabled={voidingInvoice || !voidReason.trim()}
-                onClick={() => void voidInvoiceOnAmego()}
-                className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50"
-              >
-                {voidingInvoice ? "作廢中…" : "確認作廢"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <VoidInvoiceModal
+          target={voidInvoiceTarget}
+          voiding={voidingInvoice}
+          onCancel={() => setVoidInvoiceTarget(null)}
+          onConfirm={(reason) => void voidInvoiceOnAmego(reason)}
+        />
       ) : null}
 
       {/* 新增發票（可批次多列） */}
@@ -15070,6 +15191,7 @@ export default function DashboardPage() {
                           <thead className="bg-emerald-50">
                             <tr>
                               <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">發票號碼</th>
+                              <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">光貿狀態</th>
                               <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">發票日期</th>
                               <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-stone-600">收款對象</th>
                               <th className="whitespace-nowrap px-3 py-2 text-right font-semibold text-stone-600">含稅金額</th>
@@ -15082,6 +15204,11 @@ export default function DashboardPage() {
                             {projectInvoices.map((invoice, idx) => (
                               <tr key={invoice.id ?? `${pid}-invoice-${idx}`} className="hover:bg-emerald-50/50">
                                 <td className="whitespace-nowrap px-3 py-2 font-medium text-stone-800">{invoice.發票號碼 || "—"}</td>
+                                <td className="whitespace-nowrap px-3 py-2 text-stone-600">
+                                  {invoiceIsVoided(invoice)
+                                    ? String(invoice.光貿上傳狀態 ?? "").trim() || "已作廢"
+                                    : String(invoice.光貿上傳狀態 ?? "").trim() || "—"}
+                                </td>
                                 <td className="whitespace-nowrap px-3 py-2 text-stone-600">{invoice.發票日期 || "—"}</td>
                                 <td className="whitespace-nowrap px-3 py-2 text-stone-600">{invoice.收款對象 || "—"}</td>
                                 <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums text-stone-800">

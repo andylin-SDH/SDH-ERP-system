@@ -12,6 +12,16 @@ const PLACE_TONE: Record<string, string> = {
   leave: "border-stone-200 bg-stone-100",
 };
 
+const PERIOD_FACE: Record<string, string> = { am: "早", pm: "午", eve: "晚" };
+
+const BLOCK_TONE: Record<string, string> = {
+  bigOffice: "border-sky-300 bg-sky-100 text-sky-950",
+  smallOffice: "border-emerald-300 bg-emerald-100 text-emerald-950",
+  bigStudio: "border-amber-300 bg-amber-100 text-amber-950",
+  smallStudio: "border-violet-300 bg-violet-100 text-violet-950",
+  leave: "border-stone-300 bg-stone-200 text-stone-700",
+};
+
 function weekdayParts(date: string): { name: string; day: string } {
   const names = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
   const [y, m, d] = date.split("-").map(Number);
@@ -263,7 +273,6 @@ export function ScheduleBoard({
           saving={saving}
           gridWeek={Math.min(gridWeek, activeWeeks.length - 1)}
           onGridWeek={setGridWeek}
-          onPickPerson={identity?.me.canEditAnyone && canEdit ? setEditingPerson : undefined}
           onToggle={(weekStart, items, on) => {
             if (actor) void writeClaims(weekStart, actor, items, on);
           }}
@@ -293,126 +302,154 @@ function hourText(hours: number): string {
   return Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
 }
 
-type BookingRow = {
-  booking: ScheduleWeekPayload["bookings"][number];
-  placeName: string;
-  open: { date: string; slot: string }[];
-  names: string[];
-  mine: { date: string; slot: string }[];
-};
+const GLANCE_PLACE_IDS = ["smallStudio", "bigStudio", "bigOffice"] as const;
+const GLANCE_PERIOD_LABEL: Record<string, string> = { am: "早", pm: "中", eve: "晚" };
 
-function studioRows(week: ScheduleWeekPayload, actor: string | null): BookingRow[] {
-  const studioIds = new Set(week.config.places.filter((place) => place.kind === "studio").map((place) => place.id));
-  return week.bookings
-    .filter((booking) => studioIds.has(booking.placeId) && booking.slots.length > 0)
-    .map((booking) => {
-      const placeName = week.config.places.find((place) => place.id === booking.placeId)?.name ?? booking.calendar;
-      const covered = booking.slots.filter((slot) =>
-        week.claims.some((claim) => !claim.auto && claim.date === slot.date && claim.slot === slot.slot && claim.place === booking.placeId)
-      );
-      const open = booking.slots.filter((slot) => !covered.some((item) => item.date === slot.date && item.slot === slot.slot));
-      const names = [
-        ...new Set(
-          week.claims
-            .filter((claim) => !claim.auto && claim.place === booking.placeId && booking.slots.some((slot) => slot.date === claim.date && slot.slot === claim.slot))
-            .map((claim) => claim.person)
-        ),
-      ];
-      const mine = actor
-        ? booking.slots.filter((slot) =>
-            week.claims.some(
-              (claim) => !claim.auto && claim.person === actor && claim.date === slot.date && claim.slot === slot.slot && claim.place === booking.placeId
-            )
-          )
-        : [];
-      return { booking, placeName, open, names, mine };
-    })
-    .sort((a, b) => a.booking.start.localeCompare(b.booking.start) || a.placeName.localeCompare(b.placeName, "zh-Hant"));
+function glanceCell(week: ScheduleWeekPayload, actor: string | null, date: string, placeId: string, periodId: string) {
+  const place = week.config.places.find((item) => item.id === placeId);
+  const slots = week.config.slots.filter((slot) => slot.period === periodId && place?.slots.includes(slot.id));
+  if (!place || slots.length === 0) return null;
+  const slotIds = new Set(slots.map((slot) => slot.id));
+  const items = slots.map((slot) => ({ date, slot: slot.id, place: placeId }));
+  const people = [
+    ...new Set(
+      week.claims
+        .filter((claim) => !claim.auto && claim.date === date && claim.place === placeId && slotIds.has(claim.slot))
+        .map((claim) => claim.person)
+    ),
+  ];
+  const titles = week.bookings
+    .filter((booking) => booking.placeId === placeId && booking.slots.some((slot) => slot.date === date && slotIds.has(slot.slot)))
+    .map((booking) => booking.show || booking.title)
+    .filter((title, index, all) => title && title !== "Busy" && all.indexOf(title) === index);
+  const hasBooking = week.bookings.some(
+    (booking) => booking.placeId === placeId && booking.slots.some((slot) => slot.date === date && slotIds.has(slot.slot))
+  );
+  return {
+    place,
+    items,
+    people,
+    titles,
+    hasBooking,
+    needsStaff: place.kind === "studio" && hasBooking && people.length === 0,
+    actorOn: !!actor && people.includes(actor),
+  };
 }
 
-type PeriodGroup = {
-  key: string;
-  periodId: string;
-  label: string;
-  time: string;
-  placeId: string;
-  placeName: string;
-  open: { date: string; slot: string }[];
-  mine: { date: string; slot: string }[];
-  names: string[];
-  titles: string[];
-};
+function PersonWeekGrid({
+  week,
+  actor,
+  canToggle,
+  saving,
+  onToggle,
+}: {
+  week: ScheduleWeekPayload;
+  actor: string | null;
+  canToggle: boolean;
+  saving: boolean;
+  onToggle: (items: { date: string; slot: string; place: string }[], on: boolean) => void;
+}) {
+  const today = taipeiToday();
+  const dayNames = ["日", "一", "二", "三", "四", "五", "六"];
+  const stat = week.stats.find((item) => item.name === actor);
+  const office = stat?.need == null ? `辦公室 ${stat?.officeDays ?? 0} 天` : `辦公室 ${stat.officeDays}/${stat.need} 天`;
+  const legend = week.config.places.filter((place) => (GLANCE_PLACE_IDS as readonly string[]).includes(place.id));
 
-function periodGroups(week: ScheduleWeekPayload, date: string, rows: BookingRow[]): PeriodGroup[] {
-  const periodOf = new Map(week.config.slots.map((slot) => [slot.id, slot.period]));
-  const map = new Map<string, PeriodGroup & { slotIds: string[] }>();
-  for (const row of rows) {
-    const touched = new Set<string>();
-    for (const slot of row.booking.slots) {
-      if (slot.date !== date) continue;
-      const periodId = periodOf.get(slot.slot);
-      if (periodId) touched.add(periodId);
-    }
-    for (const periodId of touched) {
-      const period = week.config.periods.find((item) => item.id === periodId);
-      if (!period) continue;
-      const key = `${periodId}|${row.booking.placeId}`;
-      let group = map.get(key);
-      if (!group) {
-        group = {
-          key,
-          periodId,
-          label: period.short || period.label,
-          time: `${period.start}–${period.end}`,
-          placeId: row.booking.placeId,
-          placeName: row.placeName,
-          open: [],
-          mine: [],
-          names: [],
-          titles: [],
-          slotIds: [],
-        };
-        map.set(key, group);
-      }
-      const title = `${row.booking.kind === "follow" ? "跟錄 " : row.booking.kind === "own" ? "自錄 " : ""}${row.booking.show || row.booking.title}`;
-      if (!group.titles.includes(title)) group.titles.push(title);
-      const seen = new Set(group.slotIds);
-      for (const slot of row.booking.slots) {
-        if (slot.date === date && periodOf.get(slot.slot) === periodId && !seen.has(slot.slot)) {
-          group.slotIds.push(slot.slot);
-          seen.add(slot.slot);
-        }
-      }
-      const seenOpen = new Set(group.open.map((slot) => slot.slot));
-      for (const slot of row.open) {
-        if (slot.date === date && periodOf.get(slot.slot) === periodId && !seenOpen.has(slot.slot)) {
-          group.open.push(slot);
-          seenOpen.add(slot.slot);
-        }
-      }
-      const seenMine = new Set(group.mine.map((slot) => slot.slot));
-      for (const slot of row.mine) {
-        if (slot.date === date && periodOf.get(slot.slot) === periodId && !seenMine.has(slot.slot)) {
-          group.mine.push(slot);
-          seenMine.add(slot.slot);
-        }
-      }
-    }
-  }
-  for (const group of map.values()) {
-    const slots = new Set(group.slotIds);
-    group.names = [
-      ...new Set(
-        week.claims
-          .filter((claim) => !claim.auto && claim.date === date && claim.place === group.placeId && slots.has(claim.slot))
-          .map((claim) => claim.person)
-      ),
-    ];
-  }
-  const periodOrder = new Map(week.config.periods.map((period, index) => [period.id, index]));
-  const placeOrder = new Map(week.config.places.map((place, index) => [place.id, index]));
-  return [...map.values()].sort(
-    (a, b) => (periodOrder.get(a.periodId) ?? 0) - (periodOrder.get(b.periodId) ?? 0) || (placeOrder.get(a.placeId) ?? 0) - (placeOrder.get(b.placeId) ?? 0)
+  return (
+    <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-3 py-2">
+        <div>
+          <p className="text-sm font-semibold text-stone-900">{actor ? `${actor} 的這一週` : "這一週"}</p>
+          {actor ? (
+            <p className="text-[11px] text-stone-500">
+              {office}　錄音 {hourText(stat?.studioHours ?? 0)} 小時
+            </p>
+          ) : (
+            <p className="text-[11px] text-stone-500">你不在排班名單裡，這格沒有個人班表。</p>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-1.5 text-[11px] text-stone-600">
+          {legend.map((place) => (
+            <span key={place.id} className={`rounded-md border px-1.5 py-0.5 ${BLOCK_TONE[place.id] ?? "border-stone-200 bg-stone-50"}`}>
+              {place.name}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[980px] border-separate border-spacing-0 text-left">
+          <thead>
+            <tr className="bg-stone-50 text-xs text-stone-500">
+              {week.dates.map((date) => {
+                const [y, m, d] = date.split("-").map(Number);
+                const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+                const weekend = wd === 0 || wd === 6;
+                const holiday = week.dayInfo[date]?.holiday;
+                return (
+                  <th key={date} className={`border-b border-stone-200 px-2 py-2 font-semibold ${weekend ? "bg-stone-100/80" : ""} ${date === today ? "text-sky-800" : ""}`}>
+                    <span className="block text-sm text-stone-800">{String(d).padStart(2, "0")}</span>
+                    <span className="font-medium">{dayNames[wd]}</span>
+                    {holiday ? <span className="mt-0.5 block font-normal text-[10px] text-amber-700">{holiday}</span> : null}
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              {week.dates.map((date) => {
+                const [y, m, d] = date.split("-").map(Number);
+                const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+                const weekend = wd === 0 || wd === 6;
+                const past = date < today;
+                const editable = canToggle && !!actor && !past;
+                return (
+                  <td key={date} className={`min-w-[8.5rem] border-t border-stone-100 px-1.5 py-1.5 align-top ${weekend ? "bg-stone-50/80" : ""} ${past ? "opacity-70" : ""}`}>
+                    <div className="flex flex-col gap-2">
+                      {week.config.periods.map((period) => (
+                        <div key={period.id}>
+                          <p className="mb-1 text-[10px] font-bold tracking-wide text-stone-500">{GLANCE_PERIOD_LABEL[period.id] ?? period.label}</p>
+                          <div className="flex flex-col gap-1">
+                            {GLANCE_PLACE_IDS.map((placeId) => {
+                              const cell = glanceCell(week, actor, date, placeId, period.id);
+                              if (!cell) return null;
+                              const tone = cell.needsStaff
+                                ? "border-red-300 bg-red-50 text-red-900"
+                                : cell.actorOn
+                                  ? BLOCK_TONE[placeId]
+                                  : cell.hasBooking
+                                    ? "border-amber-200 bg-amber-50 text-amber-950"
+                                    : "border-stone-200 bg-white text-stone-500";
+                              return (
+                                <button
+                                  key={placeId}
+                                  type="button"
+                                  disabled={!editable || saving}
+                                  onClick={() => editable && onToggle(cell.items, !cell.actorOn)}
+                                  className={`rounded-md border px-1.5 py-1 text-left ${tone} ${editable ? "cursor-pointer hover:brightness-95" : "cursor-default"} disabled:cursor-default`}
+                                >
+                                  <span className="block text-[11px] font-bold leading-tight">{cell.place.name}</span>
+                                  {cell.titles[0] ? <span className="block truncate text-[10px]">{cell.titles.join("、")}</span> : null}
+                                  {cell.needsStaff ? <span className="block text-[10px] font-semibold">要排人</span> : null}
+                                  {cell.people.length > 0 ? <span className="block truncate text-[10px]">{cell.people.join("、")}</span> : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                );
+              })}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="border-t border-stone-100 px-3 py-2 text-[11px] text-stone-500">
+        一天只分早、中、晚。錄音室那個時段有錄音、又還沒人，會標「要排人」。點一下是排上或取消你自己。已過的日期不能改。請假稍後再做。
+      </p>
+    </div>
   );
 }
 
@@ -423,7 +460,6 @@ function SchedulePair({
   saving,
   gridWeek,
   onGridWeek,
-  onPickPerson,
   onToggle,
   onPreset,
   onRefresh,
@@ -438,7 +474,6 @@ function SchedulePair({
   saving: boolean;
   gridWeek: number;
   onGridWeek: (index: number) => void;
-  onPickPerson?: (name: string) => void;
   onToggle: (weekStart: string, items: { date: string; slot: string; place: string }[], on: boolean) => void;
   onPreset: (weekStart: string) => void;
   onRefresh: () => void;
@@ -448,6 +483,7 @@ function SchedulePair({
   onLater: () => void;
 }) {
   const gridItem = weeks[gridWeek] ?? weeks[0];
+  const [showPlaceGrids, setShowPlaceGrids] = useState(false);
 
   return (
     <div className="space-y-4">
@@ -470,20 +506,6 @@ function SchedulePair({
         </div>
       </div>
 
-      <div className="grid items-start gap-4 lg:grid-cols-2">
-        {weeks.map((item) => (
-          <WeekPlan
-            key={item.weekStart}
-            week={item}
-            actor={actor}
-            canToggle={canToggle}
-            saving={saving}
-            onPickPerson={onPickPerson}
-            onToggle={(items, on) => onToggle(item.weekStart, items, on)}
-          />
-        ))}
-      </div>
-
       {gridItem ? (
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">
@@ -503,18 +525,34 @@ function SchedulePair({
           <p className="text-sm font-semibold text-stone-900">
             {weekCaption(gridItem.weekStart)}　{weekRangeLabel(gridItem.dates)}
           </p>
+          <PersonWeekGrid
+            week={gridItem}
+            actor={actor}
+            canToggle={canToggle}
+            saving={saving}
+            onToggle={(slots, on) => onToggle(gridItem.weekStart, slots, on)}
+          />
           <ConflictList week={gridItem} />
-          {gridItem.config.places.map((place) => (
-            <PlaceGrid
-              key={`${gridItem.weekStart}-${place.id}`}
-              placeId={place.id}
-              week={gridItem}
-              actor={actor}
-              canToggle={canToggle}
-              conflictKeys={conflictKeysOf(gridItem)}
-              onToggle={(slots, on) => onToggle(gridItem.weekStart, slots, on)}
-            />
-          ))}
+          <button
+            type="button"
+            onClick={() => setShowPlaceGrids((open) => !open)}
+            className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100"
+          >
+            {showPlaceGrids ? "收合依地點細格" : "依地點細格（早午晚）"}
+          </button>
+          {showPlaceGrids
+            ? gridItem.config.places.map((place) => (
+                <PlaceGrid
+                  key={`${gridItem.weekStart}-${place.id}`}
+                  placeId={place.id}
+                  week={gridItem}
+                  actor={actor}
+                  canToggle={canToggle}
+                  conflictKeys={conflictKeysOf(gridItem)}
+                  onToggle={(slots, on) => onToggle(gridItem.weekStart, slots, on)}
+                />
+              ))
+            : null}
           {canToggle && gridItem.config.presetPeople.length > 0 && (gridItem.me.canEditAnyone || gridItem.config.presetPeople.includes(gridItem.me.person ?? "")) && (
             <button type="button" className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm" onClick={() => onPreset(gridItem.weekStart)} disabled={saving}>
               預排{gridItem.config.presetPeople.join("、")}{weekCaption(gridItem.weekStart)}的時間
@@ -525,148 +563,6 @@ function SchedulePair({
     </div>
   );
 }
-
-function bookingLabel(titles: string[]): string {
-  const names = titles.map((title) => title.replace(/^(跟錄 |自錄 )/, "")).filter((title) => title && title !== "Busy");
-  return names.length ? names.join("、") : "行事曆有預約";
-}
-
-function WeekPlan({
-  week,
-  actor,
-  canToggle,
-  saving,
-  onPickPerson,
-  onToggle,
-}: {
-  week: ScheduleWeekPayload;
-  actor: string | null;
-  canToggle: boolean;
-  saving: boolean;
-  onPickPerson?: (name: string) => void;
-  onToggle: (items: { date: string; slot: string; place: string }[], on: boolean) => void;
-}) {
-  const today = taipeiToday();
-  const upcoming = week.dates.filter((date) => date >= today);
-  const rows = studioRows(week, actor).filter((row) => row.booking.slots.some((slot) => slot.date >= today));
-  const seeAll = week.me.canSeeAll;
-  const mine = week.stats.find((stat) => stat.name === actor) ?? week.stats[0] ?? null;
-  const pendingCount = seeAll ? upcoming.reduce((sum, date) => sum + periodGroups(week, date, rows).filter((group) => group.open.length > 0).length, 0) : 0;
-  const shortPeople = seeAll ? week.stats.filter((stat) => stat.met === false) : [];
-  const weekDone = seeAll ? pendingCount === 0 && shortPeople.length === 0 : mine?.met !== false;
-  const caption = weekCaption(week.weekStart);
-  const statusText = seeAll
-    ? weekDone
-      ? `${caption}排完了`
-      : `${caption}還沒排完`
-    : mine?.met === false
-      ? `你的${caption}還沒排完`
-      : mine?.met
-        ? `你的${caption}排完了`
-        : `你的${caption}`;
-  return (
-    <div className="overflow-hidden rounded-2xl border-2 border-stone-900 bg-stone-100 shadow-md">
-      <div className="bg-stone-900 px-4 py-4 text-white sm:px-5">
-        <p className="text-xs font-semibold tracking-widest text-stone-300">{caption}</p>
-        <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-2xl font-bold tracking-tight sm:text-3xl">{weekRangeLabel(week.dates)}</h3>
-          <span className={`rounded-full px-3 py-1 text-sm font-bold ${weekDone ? "bg-emerald-400 text-emerald-950" : "bg-red-500 text-white"}`}>
-            {statusText}
-            {saving ? "　儲存中…" : ""}
-          </span>
-        </div>
-      </div>
-      <div className="space-y-4 p-3 sm:p-4">
-
-      {seeAll && (
-      <div className="space-y-2">
-        {week.config.places
-          .filter((place) => place.kind === "studio")
-          .map((place) => {
-            const open = upcoming.flatMap((date) => {
-              const parts = weekdayParts(date);
-              return periodGroups(week, date, rows)
-                .filter((group) => group.placeId === place.id && group.open.length > 0)
-                .map((group) => ({ ...group, dateLabel: `${parts.name} ${parts.day}` }));
-            });
-            return (
-              <div key={place.id} className={`rounded-xl px-3 py-2 text-sm ${open.length ? "bg-red-50 text-red-950" : "bg-emerald-50 text-emerald-950"}`}>
-                <p className="font-semibold">
-                  {place.name}
-                  {upcoming.length === 0 ? "　這週剩下的日期都過了" : open.length ? `　還有 ${open.length} 個時段沒人` : "　還沒過的預約都有人"}
-                </p>
-                {open.length > 0 ? (
-                  <ul className="mt-2 space-y-1.5">
-                    {open.map((group) => (
-                      <li key={`${group.dateLabel}-${group.key}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white/80 px-2 py-1.5 text-stone-900">
-                        <div>
-                          <p className="text-sm font-semibold">
-                            {group.dateLabel}　{group.label}　{group.time}
-                          </p>
-                          <p className="text-xs text-stone-600">
-                            {bookingLabel(group.titles)}
-                            {group.names.length ? `　已有 ${group.names.join("、")}` : "　還沒有人"}
-                          </p>
-                        </div>
-                        {canToggle ? (
-                          <button
-                            type="button"
-                            disabled={saving}
-                            onClick={() => onToggle(group.open.map((slot) => ({ date: slot.date, slot: slot.slot, place: group.placeId })), true)}
-                            className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white"
-                          >
-                            我來排
-                          </button>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
-            );
-          })}
-        <p className={`rounded-xl px-3 py-2 text-sm ${shortPeople.length ? "bg-red-50 text-red-800" : "bg-emerald-50 text-emerald-900"}`}>
-          {shortPeople.length
-            ? `辦公室天數還沒到：${shortPeople.map((stat) => `${stat.name}差 ${Math.max(0, (stat.need ?? 0) - stat.officeDays)} 天`).join("、")}`
-            : "有規定的人，辦公室天數都到了"}
-        </p>
-      </div>
-      )}
-
-      <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-        {week.stats.map((stat) => {
-          const selected = actor === stat.name;
-          const office =
-            stat.need === null ? `辦公室 ${stat.officeDays} 天` : `辦公室 ${stat.officeDays}/${stat.need} 天${stat.met ? "　到了" : ""}`;
-          const className = `h-full w-full rounded-xl border px-3 py-2 text-left text-xs ${
-            selected ? "border-stone-900 bg-stone-900 text-white" : "border-stone-200 bg-stone-50 text-stone-800"
-          }`;
-          const body = (
-            <>
-              <span className="block text-sm font-semibold">{stat.name}</span>
-              <span className="mt-1 block">{office}</span>
-              <span className="mt-0.5 block">錄音室 {hourText(stat.studioHours)} 小時</span>
-            </>
-          );
-          return (
-            <li key={stat.name}>
-              {onPickPerson ? (
-                <button type="button" onClick={() => onPickPerson(stat.name)} className={className}>
-                  {body}
-                </button>
-              ) : (
-                <div className={className}>{body}</div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-      <p className="mt-2 text-xs text-stone-500">錄音室時數是這週已經排進去的小時，不算進辦公室天數。辦公室在下面的新辦公室、小辦公室自己點。</p>
-      </div>
-    </div>
-  );
-}
-
 
 function ConflictList({ week }: { week: ScheduleWeekPayload }) {
   const today = taipeiToday();
@@ -687,8 +583,6 @@ function ConflictList({ week }: { week: ScheduleWeekPayload }) {
     </div>
   );
 }
-
-const PERIOD_FACE: Record<string, string> = { am: "早", pm: "午", eve: "晚" };
 
 function meetingNote(week: ScheduleWeekPayload, date: string, placeId: string): string | null {
   const hit = week.meetings.find((meeting) => meeting.date === date && meeting.placeId === placeId);
