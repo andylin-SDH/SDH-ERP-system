@@ -484,7 +484,7 @@ function ShiftSlot({
       </div>
       {titles[0] ? (
         <p className="mt-1 flex items-start gap-1 text-[13px] font-bold leading-snug text-stone-950">
-          <svg className="mt-0.5 h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden title="跟錄">
+          <svg className="mt-0.5 h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
             <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" strokeLinecap="round" strokeLinejoin="round" />
             <path d="M19 10v1a7 7 0 0 1-14 0v-1" strokeLinecap="round" strokeLinejoin="round" />
             <path d="M12 18v3" strokeLinecap="round" />
@@ -497,7 +497,7 @@ function ShiftSlot({
         <ul className="mt-1 space-y-1">
           {people.map((name) => (
             <li key={name} className="flex items-center gap-1 rounded-md bg-white px-1.5 py-1 ring-1 ring-stone-200">
-              <svg className="h-3.5 w-3.5 shrink-0 text-stone-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden title="人員">
+              <svg className="h-3.5 w-3.5 shrink-0 text-stone-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
                 <circle cx="12" cy="8" r="4" />
                 <path d="M5 20a7 7 0 0 1 14 0" strokeLinecap="round" />
               </svg>
