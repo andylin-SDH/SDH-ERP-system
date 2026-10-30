@@ -274,16 +274,45 @@ export function effectiveClaims(
   const follower = cfg.RULES.followPerson;
   const backupId = cfg.RULES.backupPlaceId;
   let base = claims.filter((claim) => !claim.auto);
-  const atStudio: Record<string, boolean> = {};
+  const onLeave: Record<string, boolean> = {};
   for (const claim of base) {
+    if (placeKind(cfg, claim.place) === "leave") onLeave[`${claim.person}|${claim.date}|${claim.slot}`] = true;
+  }
+  const andyBusy = new Set<string>();
+  const andyAutos: ScheduleClaim[] = [];
+  for (const booking of bookings) {
+    if (!booking.andyRecording) continue;
+    const studio = placeKind(cfg, booking.placeId) === "studio";
+    for (const slot of booking.slots) {
+      andyBusy.add(`${slot.date}|${slot.slot}`);
+      if (!studio || onLeave[`${follower}|${slot.date}|${slot.slot}`]) continue;
+      const already =
+        base.some((claim) => claim.person === follower && claim.date === slot.date && claim.slot === slot.slot && claim.place === booking.placeId) ||
+        andyAutos.some((claim) => claim.date === slot.date && claim.slot === slot.slot && claim.place === booking.placeId);
+      if (already) continue;
+      andyAutos.push({ date: slot.date, slot: slot.slot, place: booking.placeId, person: follower, auto: true });
+    }
+  }
+  const followAutos: ScheduleClaim[] = [];
+  for (const booking of bookings) {
+    if (booking.kind !== "follow") continue;
+    for (const slot of booking.slots) {
+      if (onLeave[`${follower}|${slot.date}|${slot.slot}`]) continue;
+      if (andyBusy.has(`${slot.date}|${slot.slot}`)) continue;
+      const already =
+        base.some((claim) => claim.person === follower && claim.date === slot.date && claim.slot === slot.slot && claim.place === booking.placeId) ||
+        followAutos.some((claim) => claim.date === slot.date && claim.slot === slot.slot && claim.place === booking.placeId);
+      if (already) continue;
+      followAutos.push({ date: slot.date, slot: slot.slot, place: booking.placeId, person: follower, auto: true });
+    }
+  }
+  const atStudio: Record<string, boolean> = {};
+  for (const claim of [...base, ...followAutos, ...andyAutos]) {
     if (claim.person === follower && placeKind(cfg, claim.place) === "studio") atStudio[`${claim.date}|${claim.slot}`] = true;
   }
   base = base.filter((claim) => !(claim.person === follower && claim.place === backupId && atStudio[`${claim.date}|${claim.slot}`]));
   const meetings = meetingCells(weekStart, dayInfo, cfg, bookings, base);
-  const leave: Record<string, boolean> = {};
-  for (const claim of base) {
-    if (placeKind(cfg, claim.place) === "leave") leave[`${claim.person}|${claim.date}|${claim.slot}`] = true;
-  }
+  const leave = onLeave;
   let out = base.slice();
   for (const meeting of meetings) {
     for (const person of cfg.PEOPLE) {
@@ -303,6 +332,22 @@ export function effectiveClaims(
       );
       if (!has) out.push({ date: meeting.date, slot: meeting.slot, place: meeting.placeId, person: person.name, auto: true });
     }
+  }
+  for (const claim of followAutos) {
+    const has = out.some(
+      (item) => item.person === claim.person && item.date === claim.date && item.slot === claim.slot && item.place === claim.place
+    );
+    if (!has) out.push(claim);
+  }
+  for (const claim of andyAutos) {
+    const busyFollow = out.some(
+      (item) => item.person === claim.person && item.date === claim.date && item.slot === claim.slot && item.place !== claim.place
+    );
+    if (busyFollow) continue;
+    const has = out.some(
+      (item) => item.person === claim.person && item.date === claim.date && item.slot === claim.slot && item.place === claim.place
+    );
+    if (!has) out.push(claim);
   }
   return { claims: out, meetings };
 }

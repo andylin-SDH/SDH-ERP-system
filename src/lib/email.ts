@@ -4,7 +4,7 @@
  */
 
 import { Resend } from "resend";
-import { buildDashboardTaskDeepLink } from "@/lib/deep-link";
+import { buildDashboardTaskDeepLink, getAppBaseUrl } from "@/lib/deep-link";
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? "SDH ERP <onboarding@resend.dev>";
@@ -219,6 +219,97 @@ export async function sendTaskDueSoonEmail(params: {
     return { ok: true };
   } catch (err) {
     console.error("email: sendTaskDueSoonEmail 異常", err);
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** 發票開立完成，通知當初送審的申請人。 */
+export async function sendInvoiceIssuedEmail(params: {
+  to: string;
+  applicantName?: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  buyerName: string;
+  totalAmount: string;
+  projectId?: string;
+  projectName?: string;
+  reviewer?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  if (!resend) {
+    console.warn("email: RESEND_API_KEY 未設定，跳過寄信");
+    return { ok: false, error: "RESEND_API_KEY 未設定" };
+  }
+  try {
+    const to = params.to.trim();
+    const invoiceNumber = params.invoiceNumber.trim() || "—";
+    const applicantName = String(params.applicantName ?? "").trim();
+    const projectId = String(params.projectId ?? "").trim();
+    const projectName = String(params.projectName ?? "").trim();
+    const reviewer = String(params.reviewer ?? "").trim();
+    const amount = Number(String(params.totalAmount).replace(/,/g, ""));
+    const amountText = Number.isFinite(amount) ? amount.toLocaleString("zh-TW") : params.totalAmount || "—";
+    const invoiceUrl = `${getAppBaseUrl()}/invoice`;
+    const { error } = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: [to],
+      subject: `【SDH ERP】發票已開立：${invoiceNumber}`,
+      html: `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background-color:#f1f5f9;line-height:1.6;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;padding:24px 0;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:12px;box-shadow:0 4px 6px rgba(0,0,0,0.05);overflow:hidden;">
+        <tr>
+          <td style="background:linear-gradient(135deg,#0f766e 0%,#0d9488 100%);padding:24px 32px;text-align:center;">
+            <h1 style="margin:0;color:#ffffff;font-size:20px;font-weight:700;">SDH 盛德好 ERP</h1>
+            <p style="margin:8px 0 0;color:rgba(255,255,255,0.9);font-size:14px;">發票已開立</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:32px;">
+            <p style="margin:0 0 16px;color:#334155;font-size:16px;">${applicantName ? `${escapeHtml(applicantName)} 您好，` : "您好，"}</p>
+            <p style="margin:0 0 24px;color:#475569;font-size:15px;">您送出的發票申請已放行並開立完成。</p>
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;margin-bottom:24px;">
+              <tr><td style="padding:20px;">
+                <table width="100%" cellpadding="0" cellspacing="0">
+                  <tr><td style="padding:8px 0;color:#64748b;font-size:13px;width:90px;">發票號碼</td>
+                      <td style="padding:8px 0;color:#1e293b;font-size:15px;font-weight:600;font-family:monospace;">${escapeHtml(invoiceNumber)}</td></tr>
+                  <tr><td style="padding:8px 0;color:#64748b;font-size:13px;">發票日期</td>
+                      <td style="padding:8px 0;color:#475569;font-size:14px;">${escapeHtml(params.invoiceDate || "—")}</td></tr>
+                  <tr><td style="padding:8px 0;color:#64748b;font-size:13px;">買受人</td>
+                      <td style="padding:8px 0;color:#475569;font-size:14px;">${escapeHtml(params.buyerName || "—")}</td></tr>
+                  <tr><td style="padding:8px 0;color:#64748b;font-size:13px;">含稅金額</td>
+                      <td style="padding:8px 0;color:#0f766e;font-size:15px;font-weight:600;">${escapeHtml(amountText)} 元</td></tr>
+                  ${projectId ? `<tr><td style="padding:8px 0;color:#64748b;font-size:13px;">專案</td>
+                      <td style="padding:8px 0;color:#475569;font-size:14px;">${escapeHtml(projectName ? `${projectName}（${projectId}）` : projectId)}</td></tr>` : ""}
+                  ${reviewer ? `<tr><td style="padding:8px 0;color:#64748b;font-size:13px;">放行人</td>
+                      <td style="padding:8px 0;color:#475569;font-size:14px;">${escapeHtml(reviewer)}</td></tr>` : ""}
+                </table>
+              </td></tr>
+            </table>
+            <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+              <a href="${invoiceUrl}" style="display:inline-block;background:#0d9488;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:8px;">查看開立申請</a>
+            </td></tr></table>
+          </td>
+        </tr>
+        <tr><td style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;color:#94a3b8;font-size:12px;">此為系統自動寄送，請勿直接回覆此信件。</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`,
+    });
+    if (error) {
+      console.error("email: sendInvoiceIssuedEmail 失敗", { to, error });
+      return { ok: false, error: String(error) };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error("email: sendInvoiceIssuedEmail 異常", err);
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }

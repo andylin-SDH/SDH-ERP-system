@@ -123,12 +123,16 @@ export const STUDIO_CALENDARS: StudioCalendar[] = [
     name: "大錄音室",
     placeId: "bigStudio",
     color: "#2f6fed",
+    calendarId: "sandehao@gmail.com",
+    credentialsEnv: "SCHEDULE_CALENDAR_BIG_KEY",
     icsUrl: "https://calendar.google.com/calendar/ical/sandehao%40gmail.com/public/basic.ics",
   },
   {
     name: "小錄音室",
     placeId: "smallStudio",
     color: "#d9822b",
+    calendarId: "sdh.service0902@gmail.com",
+    credentialsEnv: "SCHEDULE_CALENDAR_SMALL_KEY",
     icsUrl: "https://calendar.google.com/calendar/ical/sdh.service0902%40gmail.com/public/basic.ics",
   },
 ];

@@ -2,6 +2,7 @@ import { calcB2bTotals, type B2bPriceMode, type B2bTaxKind } from "@/lib/invoice
 import { issueB2bInvoice, taipeiDateFromUnix } from "@/lib/invoice/amego";
 import { orderIdForIssue } from "@/lib/invoice/order-id";
 import { insertIssuedInvoice } from "@/lib/db/finance";
+import { sendInvoiceIssuedEmail } from "@/lib/email";
 import { getSupabase } from "@/lib/supabase/server";
 
 export type InvoiceRequestLine = {
@@ -410,7 +411,8 @@ export async function approveInvoiceRequest(id: string, reviewer: string): Promi
       .select("*")
       .single();
     if (error) throw error;
-    return mapRow(data as Record<string, unknown>, await issuedProjectIds());
+    const issued = mapRow(data as Record<string, unknown>, await issuedProjectIds());
+    return issued;
   } catch (error) {
     const message = error instanceof Error ? error.message : "開立失敗";
     await supabase
@@ -419,5 +421,39 @@ export async function approveInvoiceRequest(id: string, reviewer: string): Promi
       .eq("id", id)
       .eq("狀態", "待審核");
     throw error;
+  }
+}
+
+function canEmailApplicant(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !email.toLowerCase().endsWith(".local");
+}
+
+/** 開立已完成才呼叫。寄信失敗不影響已開立的發票。 */
+export async function notifyInvoiceApplicant(row: InvoiceRequestRow): Promise<string> {
+  const to = row.申請人Email.trim();
+  if (!canEmailApplicant(to)) return "已開立。這筆申請沒有可寄送的申請人信箱，未寄通知。";
+  let projectName = "";
+  if (row.專案ID) {
+    const { data } = await getSupabase().from("大總表").select("專案名稱").eq("專案ID", row.專案ID).maybeSingle();
+    projectName = text((data as { 專案名稱?: string } | null)?.專案名稱);
+  }
+  try {
+    const result = await sendInvoiceIssuedEmail({
+      to,
+      applicantName: row.申請人,
+      invoiceNumber: row.發票號碼,
+      invoiceDate: row.發票日期,
+      buyerName: row.買受人名稱,
+      totalAmount: row.發票總金額,
+      projectId: row.專案ID,
+      projectName,
+      reviewer: row.審核人,
+    });
+    if (!result.ok) return `已開立，但通知信沒有寄出：${result.error || "寄信失敗"}`;
+    return `已開立，已寄信通知 ${to}`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "寄信失敗";
+    console.error("notifyInvoiceApplicant", error);
+    return `已開立，但通知信沒有寄出：${message}`;
   }
 }

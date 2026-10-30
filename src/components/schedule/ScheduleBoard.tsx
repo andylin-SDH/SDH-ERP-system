@@ -46,15 +46,8 @@ function taipeiToday(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei" }).format(new Date());
 }
 
-function taipeiMonday(): string {
-  const today = taipeiToday();
-  const [y, m, d] = today.split("-").map(Number);
-  const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-  return addDays(today, wd === 0 ? -6 : 1 - wd);
-}
-
 function weekCaption(weekStart: string): string {
-  const [ay, am, ad] = taipeiMonday().split("-").map(Number);
+  const [ay, am, ad] = taipeiToday().split("-").map(Number);
   const [by, bm, bd] = weekStart.split("-").map(Number);
   const delta = Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000 / 7);
   if (delta === 0) return "這一週";
@@ -108,7 +101,7 @@ export function ScheduleBoard({
   const loadNear = useCallback(async (force = false) => {
     setLoadingNear(true);
     setError(null);
-    const next = await loadPair(taipeiMonday(), force);
+    const next = await loadPair(taipeiToday(), force);
     setLoadingNear(false);
     if (!next) {
       setError("讀取班表失敗");
@@ -136,7 +129,7 @@ export function ScheduleBoard({
     void loadNear();
   }, [loadNear]);
 
-  const futureStart = futureAnchor || addDays(taipeiMonday(), 14);
+  const futureStart = futureAnchor || addDays(taipeiToday(), 14);
   useEffect(() => {
     if (page !== "future") return;
     void loadFuture(futureStart);
@@ -188,7 +181,7 @@ export function ScheduleBoard({
   }
 
   function shiftFuture(direction: -1 | 1) {
-    const min = addDays(taipeiMonday(), 14);
+    const min = addDays(taipeiToday(), 14);
     const next = addDays(futureStart, direction * 14);
     if (next < min) return;
     setFutureAnchor(next);
@@ -213,7 +206,7 @@ export function ScheduleBoard({
         <h2 className="text-lg font-semibold text-stone-900">班表</h2>
         <p className="mt-1 text-sm text-stone-600">
           {identity?.me.person
-            ? `你是${identity.me.person}。一天分早、午、晚，按鈕只會加上或拿掉${identity.me.canEditAnyone ? "你選的那一位" : "你"}。`
+            ? `你是${identity.me.person}。缺人的格子會寫還缺幾人，按旁邊的 + 加上${identity.me.canEditAnyone ? "你選的那一位" : "你"}，人名旁邊的 × 拿掉。`
             : identity
               ? "你不在排班名單裡，可以看，不能改。"
               : "正在讀取班表…"}
@@ -278,7 +271,7 @@ export function ScheduleBoard({
           }}
           onPreset={(weekStart) => void preset(weekStart)}
           onRefresh={() => void (page === "future" ? loadFuture(futureStart, true) : loadNear(true))}
-          earlierLabel={page === "future" && futureStart > addDays(taipeiMonday(), 14) ? "← 前兩週" : undefined}
+          earlierLabel={page === "future" && futureStart > addDays(taipeiToday(), 14) ? "← 前兩週" : undefined}
           laterLabel={page === "future" ? "後兩週 →" : undefined}
           onEarlier={() => shiftFuture(-1)}
           onLater={() => shiftFuture(1)}
@@ -303,7 +296,115 @@ function hourText(hours: number): string {
 }
 
 const GLANCE_PLACE_IDS = ["smallStudio", "bigStudio", "bigOffice"] as const;
+const GLANCE_PLACE_SHORT: Record<string, string> = { smallStudio: "小錄", bigStudio: "大錄", bigOffice: "新辦" };
 const GLANCE_PERIOD_LABEL: Record<string, string> = { am: "早", pm: "中", eve: "晚" };
+
+const PERIOD_BAND: Record<string, { box: string; chip: string }> = {
+  am: { box: "border-stone-300 bg-stone-50", chip: "bg-stone-500 text-white" },
+  pm: { box: "border-stone-400 bg-stone-100", chip: "bg-stone-600 text-white" },
+  eve: { box: "border-stone-500 bg-stone-200", chip: "bg-stone-800 text-white" },
+};
+
+const PLACE_FACE: Record<string, { idle: string; filled: string }> = {
+  smallStudio: { idle: "border-violet-300 bg-violet-50/70", filled: "border-violet-400 bg-violet-50" },
+  bigStudio: { idle: "border-amber-300 bg-amber-50/70", filled: "border-amber-400 bg-amber-50" },
+  bigOffice: { idle: "border-sky-200 bg-white", filled: "border-sky-300 bg-sky-50" },
+};
+
+const STUDIO_OTHER: Record<string, string> = { smallStudio: "bigStudio", bigStudio: "smallStudio" };
+const FOLLOW_COVER = "林安迪";
+
+function periodSlotIds(week: ScheduleWeekPayload, periodId: string): Set<string> {
+  return new Set(week.config.slots.filter((slot) => slot.period === periodId).map((slot) => slot.id));
+}
+
+function hasFollowBooking(week: ScheduleWeekPayload, date: string, placeId: string, slotIds: Set<string>): boolean {
+  return week.bookings.some(
+    (booking) => booking.kind === "follow" && booking.placeId === placeId && booking.slots.some((slot) => slot.date === date && slotIds.has(slot.slot))
+  );
+}
+
+function peopleInCell(week: ScheduleWeekPayload, date: string, placeId: string, slotIds: Set<string>, manualOnly: boolean): string[] {
+  const follower = week.config.followPerson;
+  const studio = placeId === "smallStudio" || placeId === "bigStudio";
+  return [
+    ...new Set(
+      week.claims
+        .filter((claim) => {
+          if (claim.date !== date || claim.place !== placeId || !slotIds.has(claim.slot)) return false;
+          if (!claim.auto) return true;
+          return !manualOnly && studio && claim.person === follower;
+        })
+        .map((claim) => claim.person)
+    ),
+  ].filter((name) => manualOnly || name !== follower || !andyFollowMark(week, date, placeId, slotIds));
+}
+
+function studioShortBy(week: ScheduleWeekPayload, date: string, placeId: string, periodId: string, people: string[], manual: string[]): number {
+  const slotIds = periodSlotIds(week, periodId);
+  const followHere = hasFollowBooking(week, date, placeId, slotIds);
+  const otherId = STUDIO_OTHER[placeId];
+  const followOther = !!otherId && hasFollowBooking(week, date, otherId, slotIds);
+  const andyLeave = week.claims.some(
+    (claim) => !claim.auto && claim.person === FOLLOW_COVER && claim.place === "leave" && claim.date === date && slotIds.has(claim.slot)
+  );
+  const follower = week.config.followPerson;
+  const followerHere = people.includes(follower);
+  const followGap = followHere && followSlotsUncovered(week, date, placeId, slotIds);
+  let need = 0;
+  if (followHere && !followerHere) need += 1;
+  else if (followGap) need += 1;
+  if (followHere && andyLeave) need += 1;
+  if (followOther && !followerHere) need += 1;
+  const outsideSlots = new Set(
+    week.bookings
+      .filter((booking) => booking.kind === "other" && booking.placeId === placeId)
+      .flatMap((booking) => booking.slots.filter((slot) => slot.date === date && slotIds.has(slot.slot)).map((slot) => slot.slot))
+  );
+  if (!followHere && !followOther && outsideSlots.size > 0 && manual.length === 0) {
+    const coveredByFollower = [...outsideSlots].every((slot) =>
+      week.claims.some((claim) => claim.person === follower && claim.date === date && claim.place === placeId && claim.slot === slot)
+    );
+    if (!coveredByFollower) need = Math.max(need, 1);
+  }
+  return Math.max(0, need - manual.length);
+}
+
+function followSlotsUncovered(week: ScheduleWeekPayload, date: string, placeId: string, slotIds: Set<string>): boolean {
+  const follower = week.config.followPerson;
+  let missing = false;
+  for (const booking of week.bookings) {
+    if (booking.kind !== "follow" || booking.placeId !== placeId) continue;
+    for (const slot of booking.slots) {
+      if (slot.date !== date || !slotIds.has(slot.slot)) continue;
+      const covered = week.claims.some(
+        (claim) => claim.date === date && claim.place === placeId && claim.slot === slot.slot && (claim.person === follower || !claim.auto)
+      );
+      if (!covered) missing = true;
+    }
+  }
+  return missing;
+}
+
+function andyFollowMark(week: ScheduleWeekPayload, date: string, placeId: string, slotIds: Set<string>): boolean {
+  const followSlots = new Set(
+    week.bookings
+      .filter((booking) => booking.kind === "follow" && booking.placeId === placeId)
+      .flatMap((booking) => booking.slots.filter((slot) => slot.date === date && slotIds.has(slot.slot)).map((slot) => slot.slot))
+  );
+  return week.bookings.some((booking) => booking.andyRecording && booking.slots.some((slot) => slot.date === date && followSlots.has(slot.slot)));
+}
+
+function followTitles(week: ScheduleWeekPayload, date: string, placeId: string, slotIds: Set<string>): string[] {
+  return [
+    ...new Set(
+      week.bookings
+        .filter((booking) => booking.kind === "follow" && booking.placeId === placeId && booking.slots.some((slot) => slot.date === date && slotIds.has(slot.slot)))
+        .map((booking) => booking.show || booking.title)
+        .filter(Boolean)
+    ),
+  ];
+}
 
 function glanceCell(week: ScheduleWeekPayload, actor: string | null, date: string, placeId: string, periodId: string) {
   const place = week.config.places.find((item) => item.id === placeId);
@@ -311,29 +412,120 @@ function glanceCell(week: ScheduleWeekPayload, actor: string | null, date: strin
   if (!place || slots.length === 0) return null;
   const slotIds = new Set(slots.map((slot) => slot.id));
   const items = slots.map((slot) => ({ date, slot: slot.id, place: placeId }));
-  const people = [
-    ...new Set(
-      week.claims
-        .filter((claim) => !claim.auto && claim.date === date && claim.place === placeId && slotIds.has(claim.slot))
-        .map((claim) => claim.person)
-    ),
-  ];
-  const titles = week.bookings
-    .filter((booking) => booking.placeId === placeId && booking.slots.some((slot) => slot.date === date && slotIds.has(slot.slot)))
-    .map((booking) => booking.show || booking.title)
-    .filter((title, index, all) => title && title !== "Busy" && all.indexOf(title) === index);
-  const hasBooking = week.bookings.some(
-    (booking) => booking.placeId === placeId && booking.slots.some((slot) => slot.date === date && slotIds.has(slot.slot))
-  );
+  const people = peopleInCell(week, date, placeId, slotIds, false);
+  const manual = peopleInCell(week, date, placeId, slotIds, true);
+  const titles = followTitles(week, date, placeId, slotIds);
   return {
     place,
     items,
     people,
     titles,
-    hasBooking,
-    needsStaff: place.kind === "studio" && hasBooking && people.length === 0,
+    andyMark: andyFollowMark(week, date, placeId, slotIds),
+    shortBy: place.kind === "studio" ? studioShortBy(week, date, placeId, periodId, people, manual) : 0,
     actorOn: !!actor && people.includes(actor),
+    actorRemovable: !!actor && manual.includes(actor),
   };
+}
+
+function ShiftSlot({
+  placeId,
+  placeName,
+  people,
+  actor,
+  actorOn,
+  actorRemovable,
+  shortBy,
+  titles,
+  andyMark,
+  editable,
+  saving,
+  ring,
+  fill,
+  onAdd,
+  onRemove,
+}: {
+  placeId: string;
+  placeName: string;
+  people: string[];
+  actor: string | null;
+  actorOn: boolean;
+  actorRemovable: boolean;
+  shortBy: number;
+  titles: string[];
+  andyMark?: boolean;
+  editable: boolean;
+  saving: boolean;
+  ring?: string;
+  fill?: boolean;
+  onAdd: () => void;
+  onRemove: () => void;
+}) {
+  const face = PLACE_FACE[placeId] ?? { idle: "border-stone-200 bg-white", filled: "border-stone-300 bg-stone-50" };
+  const label = GLANCE_PLACE_SHORT[placeId] ?? placeName;
+  const showAdd = editable && !actorOn;
+  const hasBody = !!titles[0] || people.length > 0 || shortBy > 0 || !!andyMark;
+  const addButton = showAdd ? (
+    <button
+      type="button"
+      disabled={saving}
+      aria-label={actor ? `把${actor}排上${placeName}` : `排上${placeName}`}
+      title={actor ? `把${actor}排上` : "排上"}
+      onClick={onAdd}
+      className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-stone-900 text-base leading-none text-white hover:bg-stone-700 disabled:opacity-40"
+    >
+      +
+    </button>
+  ) : null;
+  return (
+    <div className={`rounded-lg border border-l-4 px-1.5 py-1.5 ${fill ? "h-full" : ""} ${people.length > 0 || titles[0] || andyMark ? face.filled : face.idle} ${andyMark ? "ring-2 ring-amber-500" : ""} ${ring ?? ""}`}>
+      <div className={`flex items-center justify-between gap-1 ${hasBody ? "border-b border-stone-300/80 pb-1" : ""}`}>
+        <p className="text-[11px] font-semibold leading-none text-stone-700">{label}</p>
+        {shortBy === 0 ? addButton : null}
+      </div>
+      {titles[0] ? (
+        <p className="mt-1 flex items-start gap-1 text-[13px] font-bold leading-snug text-stone-950">
+          <svg className="mt-0.5 h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden title="跟錄">
+            <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M19 10v1a7 7 0 0 1-14 0v-1" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M12 18v3" strokeLinecap="round" />
+          </svg>
+          <span className="line-clamp-2 min-w-0">{titles.join("、")}</span>
+        </p>
+      ) : null}
+      {andyMark ? <p className="mt-1 text-[11px] font-bold leading-snug text-amber-950">五吉郎在訪談需要其他人支援跟錄</p> : null}
+      {people.length > 0 ? (
+        <ul className="mt-1 space-y-1">
+          {people.map((name) => (
+            <li key={name} className="flex items-center gap-1 rounded-md bg-white px-1.5 py-1 ring-1 ring-stone-200">
+              <svg className="h-3.5 w-3.5 shrink-0 text-stone-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden title="人員">
+                <circle cx="12" cy="8" r="4" />
+                <path d="M5 20a7 7 0 0 1 14 0" strokeLinecap="round" />
+              </svg>
+              <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-stone-900">{name}</span>
+              {editable && actorRemovable && name === actor ? (
+                <button
+                  type="button"
+                  disabled={saving}
+                  aria-label={`拿掉${name}`}
+                  title={`拿掉${name}`}
+                  onClick={onRemove}
+                  className="grid h-4 w-4 shrink-0 place-items-center rounded text-[13px] leading-none text-stone-400 hover:bg-stone-100 hover:text-stone-800 disabled:opacity-40"
+                >
+                  ×
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {shortBy > 0 ? (
+        <div className="mt-1 flex items-center justify-between gap-1">
+          <span className="text-[12px] font-semibold text-red-700">缺 {shortBy} 人</span>
+          {addButton}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function PersonWeekGrid({
@@ -396,58 +588,63 @@ function PersonWeekGrid({
             </tr>
           </thead>
           <tbody>
-            <tr>
-              {week.dates.map((date) => {
-                const [y, m, d] = date.split("-").map(Number);
-                const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-                const weekend = wd === 0 || wd === 6;
-                const past = date < today;
-                const editable = canToggle && !!actor && !past;
-                return (
-                  <td key={date} className={`min-w-[8.5rem] border-t border-stone-100 px-1.5 py-1.5 align-top ${weekend ? "bg-stone-50/80" : ""} ${past ? "opacity-70" : ""}`}>
-                    <div className="flex flex-col gap-2">
-                      {week.config.periods.map((period) => (
-                        <div key={period.id}>
-                          <p className="mb-1 text-[10px] font-bold tracking-wide text-stone-500">{GLANCE_PERIOD_LABEL[period.id] ?? period.label}</p>
-                          <div className="flex flex-col gap-1">
-                            {GLANCE_PLACE_IDS.map((placeId) => {
+            {week.config.periods.map((period) => {
+              const band = PERIOD_BAND[period.id] ?? { box: "border-stone-300 bg-stone-50", chip: "bg-stone-600 text-white" };
+              const placeIds = GLANCE_PLACE_IDS.filter((placeId) => glanceCell(week, actor, week.dates[0], placeId, period.id));
+              return (
+                <tr key={period.id}>
+                  {week.dates.map((date) => {
+                    const [y, m, d] = date.split("-").map(Number);
+                    const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+                    const weekend = wd === 0 || wd === 6;
+                    const editable = canToggle && !!actor;
+                    return (
+                      <td key={date} className={`h-px min-w-[8.5rem] px-1.5 py-1 align-top ${weekend ? "bg-stone-50/80" : ""}`}>
+                        <div className={`flex h-full flex-col rounded-lg border-2 p-1 ${band.box}`}>
+                          <p className={`mb-1 rounded px-1 py-1 text-center leading-tight ${band.chip}`}>
+                            <span className="block text-xs font-semibold">{GLANCE_PERIOD_LABEL[period.id] ?? period.label}</span>
+                            <span className="block text-[9px] font-medium opacity-90">{period.start}–{period.end}</span>
+                          </p>
+                          <div
+                            className="grid min-h-0 flex-1 gap-1"
+                            style={{ gridTemplateRows: `repeat(${Math.max(placeIds.length, 1)}, minmax(auto, 1fr))` }}
+                          >
+                            {placeIds.map((placeId) => {
                               const cell = glanceCell(week, actor, date, placeId, period.id);
-                              if (!cell) return null;
-                              const tone = cell.needsStaff
-                                ? "border-red-300 bg-red-50 text-red-900"
-                                : cell.actorOn
-                                  ? BLOCK_TONE[placeId]
-                                  : cell.hasBooking
-                                    ? "border-amber-200 bg-amber-50 text-amber-950"
-                                    : "border-stone-200 bg-white text-stone-500";
+                              if (!cell) return <div key={placeId} />;
                               return (
-                                <button
+                                <ShiftSlot
                                   key={placeId}
-                                  type="button"
-                                  disabled={!editable || saving}
-                                  onClick={() => editable && onToggle(cell.items, !cell.actorOn)}
-                                  className={`rounded-md border px-1.5 py-1 text-left ${tone} ${editable ? "cursor-pointer hover:brightness-95" : "cursor-default"} disabled:cursor-default`}
-                                >
-                                  <span className="block text-[11px] font-bold leading-tight">{cell.place.name}</span>
-                                  {cell.titles[0] ? <span className="block truncate text-[10px]">{cell.titles.join("、")}</span> : null}
-                                  {cell.needsStaff ? <span className="block text-[10px] font-semibold">要排人</span> : null}
-                                  {cell.people.length > 0 ? <span className="block truncate text-[10px]">{cell.people.join("、")}</span> : null}
-                                </button>
+                                  placeId={placeId}
+                                  placeName={cell.place.name}
+                                  people={cell.people}
+                                  actor={actor}
+                                  actorOn={cell.actorOn}
+                                  actorRemovable={cell.actorRemovable}
+                                  shortBy={cell.shortBy}
+                                    titles={cell.titles}
+                                    andyMark={cell.andyMark}
+                                    editable={editable}
+                                  saving={saving}
+                                  fill
+                                  onAdd={() => onToggle(cell.items, true)}
+                                  onRemove={() => onToggle(cell.items, false)}
+                                />
                               );
                             })}
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  </td>
-                );
-              })}
-            </tr>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
       <p className="border-t border-stone-100 px-3 py-2 text-[11px] text-stone-500">
-        一天只分早、中、晚。錄音室那個時段有錄音、又還沒人，會標「要排人」。點一下是排上或取消你自己。已過的日期不能改。請假稍後再做。
+        跟錄節目寫在格子上，五吉郎會先排好。缺人旁邊的 + 是排上正在排的人，人名旁的 × 拿掉。小錄是紫色、大錄是黃色、新辦是藍色。
       </p>
     </div>
   );
@@ -606,8 +803,7 @@ function PlaceGrid({
   onToggle: (items: { date: string; slot: string; place: string }[], on: boolean) => void;
 }) {
   const place = week.config.places.find((item) => item.id === placeId);
-  const today = taipeiToday();
-  const dates = week.dates.filter((date) => date >= today);
+  const dates = week.dates;
   if (!place || dates.length === 0) return null;
   const tone = PLACE_TONE[place.id] ?? "border-stone-200 bg-white";
   const rows = week.config.periods.map((period) => ({
@@ -636,11 +832,13 @@ function PlaceGrid({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const band = PERIOD_BAND[row.id] ?? { box: "border-stone-300 bg-stone-50", chip: "bg-stone-600 text-white" };
+            return (
             <tr key={row.id}>
-              <td className="px-1 py-1 align-top text-stone-700">
-                <span className="block font-semibold">{row.label}</span>
-                <span className="text-[10px] text-stone-500">{row.time}</span>
+              <td className="px-1 py-1 align-top">
+                <span className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-black ${band.chip}`}>{row.label}</span>
+                <span className="mt-0.5 block text-[10px] text-stone-500">{row.time}</span>
               </td>
               {dates.map((date) => {
                 if (row.slots.length === 0) {
@@ -651,50 +849,41 @@ function PlaceGrid({
                   );
                 }
                 const items = row.slots.map((slot) => ({ date, slot, place: place.id }));
-                const stored = items.some((item) =>
-                  week.claims.some((claim) => !claim.auto && claim.person === actor && claim.date === item.date && claim.slot === item.slot && claim.place === item.place)
-                );
+                const slotIds = new Set(row.slots);
+                const names = peopleInCell(week, date, place.id, slotIds, false);
+                const manual = peopleInCell(week, date, place.id, slotIds, true);
+                const actorOn = !!actor && names.includes(actor);
                 const severity = items.reduce<"error" | "warn" | null>((current, item) => {
                   const hit = conflictKeys.get(`${item.date}|${item.slot}|${item.place}`);
                   if (hit === "error" || current === "error") return "error";
                   return hit ?? current;
                 }, null);
-                const names = [
-                  ...new Set(
-                    week.claims
-                      .filter((claim) => !claim.auto && claim.date === date && claim.place === place.id && row.slots.includes(claim.slot))
-                      .map((claim) => claim.person)
-                  ),
-                ];
-                const bookings = week.bookings.filter(
-                  (booking) => booking.placeId === place.id && booking.slots.some((slot) => slot.date === date && row.slots.includes(slot.slot))
-                );
                 const ring = severity === "error" ? "ring-2 ring-red-400" : severity === "warn" ? "ring-2 ring-amber-300" : "";
+                const shortBy = place.kind === "studio" ? studioShortBy(week, date, place.id, row.id, names, manual) : 0;
                 return (
                   <td key={date} className="align-top">
-                    <div className={`min-h-16 rounded-lg bg-white/80 px-1.5 py-1 ${ring}`}>
-                      <p className="text-stone-800">{names.length ? names.join("、") : "還沒有人"}</p>
-                      {bookings.map((booking) => (
-                        <p key={`${booking.start}-${booking.title}`} className="mt-1 truncate text-[10px] text-stone-500">
-                          {booking.kind === "follow" ? "跟錄 " : booking.kind === "own" ? "自錄 " : ""}
-                          {booking.show || booking.title}
-                        </p>
-                      ))}
-                      {canToggle && (
-                        <button
-                          type="button"
-                          onClick={() => onToggle(items, !stored)}
-                          className={`mt-1 rounded-md px-2 py-0.5 text-[11px] font-semibold ${stored ? "bg-stone-900 text-white" : "bg-white text-stone-800 ring-1 ring-stone-300"}`}
-                        >
-                          {stored ? "取消" : "我要到"}
-                        </button>
-                      )}
-                    </div>
+                    <ShiftSlot
+                      placeId={place.id}
+                      placeName={place.name}
+                      people={names}
+                      actor={actor}
+                      actorOn={actorOn}
+                      actorRemovable={!!actor && manual.includes(actor)}
+                      shortBy={shortBy}
+                      titles={followTitles(week, date, place.id, slotIds)}
+                      andyMark={andyFollowMark(week, date, place.id, slotIds)}
+                      editable={canToggle}
+                      saving={false}
+                      ring={ring}
+                      onAdd={() => onToggle(items, true)}
+                      onRemove={() => onToggle(items, false)}
+                    />
                   </td>
                 );
               })}
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

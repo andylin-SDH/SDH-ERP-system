@@ -162,6 +162,18 @@ export function FollowList({ people, canMutate }: { people: string[]; canMutate:
           </div>
         </form>
       )}
+      <div className="mt-4 border-t border-stone-200 pt-3">
+        <p className="text-xs font-semibold text-stone-800">目前的規則</p>
+        <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-stone-600">
+          <li>跟錄名單上的節目，五吉郎會先排上，不用手動點。</li>
+          <li>同一時段的另一間錄音室，固定再缺 1 人。五吉郎若已經在那間做安迪訪談，那間就不缺。</li>
+          <li>林安迪這段若請假，要跟錄的那一格再缺 1 人。五吉郎不算補上這個缺。</li>
+          <li>五吉郎自己請假時不會自動排，跟錄那格要另外找人。</li>
+          <li>外面的錄音室預約沒人，才會缺 1 人。自己人的節目，例如郝聲音、安迪，不另開缺人。</li>
+          <li>格子只顯示跟錄節目名。節目名前是麥克風，人名前面是人。</li>
+          <li>「安迪」就是五吉郎，人在那場錄音的錄音室。跟錄時間若重疊，跟錄那格不寫他的名字，改標「五吉郎在訪談需要其他人支援跟錄」。時間沒重疊就照常排。</li>
+        </ol>
+      </div>
     </div>
   );
 }

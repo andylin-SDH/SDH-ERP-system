@@ -79,6 +79,7 @@ export function InvoiceReviewPanel({ canReview, reloadToken = 0 }: { canReview: 
   const [rows, setRows] = useState<InvoiceRequestRow[]>([]);
   const [status, setStatus] = useState<(typeof STATUS)[number]>("待審核");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rejectId, setRejectId] = useState<string | null>(null);
@@ -116,11 +117,12 @@ export function InvoiceReviewPanel({ canReview, reloadToken = 0 }: { canReview: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, action, reason }),
       });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = (await res.json()) as { ok?: boolean; error?: string; mailNotice?: string };
       if (!res.ok || !data.ok) {
         setError(data.error || "審核失敗");
         return;
       }
+      setNotice(data.mailNotice?.trim() || null);
       setRejectId(null);
       setReason("");
       await load();
@@ -153,6 +155,20 @@ export function InvoiceReviewPanel({ canReview, reloadToken = 0 }: { canReview: 
       {!issueLive ? (
         <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
           申請會先留在這裡。{invoiceEInvoiceLaunchLabel()} 起才能按「放行並開立」，在那之前不會向光貿開立。
+        </p>
+      ) : null}
+      {issueLive ? (
+        <p className="mb-3 text-xs text-stone-500">開立完成後會寄信通知申請人。</p>
+      ) : null}
+      {notice ? (
+        <p
+          className={`mb-3 rounded-lg px-3 py-2 text-sm ${
+            notice.includes("沒有寄出") || notice.includes("未寄")
+              ? "bg-amber-50 text-amber-950"
+              : "bg-emerald-50 text-emerald-900"
+          }`}
+        >
+          {notice}
         </p>
       ) : null}
       {error ? <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}

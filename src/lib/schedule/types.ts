@@ -94,6 +94,8 @@ export type StudioCalendar = {
   placeId: string;
   color: string;
   icsUrl: string;
+  calendarId: string;
+  credentialsEnv: string;
 };
 
 export type DayInfo = { workday: boolean; holiday: string; weekend: boolean };
@@ -111,6 +113,7 @@ export type ScheduleBooking = {
   show: string;
   owner: string;
   companions: string[];
+  andyRecording: boolean;
   slots: BookingSlot[];
 };
 

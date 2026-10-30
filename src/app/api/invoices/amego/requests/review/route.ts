@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireEmployee } from "@/lib/auth/api";
-import { approveInvoiceRequest, rejectInvoiceRequest } from "@/lib/db/invoice-requests";
+import { approveInvoiceRequest, notifyInvoiceApplicant, rejectInvoiceRequest } from "@/lib/db/invoice-requests";
 import { invoiceEInvoiceNotLiveResponse, isInvoiceEInvoiceLive } from "@/lib/invoice/launch";
 import { canReviewInvoice } from "@/lib/invoice/review-access";
 
@@ -24,7 +24,8 @@ export async function POST(request: NextRequest) {
     if (body.action === "approve") {
       if (!isInvoiceEInvoiceLive()) return invoiceEInvoiceNotLiveResponse();
       const updated = await approveInvoiceRequest(id, reviewer);
-      return NextResponse.json({ ok: true, request: updated });
+      const mailNotice = await notifyInvoiceApplicant(updated);
+      return NextResponse.json({ ok: true, request: updated, mailNotice });
     }
     return NextResponse.json({ ok: false, error: "未知的審核動作" }, { status: 400 });
   } catch (error) {

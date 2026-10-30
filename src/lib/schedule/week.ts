@@ -1,4 +1,5 @@
 import { SCHEDULE_CONFIG, STUDIO_CALENDARS } from "@/lib/schedule/config.server";
+import { listStudioEvents } from "@/lib/schedule/google-calendar";
 import { expandIcsEvents } from "@/lib/schedule/ics";
 import { schedulePersonOf } from "@/lib/schedule/identity";
 import {
@@ -10,7 +11,6 @@ import {
   expandStoredClaims,
   findConflicts,
   isDateStr,
-  mondayOf,
   presetClaims,
   weekDates,
   weekStats,
@@ -60,9 +60,29 @@ function publicConfig() {
   };
 }
 
+async function loadPublicIcs(icsUrl: string, name: string, rangeStart: Date, rangeEnd: Date, warnings: string[]) {
+  const response = await fetch(icsUrl, { cache: "no-store" });
+  if (!response.ok) {
+    warnings.push(`讀取「${name}」日曆失敗：HTTP ${response.status}`);
+    return [];
+  }
+  const text = await response.text();
+  if (!text.includes("BEGIN:VCALENDAR")) {
+    warnings.push(`讀取「${name}」日曆失敗：回傳的內容不是日曆檔`);
+    return [];
+  }
+  return expandIcsEvents(text, rangeStart, rangeEnd).map((event) => ({
+    title: event.title || "（無標題）",
+    text: event.text,
+    emails: event.emails,
+    start: event.start,
+    end: event.end,
+  }));
+}
+
 async function loadBookings(weekStart: string, force: boolean, cfg: ScheduleConfig): Promise<{ bookings: ScheduleBooking[]; warnings: string[] }> {
   const now = Date.now();
-  const cacheKey = `${weekStart}:${followKey(cfg.FOLLOW_SHOWS)}`;
+  const cacheKey = `${weekStart}:${followKey(cfg.FOLLOW_SHOWS)}:andy`;
   if (!force && calendarCache && calendarCache.key === cacheKey && now - calendarCache.at < CACHE_MS) {
     return {
       warnings: calendarCache.warnings,
@@ -79,19 +99,12 @@ async function loadBookings(weekStart: string, force: boolean, cfg: ScheduleConf
   await Promise.all(
     STUDIO_CALENDARS.map(async (calendar) => {
       try {
-        const response = await fetch(calendar.icsUrl, { cache: "no-store" });
-        if (!response.ok) {
-          warnings.push(`讀取「${calendar.name}」日曆失敗：HTTP ${response.status}`);
-          return;
-        }
-        const text = await response.text();
-        if (!text.includes("BEGIN:VCALENDAR")) {
-          warnings.push(`讀取「${calendar.name}」日曆失敗：回傳的內容不是日曆檔`);
-          return;
-        }
-        const events = expandIcsEvents(text, rangeStart, rangeEnd);
-        if (events.length && events.every((event) => /^(busy|忙碌)$/i.test(event.title.trim()))) {
-          warnings.push(`「${calendar.name}」日曆只公開了忙碌／空閒，看不到預約標題`);
+        const keyFile = process.env[calendar.credentialsEnv]?.trim();
+        const events = keyFile
+          ? await listStudioEvents(keyFile, calendar.calendarId, rangeStart, rangeEnd)
+          : await loadPublicIcs(calendar.icsUrl, calendar.name, rangeStart, rangeEnd, warnings);
+        if (!keyFile) {
+          warnings.push(`「${calendar.name}」尚未設定服務帳戶，公開連結只看得到忙碌／空閒`);
         }
         for (const event of events) {
           const title = event.title || "（無標題）";
@@ -107,6 +120,7 @@ async function loadBookings(weekStart: string, force: boolean, cfg: ScheduleConf
             show: classified.show,
             owner: classified.owner,
             companions: classified.companions,
+            andyRecording: `${title}\n${event.text ?? ""}`.includes("安迪"),
           });
         }
       } catch (error) {
@@ -128,7 +142,7 @@ async function loadBookings(weekStart: string, force: boolean, cfg: ScheduleConf
 export function normalizeWeekStart(weekStart: string | null | undefined): string {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei" }).format(new Date());
   const raw = weekStart && isDateStr(weekStart) ? weekStart : today;
-  return mondayOf(raw);
+  return raw;
 }
 
 export async function buildScheduleWeek(

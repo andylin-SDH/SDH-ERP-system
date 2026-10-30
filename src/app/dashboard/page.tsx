@@ -607,11 +607,15 @@ function InvoiceProjectMultiSelect({
   options,
   disabled,
   onChange,
+  masterById,
+  canShowAmounts,
 }: {
   value: string;
   options: InvoiceProjectOption[];
   disabled?: boolean;
   onChange: (joinedProjectIds: string) => void;
+  masterById?: Map<string, MasterRow>;
+  canShowAmounts?: (row: MasterRow | undefined) => boolean;
 }) {
   const selectedIds = useMemo(() => parseInvoiceDraftProjectIds(value), [value]);
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -646,6 +650,12 @@ function InvoiceProjectMultiSelect({
               title={opt.id}
             >
               <span className="truncate">{opt.name}</span>
+              {masterById ? (
+                <TaskProjectInfoButton
+                  project={masterById.get(opt.id)}
+                  showAmounts={canShowAmounts?.(masterById.get(opt.id)) ?? false}
+                />
+              ) : null}
               <button
                 type="button"
                 disabled={disabled}
@@ -12727,16 +12737,26 @@ export default function DashboardPage() {
                               {invoicesVisibleCols.map((k) => {
                                 const v = (inv as unknown as Record<string, unknown>)[k];
                                 if (!rowId) {
-                                  const str =
-                                    k === "專案ID" && (v == null || String(v).trim() === "")
-                                      ? "—"
-                                      : String(v ?? "—");
+                                  if (k === "專案ID") {
+                                    const pid = v == null ? "" : String(v).trim();
+                                    const project = pid ? masterByProjectId.get(pid) : undefined;
+                                    return (
+                                      <td key={k} className="whitespace-nowrap px-4 py-3.5 text-sm font-medium text-stone-900">
+                                        <span className="inline-flex items-center gap-1">
+                                          <span>{pid || "—"}</span>
+                                          <TaskProjectInfoButton
+                                            project={project}
+                                            showAmounts={canViewMasterAmountsForRow(project)}
+                                          />
+                                        </span>
+                                      </td>
+                                    );
+                                  }
+                                  const str = String(v ?? "—");
                                   const cellCls =
-                                    k === "專案ID"
-                                      ? "font-medium text-stone-900"
-                                      : k === "發票金額含稅" && str !== "—"
-                                        ? "text-right text-base font-semibold tabular-nums text-stone-900"
-                                        : "text-stone-600";
+                                    k === "發票金額含稅" && str !== "—"
+                                      ? "text-right text-base font-semibold tabular-nums text-stone-900"
+                                      : "text-stone-600";
                                   return (
                                     <td key={k} className={`whitespace-nowrap px-4 py-3.5 text-sm ${cellCls}`}>
                                       {str}
@@ -12747,20 +12767,30 @@ export default function DashboardPage() {
                                 const inputCls =
                                   "w-full min-w-[4rem] rounded border border-stone-200 bg-white px-2 py-1 text-xs text-stone-800 placeholder:text-stone-400 focus:border-amber-500/60 focus:outline-none disabled:opacity-60";
                                 if (k === "專案ID") {
+                                  const pid = val.trim();
+                                  const project = pid ? masterByProjectId.get(pid) : undefined;
                                   return (
                                     <td key={k} className="min-w-[11rem] max-w-[18rem] px-2 py-2 align-middle">
-                                      <InvoiceProjectSearchSelect
-                                        value={val}
-                                        options={invoiceProjectOptions}
-                                        disabled={saving}
-                                        onChange={(projectId) => {
-                                          setInvoiceEditError(null);
-                                          setInvoiceDirtyIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
-                                          setInvoices((prev) =>
-                                            prev.map((r) => (r.id === rowId ? { ...r, 專案ID: projectId } : r))
-                                          );
-                                        }}
-                                      />
+                                      <div className="flex items-center gap-1">
+                                        <div className="min-w-0 flex-1">
+                                          <InvoiceProjectSearchSelect
+                                            value={val}
+                                            options={invoiceProjectOptions}
+                                            disabled={saving}
+                                            onChange={(projectId) => {
+                                              setInvoiceEditError(null);
+                                              setInvoiceDirtyIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
+                                              setInvoices((prev) =>
+                                                prev.map((r) => (r.id === rowId ? { ...r, 專案ID: projectId } : r))
+                                              );
+                                            }}
+                                          />
+                                        </div>
+                                        <TaskProjectInfoButton
+                                          project={project}
+                                          showAmounts={canViewMasterAmountsForRow(project)}
+                                        />
+                                      </div>
                                     </td>
                                   );
                                 }
@@ -13593,6 +13623,8 @@ export default function DashboardPage() {
                           <InvoiceProjectMultiSelect
                             value={row.專案ID ?? ""}
                             options={invoiceProjectOptions}
+                            masterById={masterByProjectId}
+                            canShowAmounts={canViewMasterAmountsForRow}
                             onChange={(projectIds) => patchDraft("專案ID", projectIds)}
                           />
                         </div>
