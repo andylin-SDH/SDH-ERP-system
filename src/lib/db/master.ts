@@ -40,6 +40,8 @@ export interface MasterRow {
   統一編號: string | null;
   /** 發票收件人 Email（開立發票買受人 Email 可帶入） */
   收件人Email: string | null;
+  /** 開立發票時帶入明細品名。空白則用專案名稱 */
+  發票品名: string | null;
   /** 可編輯；同步至財務與分潤表「廠商預計付款日」 */
   廠商預計付款日: string | null;
   專案內容: string | null;
@@ -97,6 +99,7 @@ function rowToMaster(r: Record<string, unknown>): MasterRow {
     廠商名稱: (r.廠商名稱 as string) ?? null,
     統一編號: (r.統一編號 as string) ?? null,
     收件人Email: (r.收件人Email as string) ?? null,
+    發票品名: (r.發票品名 as string) ?? null,
     廠商預計付款日: (r.廠商預計付款日 as string) ?? null,
     專案內容: (r.專案內容 as string) ?? null,
     備註: (r.備註 as string) ?? null,
@@ -149,6 +152,7 @@ function dropMissingMasterColumns(data: Record<string, unknown>, error: { messag
     ["分潤制度"],
     ["統一編號"],
     ["收件人Email"],
+    ["發票品名"],
   ];
   let dropped = false;
   for (const keys of groups) {
@@ -246,6 +250,7 @@ export async function createMaster(payload: NewMasterInput): Promise<MasterRow> 
     廠商名稱: payload.廠商名稱 ?? null,
     統一編號: payload.統一編號 ?? null,
     收件人Email: payload.收件人Email ?? null,
+    發票品名: payload.發票品名 ?? null,
     廠商預計付款日: payload.廠商預計付款日 ?? null,
     專案內容: payload.專案內容 ?? null,
     備註: payload.備註 ?? null,
@@ -319,6 +324,7 @@ export async function updateMaster(payload: UpdateMasterInput): Promise<MasterRo
     廠商名稱: payload.廠商名稱 ?? null,
     統一編號: payload.統一編號 ?? null,
     收件人Email: payload.收件人Email ?? null,
+    發票品名: payload.發票品名 ?? null,
     廠商預計付款日: payload.廠商預計付款日 ?? null,
     專案內容: payload.專案內容 ?? null,
     備註: payload.備註 ?? null,

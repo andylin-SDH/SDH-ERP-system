@@ -21,6 +21,7 @@ export type InvoiceRequestProjectSummary = {
   廠商名稱: string;
   統一編號: string;
   收件人Email: string;
+  發票品名: string;
   KOL名稱: string;
   執行管理員: string;
   專案總金額未稅: string;
@@ -159,7 +160,7 @@ async function projectSummariesByIds(projectIds: string[]): Promise<Map<string, 
   const map = new Map<string, InvoiceRequestProjectSummary>();
   if (ids.length === 0) return map;
   const columnSets = [
-    '"專案ID","專案名稱","專案狀態","開案日期","廠商名稱","統一編號","收件人Email","KOL名稱","執行管理員","專案總金額未稅","專案成本","KOL費用未稅","KOL應收額外成本","專案營收","廠商預計付款日","專案內容"',
+    '"專案ID","專案名稱","專案狀態","開案日期","廠商名稱","統一編號","收件人Email","發票品名","KOL名稱","執行管理員","專案總金額未稅","專案成本","KOL費用未稅","KOL應收額外成本","專案營收","廠商預計付款日","專案內容"',
     '"專案ID","專案名稱","專案狀態","開案日期","廠商名稱","統一編號","KOL名稱","執行管理員","專案總金額未稅","專案成本","KOL費用未稅","KOL應收額外成本","專案營收","廠商預計付款日","專案內容"',
     '"專案ID","專案名稱","專案狀態","開案日期","廠商名稱","KOL名稱","執行管理員","專案總金額未稅","專案成本","KOL費用未稅","KOL應收額外成本","專案營收","廠商預計付款日","專案內容"',
   ];
@@ -170,7 +171,7 @@ async function projectSummariesByIds(projectIds: string[]): Promise<Map<string, 
       data = result.data;
       break;
     }
-    if (!/收件人Email|統一編號|schema cache|column/i.test(result.error.message ?? "")) return map;
+    if (!/收件人Email|統一編號|發票品名|schema cache|column/i.test(result.error.message ?? "")) return map;
   }
   if (!data) return map;
   for (const row of data) {
@@ -189,6 +190,7 @@ async function projectSummariesByIds(projectIds: string[]): Promise<Map<string, 
       廠商名稱: text(r.廠商名稱),
       統一編號: text(r.統一編號),
       收件人Email: text(r.收件人Email),
+      發票品名: text(r.發票品名),
       KOL名稱: text(r.KOL名稱),
       執行管理員: text(r.執行管理員),
       專案總金額未稅: total,

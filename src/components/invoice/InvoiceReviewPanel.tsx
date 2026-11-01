@@ -26,6 +26,7 @@ function ProjectSummaryBlock({ project }: { project: InvoiceRequestProjectSummar
     ["廠商（發票抬頭）", project.廠商名稱 || "—"],
     ["統一編號", project.統一編號 || "—"],
     ["收件人 Email", project.收件人Email || "—"],
+    ["品名", project.發票品名 || "—"],
     ["KOL", project.KOL名稱 || "—"],
     ["負責 PM", project.執行管理員 || "—"],
     ["預計付款日", project.廠商預計付款日 || "—"],

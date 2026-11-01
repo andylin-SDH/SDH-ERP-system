@@ -923,6 +923,7 @@ function TaskProjectInfoButton({
     ["廠商名稱（發票抬頭）", project.廠商名稱 || "—"],
     ["統一編號", project.統一編號 || "—"],
     ["收件人 Email", project.收件人Email || "—"],
+    ["發票品名", project.發票品名 || "—"],
     ["預計付款日", formatPartnerDateDisplay(project.廠商預計付款日)],
   ] as const;
 
@@ -1353,6 +1354,7 @@ type MasterCreateFormState = {
   廠商名稱: string;
   統一編號: string;
   收件人Email: string;
+  發票品名: string;
   專案資料夾: string;
   專案BDPM: string;
   專案BDPM分潤成數: string;
@@ -1398,6 +1400,7 @@ function emptyMasterCreateForm(payoutDefaults: Record<string, string>, 專案類
     廠商名稱: "",
     統一編號: "",
     收件人Email: "",
+    發票品名: "",
     專案資料夾: "",
     專案BDPM: "",
     專案BDPM分潤成數: payoutDefaults.專案BDPM分潤成數 ?? "",
@@ -1450,6 +1453,7 @@ function buildMasterCreateFormFromCopy(
     廠商名稱: String(source.廠商名稱 ?? "").trim(),
     統一編號: String(source.統一編號 ?? "").trim(),
     收件人Email: String(source.收件人Email ?? "").trim(),
+    發票品名: String(source.發票品名 ?? "").trim(),
     專案資料夾: String(source.專案資料夾 ?? "").trim(),
     專案BDPM: "",
     專案BDPM分潤成數: "",
@@ -1510,6 +1514,7 @@ const MASTER_LIST_HIDDEN_KEYS = new Set([
   "廠商名稱",
   "統一編號",
   "收件人Email",
+  "發票品名",
   "廠商預計付款日",
   "專案引薦人",
   /** 結案會進「已結案」分頁；列表不必再佔一欄下拉 */
@@ -1955,6 +1960,7 @@ export default function DashboardPage() {
     廠商名稱: "",
     統一編號: "",
     收件人Email: "",
+    發票品名: "",
     專案BDPM: "",
     專案BDPM分潤成數: "",
     專案引薦人: "",
@@ -4726,6 +4732,7 @@ export default function DashboardPage() {
           廠商名稱: row.廠商名稱 ?? "",
           統一編號: row.統一編號 ?? "",
           收件人Email: row.收件人Email ?? "",
+          發票品名: row.發票品名 ?? "",
           專案BDPM: row.專案BDPM ?? "",
           專案引薦人: row.專案引薦人 ?? "",
           專案開發人: row.專案開發人 ?? "",
@@ -4968,6 +4975,7 @@ export default function DashboardPage() {
       廠商名稱: selectedMaster.廠商名稱 ?? "",
       統一編號: selectedMaster.統一編號 ?? "",
       收件人Email: selectedMaster.收件人Email ?? "",
+      發票品名: selectedMaster.發票品名 ?? "",
       專案BDPM: selectedMaster.專案BDPM ?? "",
       專案BDPM分潤成數: selectedMaster.專案BDPM分潤成數 ?? "",
       專案引薦人: selectedMaster.專案引薦人 ?? "",
@@ -14341,9 +14349,17 @@ export default function DashboardPage() {
                       acknowledged={createSimilarAck}
                       onAcknowledge={(on) => setCreateSimilarAckKey(on ? createSimilarKey : "")}
                     />
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
+                  <h3 className="text-base font-bold text-sky-950">發票資訊</h3>
+                  <p className="mt-1 mb-3 text-xs leading-relaxed text-stone-500">開立發票時會帶入這些欄位。品名會寫進發票明細；沒填就用專案名稱。</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-4">
                     <InputField label="廠商名稱（發票抬頭）" value={createForm.廠商名稱} onChange={(v) => setCreateForm((f) => ({ ...f, 廠商名稱: v }))} />
                     <InputField label="統一編號" value={createForm.統一編號} onChange={(v) => setCreateForm((f) => ({ ...f, 統一編號: v.replace(/\D/g, "").slice(0, 8) }))} />
                     <InputField label="收件人 Email" value={createForm.收件人Email} onChange={(v) => setCreateForm((f) => ({ ...f, 收件人Email: v }))} />
+                    <InputField label="品名" value={createForm.發票品名} onChange={(v) => setCreateForm((f) => ({ ...f, 發票品名: v }))} />
                   </div>
                 </section>
 
@@ -14952,6 +14968,7 @@ export default function DashboardPage() {
                       廠商名稱: selectedMaster.廠商名稱 ?? "",
                       統一編號: selectedMaster.統一編號 ?? "",
                       收件人Email: selectedMaster.收件人Email ?? "",
+                      發票品名: selectedMaster.發票品名 ?? "",
                       專案BDPM: selectedMaster.專案BDPM ?? "",
                       專案BDPM分潤成數: selectedMaster.專案BDPM分潤成數 ?? "",
                       專案引薦人: selectedMaster.專案引薦人 ?? "",
@@ -15857,29 +15874,6 @@ export default function DashboardPage() {
                       onAcknowledge={(on) => setEditSimilarAckKey(on ? editSimilarKey : "")}
                     />
                   )}
-                  {isEditingMaster ? (
-                    <InputField label="廠商名稱（發票抬頭）" value={editMasterForm.廠商名稱} onChange={(v) => setEditMasterForm((f) => ({ ...f, 廠商名稱: v }))} />
-                  ) : (
-                    <Field label="廠商名稱（發票抬頭）" value={selectedMaster.廠商名稱} />
-                  )}
-                  {isEditingMaster ? (
-                    <InputField
-                      label="統一編號"
-                      value={editMasterForm.統一編號}
-                      onChange={(v) => setEditMasterForm((f) => ({ ...f, 統一編號: v.replace(/\D/g, "").slice(0, 8) }))}
-                    />
-                  ) : (
-                    <Field label="統一編號" value={selectedMaster.統一編號} />
-                  )}
-                  {isEditingMaster ? (
-                    <InputField
-                      label="收件人 Email"
-                      value={editMasterForm.收件人Email}
-                      onChange={(v) => setEditMasterForm((f) => ({ ...f, 收件人Email: v }))}
-                    />
-                  ) : (
-                    <Field label="收件人 Email" value={selectedMaster.收件人Email} />
-                  )}
                   {!isTwoRolePayoutProject(selectedMaster) && (isPayoutModeB(isEditingMaster ? editMasterForm.專案類型 : selectedMaster.專案類型 ?? "") ? (
                     <>
                       {isEditingMaster ? (
@@ -16045,6 +16039,41 @@ export default function DashboardPage() {
                 ) : null}
                 </>
                 ) : null}
+              </section>
+
+              <section className="rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
+                <h3 className="text-base font-bold text-sky-950">發票資訊</h3>
+                <p className="mt-1 mb-3 text-xs leading-relaxed text-stone-500">開立發票時會帶入這些欄位。品名會寫進發票明細；沒填就用專案名稱。</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  {isEditingMaster ? (
+                    <InputField label="廠商名稱（發票抬頭）" value={editMasterForm.廠商名稱} onChange={(v) => setEditMasterForm((f) => ({ ...f, 廠商名稱: v }))} />
+                  ) : (
+                    <Field label="廠商名稱（發票抬頭）" value={selectedMaster.廠商名稱} />
+                  )}
+                  {isEditingMaster ? (
+                    <InputField
+                      label="統一編號"
+                      value={editMasterForm.統一編號}
+                      onChange={(v) => setEditMasterForm((f) => ({ ...f, 統一編號: v.replace(/\D/g, "").slice(0, 8) }))}
+                    />
+                  ) : (
+                    <Field label="統一編號" value={selectedMaster.統一編號} />
+                  )}
+                  {isEditingMaster ? (
+                    <InputField
+                      label="收件人 Email"
+                      value={editMasterForm.收件人Email}
+                      onChange={(v) => setEditMasterForm((f) => ({ ...f, 收件人Email: v }))}
+                    />
+                  ) : (
+                    <Field label="收件人 Email" value={selectedMaster.收件人Email} />
+                  )}
+                  {isEditingMaster ? (
+                    <InputField label="品名" value={editMasterForm.發票品名} onChange={(v) => setEditMasterForm((f) => ({ ...f, 發票品名: v }))} />
+                  ) : (
+                    <Field label="品名" value={selectedMaster.發票品名} />
+                  )}
+                </div>
               </section>
 
               <section id="master-project-content">

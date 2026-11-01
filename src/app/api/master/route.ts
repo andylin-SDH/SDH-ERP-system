@@ -113,6 +113,7 @@ export async function POST(request: NextRequest) {
       廠商名稱: (body?.廠商名稱 as string) ?? null,
       統一編號: (body?.統一編號 as string) ?? null,
       收件人Email: (body?.收件人Email as string) ?? null,
+      發票品名: (body?.發票品名 as string) ?? null,
       廠商預計付款日: (body?.廠商預計付款日 as string) ?? null,
       專案內容: (body?.專案內容 as string) ?? null,
       備註: (body?.備註 as string) ?? null,
@@ -251,6 +252,10 @@ export async function PATCH(request: NextRequest) {
         body && Object.prototype.hasOwnProperty.call(body, "收件人Email")
           ? ((body.收件人Email as string) ?? null)
           : (existing.收件人Email ?? null),
+      發票品名:
+        body && Object.prototype.hasOwnProperty.call(body, "發票品名")
+          ? ((body.發票品名 as string) ?? null)
+          : (existing.發票品名 ?? null),
       廠商預計付款日: (body?.廠商預計付款日 as string) ?? null,
       專案內容: (body?.專案內容 as string) ?? null,
       備註: (body?.備註 as string) ?? null,

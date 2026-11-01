@@ -13,7 +13,11 @@ import { fetchSessionWithRetry } from "@/components/ErpLoginPanel";
 import { calcB2bTotals, type B2bPriceMode, type B2bTaxKind } from "@/lib/invoice/b2b-amount";
 
 type Line = { key: string; description: string; quantity: string; unitPrice: string };
-type ProjectOption = { id: string; name: string; vendor: string; taxId: string; email: string; untaxed: string; kol: string };
+type ProjectOption = { id: string; name: string; vendor: string; taxId: string; email: string; itemName: string; untaxed: string; kol: string };
+
+function invoiceItemName(project: ProjectOption): string {
+  return String(project.itemName ?? "").trim() || project.name;
+}
 
 function emptyLine(): Line {
   return { key: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, description: "", quantity: "1", unitPrice: "" };
@@ -171,7 +175,7 @@ export default function InvoiceIssuePage() {
         return [
           {
             ...first,
-            description: project.name || first.description,
+            description: invoiceItemName(project) || first.description,
             unitPrice: price || first.unitPrice,
             quantity: first.quantity || "1",
           },
@@ -210,7 +214,7 @@ export default function InvoiceIssuePage() {
     const price = moneyInput(project.untaxed);
     setLines((prev) => {
       const first = prev[0] ?? emptyLine();
-      return [{ ...first, description: project.name || first.description, unitPrice: price || first.unitPrice, quantity: first.quantity || "1" }, ...prev.slice(1)];
+      return [{ ...first, description: invoiceItemName(project) || first.description, unitPrice: price || first.unitPrice, quantity: first.quantity || "1" }, ...prev.slice(1)];
     });
   }
 
@@ -336,7 +340,7 @@ export default function InvoiceIssuePage() {
           <div className="mb-6">
             <span className="text-sm font-semibold text-sky-700">專案</span>
             <ProjectPicker projects={projects} projectId={projectId} onSelect={selectProject} />
-            <p className="mt-1 text-[11px] text-stone-500">選了之後帶入廠商名稱（發票抬頭）、統一編號、收件人 Email、專案名稱和未稅金額。同一專案再開第二張時，訂單編號會自動加尾碼。</p>
+            <p className="mt-1 text-[11px] text-stone-500">選了之後帶入廠商名稱（發票抬頭）、統一編號、收件人 Email、品名和未稅金額。品名沒填就用專案名稱。同一專案再開第二張時，訂單編號會自動加尾碼。</p>
           </div>
 
           <div className="grid gap-x-10 gap-y-5 sm:grid-cols-2">

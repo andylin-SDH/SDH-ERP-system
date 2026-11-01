@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabase();
     const columnSets = [
-      '"專案ID","專案名稱","廠商名稱","統一編號","收件人Email","專案總金額未稅","KOL名稱"',
+      '"專案ID","專案名稱","廠商名稱","統一編號","收件人Email","發票品名","專案總金額未稅","KOL名稱"',
       '"專案ID","專案名稱","廠商名稱","統一編號","專案總金額未稅","KOL名稱"',
       '"專案ID","專案名稱","廠商名稱","專案總金額未稅","KOL名稱"',
     ];
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
         break;
       }
       lastError = withSoft.error;
-      if (!/收件人Email|統一編號|deleted_at|schema cache|column/i.test(withSoft.error.message ?? "")) {
+      if (!/收件人Email|統一編號|發票品名|deleted_at|schema cache|column/i.test(withSoft.error.message ?? "")) {
         throw withSoft.error;
       }
       const fallback = await supabase.from("大總表").select(columns).order("created_at", { ascending: false });
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
         break;
       }
       lastError = fallback.error;
-      if (!/收件人Email|統一編號|deleted_at|schema cache|column/i.test(fallback.error.message ?? "")) {
+      if (!/收件人Email|統一編號|發票品名|deleted_at|schema cache|column/i.test(fallback.error.message ?? "")) {
         throw fallback.error;
       }
     }
@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
           vendor: String(r.廠商名稱 ?? "").trim(),
           taxId: String(r.統一編號 ?? "").trim(),
           email: String(r.收件人Email ?? "").trim(),
+          itemName: String(r.發票品名 ?? "").trim(),
           untaxed: String(r.專案總金額未稅 ?? "").trim(),
           kol: String(r.KOL名稱 ?? "").trim(),
         };
