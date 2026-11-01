@@ -158,7 +158,7 @@ export function InvoiceReviewPanel({ canReview, reloadToken = 0 }: { canReview: 
         </p>
       ) : null}
       {issueLive ? (
-        <p className="mb-3 text-xs text-stone-500">開立完成後會寄信通知申請人。</p>
+        <p className="mb-3 text-xs text-stone-500">開立完成後會寄信給專案上的專案負責人和主管。同一人只寄一封。</p>
       ) : null}
       {notice ? (
         <p

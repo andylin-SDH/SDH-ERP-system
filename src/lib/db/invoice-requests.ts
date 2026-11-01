@@ -3,6 +3,7 @@ import { issueB2bInvoice, taipeiDateFromUnix } from "@/lib/invoice/amego";
 import { orderIdForIssue } from "@/lib/invoice/order-id";
 import { insertIssuedInvoice } from "@/lib/db/finance";
 import { sendInvoiceIssuedEmail } from "@/lib/email";
+import { getEmailByNameOrEmail } from "@/lib/db/users";
 import { getSupabase } from "@/lib/supabase/server";
 
 export type InvoiceRequestLine = {
@@ -428,32 +429,58 @@ function canEmailApplicant(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !email.toLowerCase().endsWith(".local");
 }
 
-/** 開立已完成才呼叫。寄信失敗不影響已開立的發票。 */
+/** 開立已完成才呼叫。寄給專案上的專案負責人與主管，同一人只寄一封。寄信失敗不影響已開立的發票。 */
 export async function notifyInvoiceApplicant(row: InvoiceRequestRow): Promise<string> {
-  const to = row.申請人Email.trim();
-  if (!canEmailApplicant(to)) return "已開立。這筆申請沒有可寄送的申請人信箱，未寄通知。";
-  let projectName = "";
-  if (row.專案ID) {
-    const { data } = await getSupabase().from("大總表").select("專案名稱").eq("專案ID", row.專案ID).maybeSingle();
-    projectName = text((data as { 專案名稱?: string } | null)?.專案名稱);
+  if (!row.專案ID.trim()) return "已開立。這筆沒有對應專案，未寄通知。";
+  const { data } = await getSupabase()
+    .from("大總表")
+    .select("專案名稱,執行管理員,直屬主管")
+    .eq("專案ID", row.專案ID)
+    .maybeSingle();
+  const project = data as { 專案名稱?: string; 執行管理員?: string; 直屬主管?: string } | null;
+  const projectName = text(project?.專案名稱);
+  const people = new Map<string, string[]>();
+  const addPerson = (name: string, role: string) => {
+    const key = name.trim();
+    if (!key) return;
+    const roles = people.get(key) ?? [];
+    if (!roles.includes(role)) roles.push(role);
+    people.set(key, roles);
+  };
+  addPerson(text(project?.執行管理員), "專案負責人");
+  addPerson(text(project?.直屬主管), "主管");
+  if (people.size === 0) return "已開立。這個專案沒有填專案負責人或主管，未寄通知。";
+
+  const sent: string[] = [];
+  const missed: string[] = [];
+  for (const [name, roles] of people) {
+    const label = `${roles.join("／")} ${name}`;
+    try {
+      const to = (await getEmailByNameOrEmail(name))?.trim() ?? "";
+      if (!canEmailApplicant(to)) {
+        missed.push(`${label} 沒有對到可寄送的帳號信箱`);
+        continue;
+      }
+      const result = await sendInvoiceIssuedEmail({
+        to,
+        applicantName: name,
+        invoiceNumber: row.發票號碼,
+        invoiceDate: row.發票日期,
+        buyerName: row.買受人名稱,
+        totalAmount: row.發票總金額,
+        projectId: row.專案ID,
+        projectName,
+        reviewer: row.審核人,
+      });
+      if (!result.ok) missed.push(`${label} 沒有寄出：${result.error || "寄信失敗"}`);
+      else sent.push(`${label}（${to}）`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "寄信失敗";
+      console.error("notifyInvoiceApplicant", error);
+      missed.push(`${label} 沒有寄出：${message}`);
+    }
   }
-  try {
-    const result = await sendInvoiceIssuedEmail({
-      to,
-      applicantName: row.申請人,
-      invoiceNumber: row.發票號碼,
-      invoiceDate: row.發票日期,
-      buyerName: row.買受人名稱,
-      totalAmount: row.發票總金額,
-      projectId: row.專案ID,
-      projectName,
-      reviewer: row.審核人,
-    });
-    if (!result.ok) return `已開立，但通知信沒有寄出：${result.error || "寄信失敗"}`;
-    return `已開立，已寄信通知 ${to}`;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "寄信失敗";
-    console.error("notifyInvoiceApplicant", error);
-    return `已開立，但通知信沒有寄出：${message}`;
-  }
+  if (sent.length === 0) return `已開立，通知信未寄出。${missed.join("；")}`;
+  const ok = `已開立，已寄信通知 ${sent.join("、")}`;
+  return missed.length ? `${ok}。另外${missed.join("；")}` : ok;
 }

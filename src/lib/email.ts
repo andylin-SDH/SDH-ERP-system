@@ -270,7 +270,7 @@ export async function sendInvoiceIssuedEmail(params: {
         <tr>
           <td style="padding:32px;">
             <p style="margin:0 0 16px;color:#334155;font-size:16px;">${applicantName ? `${escapeHtml(applicantName)} 您好，` : "您好，"}</p>
-            <p style="margin:0 0 24px;color:#475569;font-size:15px;">您送出的發票申請已放行並開立完成。</p>
+            <p style="margin:0 0 24px;color:#475569;font-size:15px;">這個專案已完成發票開立。</p>
             <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;margin-bottom:24px;">
               <tr><td style="padding:20px;">
                 <table width="100%" cellpadding="0" cellspacing="0">

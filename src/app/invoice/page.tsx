@@ -271,7 +271,7 @@ export default function InvoiceIssuePage() {
           <div className="rounded-2xl border border-stone-200 bg-white px-6 py-8 text-center shadow-sm">
             <h1 className="text-xl font-bold">開立發票</h1>
             <p className="mt-3 text-sm text-stone-600">{invoiceEInvoiceLockedMessage()}</p>
-            <p className="mt-1 text-xs text-stone-400">錄音室預約的申請會先進入下面的待審核，{invoiceEInvoiceLaunchLabel()}（台北時間）起才能放行開立。開立完成會寄信通知申請人。</p>
+            <p className="mt-1 text-xs text-stone-400">錄音室預約的申請會先進入下面的待審核，{invoiceEInvoiceLaunchLabel()}（台北時間）起才能放行開立。開立完成會寄信通知專案上的專案負責人和主管。</p>
             <Link
               href="/dashboard"
               className="mt-6 inline-flex rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm font-semibold text-stone-700 hover:bg-stone-50"
@@ -299,7 +299,7 @@ export default function InvoiceIssuePage() {
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-4 sm:px-6">
           <div>
             <h1 className="text-xl font-bold">開立發票</h1>
-            <p className="mt-0.5 text-xs text-stone-500">B2B。送出後由董事長或會計核對，放行才會開立。開立完成會寄信通知申請人。</p>
+            <p className="mt-0.5 text-xs text-stone-500">B2B。送出後由董事長或會計核對，放行才會開立。開立完成會寄信通知專案上的專案負責人和主管。</p>
           </div>
           <Link
             href={
@@ -317,7 +317,7 @@ export default function InvoiceIssuePage() {
       <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
         {success ? (
           <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-            已送出審核。含稅 {success.totalAmount.toLocaleString("zh-TW")} 元。董事長或會計放行後才會開立，完成後會寄信到你的帳號信箱。
+            已送出審核。含稅 {success.totalAmount.toLocaleString("zh-TW")} 元。董事長或會計放行後才會開立，完成後會寄信給這個專案的專案負責人和主管。
           </div>
         ) : null}
         {error ? <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p> : null}
