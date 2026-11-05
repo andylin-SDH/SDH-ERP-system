@@ -431,31 +431,53 @@ function canEmailApplicant(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !email.toLowerCase().endsWith(".local");
 }
 
-/** 開立已完成才呼叫。寄給專案上的專案負責人與主管，同一人只寄一封。寄信失敗不影響已開立的發票。 */
+/** 開案的人。新專案寫在新增紀錄；沒有紀錄時，用執行管理員，再不然用舊欄主管或專案開發人。 */
+async function projectOpenerName(projectId: string, project: { 執行管理員?: string; 主管?: string; 專案開發人?: string } | null): Promise<string> {
+  try {
+    const { data } = await getSupabase()
+      .from("master_edit_log")
+      .select("更新者")
+      .eq("專案ID", projectId)
+      .eq("操作", "新增")
+      .order("created_at", { ascending: true })
+      .limit(1);
+    const fromLog = text((data?.[0] as { 更新者?: string } | undefined)?.更新者);
+    if (fromLog) return fromLog;
+  } catch (error) {
+    console.error("projectOpenerName", error);
+  }
+  return text(project?.執行管理員) || text(project?.主管) || text(project?.專案開發人);
+}
+
+/** 開立已完成才呼叫。寄給專案負責人、主管和開案的人，同一人只寄一封。寄信失敗不影響已開立的發票。 */
 export async function notifyInvoiceApplicant(row: InvoiceRequestRow): Promise<string> {
   if (!row.專案ID.trim()) return "已開立。這筆沒有對應專案，未寄通知。";
   const { data } = await getSupabase()
     .from("大總表")
-    .select("專案名稱,執行管理員,直屬主管")
+    .select("專案名稱,執行管理員,直屬主管,主管,專案開發人")
     .eq("專案ID", row.專案ID)
     .maybeSingle();
-  const project = data as { 專案名稱?: string; 執行管理員?: string; 直屬主管?: string } | null;
+  const project = data as { 專案名稱?: string; 執行管理員?: string; 直屬主管?: string; 主管?: string; 專案開發人?: string } | null;
   const projectName = text(project?.專案名稱);
-  const people = new Map<string, string[]>();
+  const people = new Map<string, { name: string; roles: string[] }>();
   const addPerson = (name: string, role: string) => {
-    const key = name.trim();
-    if (!key) return;
-    const roles = people.get(key) ?? [];
-    if (!roles.includes(role)) roles.push(role);
-    people.set(key, roles);
+    const display = name.trim();
+    if (!display) return;
+    const key = display.toLowerCase();
+    const current = people.get(key) ?? { name: display, roles: [] };
+    if (!current.roles.includes(role)) current.roles.push(role);
+    people.set(key, current);
   };
   addPerson(text(project?.執行管理員), "專案負責人");
-  addPerson(text(project?.直屬主管), "主管");
-  if (people.size === 0) return "已開立。這個專案沒有填專案負責人或主管，未寄通知。";
+  addPerson(text(project?.直屬主管) || text(project?.主管), "主管");
+  addPerson(await projectOpenerName(row.專案ID, project), "開案的人");
+  // 舊案人員欄全空時，至少寄給送審開立的人
+  if (people.size === 0) addPerson(text(row.申請人) || text(row.申請人Email), "申請開立的人");
+  if (people.size === 0) return "已開立。這個專案沒有填專案負責人、主管或開案的人，未寄通知。";
 
   const sent: string[] = [];
   const missed: string[] = [];
-  for (const [name, roles] of people) {
+  for (const { name, roles } of people.values()) {
     const label = `${roles.join("／")} ${name}`;
     try {
       const to = (await getEmailByNameOrEmail(name))?.trim() ?? "";

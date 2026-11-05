@@ -143,7 +143,11 @@ export function InvoiceReviewPanel({ canReview, reloadToken = 0 }: { canReview: 
           <button
             key={item}
             type="button"
-            onClick={() => setStatus(item)}
+            onClick={() => {
+              setStatus(item);
+              setNotice(null);
+              setError(null);
+            }}
             className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
               status === item ? "bg-amber-500 text-slate-900" : "text-stone-500 hover:text-stone-900"
             }`}
@@ -159,18 +163,26 @@ export function InvoiceReviewPanel({ canReview, reloadToken = 0 }: { canReview: 
         </p>
       ) : null}
       {issueLive ? (
-        <p className="mb-3 text-xs text-stone-500">開立完成後會寄信給專案上的專案負責人和主管。同一人只寄一封。</p>
+        <p className="mb-3 text-xs text-stone-500">開立完成後會寄信給專案上的專案負責人、主管和開案的人。同一人只寄一封。</p>
       ) : null}
       {notice ? (
-        <p
-          className={`mb-3 rounded-lg px-3 py-2 text-sm ${
+        <div
+          className={`mb-3 flex items-start gap-2 rounded-lg px-3 py-2 text-sm ${
             notice.includes("沒有寄出") || notice.includes("未寄")
               ? "bg-amber-50 text-amber-950"
               : "bg-emerald-50 text-emerald-900"
           }`}
         >
-          {notice}
-        </p>
+          <p className="min-w-0 flex-1">{notice}</p>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold opacity-70 hover:opacity-100"
+            aria-label="關閉通知"
+          >
+            關閉
+          </button>
+        </div>
       ) : null}
       {error ? <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
       {loading ? <p className="text-sm text-stone-500">載入申請…</p> : null}
