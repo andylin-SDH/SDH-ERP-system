@@ -1,7 +1,21 @@
+import { addDays } from "./logic";
 import type { ScheduleClaim, ScheduleConflict, ScheduleSlot, ScheduleWeekPayload } from "./types";
 
-export type DispatchSelection = { date: string; place: string; slots: string[]; person?: string };
+export type DispatchSelection = { date: string; place: string; slots: string[]; person?: string; endDate?: string };
 export type ClaimRange = { person: string; auto: boolean; slots: string[]; start: string; end: string };
+
+/** Inclusive date list from → to（自動對調顛倒的起迄）。 */
+export function datesInRange(from: string, to: string): string[] {
+  const start = from <= to ? from : to;
+  const end = from <= to ? to : from;
+  const out: string[] = [];
+  let cursor = start;
+  while (cursor <= end) {
+    out.push(cursor);
+    cursor = addDays(cursor, 1);
+  }
+  return out;
+}
 
 /** Keep gaps and automatic/manual sources separate, so deleting a range cannot delete another. */
 export function claimRanges(claims: ScheduleClaim[], slots: ScheduleSlot[]): ClaimRange[] {

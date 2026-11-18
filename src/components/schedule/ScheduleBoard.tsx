@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { FollowList } from "./FollowList";
 import { addDays, isDateStr, mondayOf } from "@/lib/schedule/logic";
-import { bookingOverlaps, claimRanges, conflictingClaims, conflictTargets, selectionSlots, type DispatchSelection } from "@/lib/schedule/dispatch";
+import { bookingOverlaps, claimRanges, conflictingClaims, conflictTargets, datesInRange, selectionSlots, type DispatchSelection } from "@/lib/schedule/dispatch";
 import type { ScheduleBooking, ScheduleConflict, ScheduleWeekPayload } from "@/lib/schedule/types";
 import styles from "./ScheduleBoard.module.css";
 
@@ -31,7 +31,7 @@ async function requestWeek(url: string, options?: RequestInit): Promise<Schedule
 export function ScheduleBoard({ canEdit }: { canEdit: boolean }) {
   const [date, setDate] = useState(todayInTaipei);
   const weekStart = mondayOf(date);
-  const [page, setPage] = useState<"dispatch" | "follow">("dispatch");
+  const [page, setPage] = useState<"dispatch" | "leave" | "follow">("dispatch");
   const [data, setData] = useState<ScheduleWeekPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -72,11 +72,17 @@ export function ScheduleBoard({ canEdit }: { canEdit: boolean }) {
     mutation.current = true;
     setSaving(true); setError(""); setNotice("");
     try {
+      const leavePlace = week.config.places.find((item) => item.kind === "leave")?.id;
+      const isLeave = target.place === leavePlace;
+      const days = isLeave ? datesInRange(target.date, target.endDate ?? target.date) : [target.date];
+      const items = days.flatMap((day) => target.slots.map((slot) => ({ date: day, place: target.place, slot })));
       const next = await requestWeek("/api/schedule", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ weekStart: week.weekStart, person, on, items: target.slots.map((slot) => ({ date: target.date, place: target.place, slot })) }),
+        body: JSON.stringify({ weekStart: week.weekStart, person, on, items }),
       });
-      setData(next); setNotice(`${person}的班次已${on ? "儲存" : "取消"}`);
+      const label = isLeave ? "請假" : "班次";
+      const span = isLeave && days.length > 1 ? `（${days.length} 天）` : "";
+      setData(next); setNotice(`${person}的${label}${span}已${on ? "儲存" : "取消"}`);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "儲存失敗，請重試"); }
     finally { mutation.current = false; setSaving(false); }
   }
@@ -102,7 +108,8 @@ export function ScheduleBoard({ canEdit }: { canEdit: boolean }) {
       <header className={styles.header}>
         <div><p className={styles.eyebrow}>DAILY OPERATIONS</p><h2>場地調度</h2><p className={styles.subtitle}>先看場地，再安排人。預約、值班與待處理事項，一起掌握。</p></div>
         <nav className={styles.tabs} aria-label="班表功能">
-          <button type="button" aria-pressed={page === "dispatch"} disabled={saving} onClick={() => setPage("dispatch")}>場地班表</button>
+          <button type="button" aria-pressed={page === "dispatch"} disabled={saving} onClick={() => { setPage("dispatch"); setSelection(null); }}>場地班表</button>
+          <button type="button" aria-pressed={page === "leave"} disabled={saving} onClick={() => { setPage("leave"); setSelection(null); }}>請假</button>
           <button type="button" aria-pressed={page === "follow"} disabled={saving} onClick={() => { setPage("follow"); setSelection(null); }}>跟錄名單</button>
         </nav>
       </header>
@@ -116,22 +123,29 @@ export function ScheduleBoard({ canEdit }: { canEdit: boolean }) {
           </div>
           <div className={styles.row}>
             <label className={styles.datePicker}>跳至日期<input type="date" aria-label="跳至日期" value={date} disabled={saving} onChange={(event) => navigate(event.target.value)} /></label>
-            <button type="button" disabled={locked} onClick={() => setRefresh((value) => value + 1)}>{loading ? "讀取中…" : "同步日曆"}</button>
+            {page === "dispatch" && <button type="button" disabled={locked} onClick={() => setRefresh((value) => value + 1)}>{loading ? "讀取中…" : "同步日曆"}</button>}
           </div>
         </div>
         <div className={styles.days} aria-label="選擇日期">
           {Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)).map((day) => {
-            const issueCount = week?.conflicts.filter((issue) => issue.cells.some((cell) => cell.date === day)).length ?? 0;
+            const leavePlaceId = week?.config.places.find((place) => place.kind === "leave")?.id;
+            const issueCount = page === "dispatch"
+              ? week?.conflicts.filter((issue) => issue.cells.some((cell) => cell.date === day)).length ?? 0
+              : leavePlaceId
+                ? new Set(week?.claims.filter((claim) => claim.date === day && claim.place === leavePlaceId).map((claim) => claim.person)).size
+                : 0;
             return <button type="button" key={day} aria-pressed={day === date} disabled={saving} onClick={() => navigate(day)}>
               <span>{dateLabel(day)}</span><small>{week?.dayInfo[day]?.holiday || (day === todayInTaipei() ? "今天" : week?.dayInfo[day]?.weekend ? "週末" : "平日")}</small>
-              {issueCount > 0 && <span className={styles.dayCount}>{issueCount} 件待處理</span>}
+              {issueCount > 0 && <span className={styles.dayCount}>{page === "dispatch" ? `${issueCount} 件待處理` : `${issueCount} 人請假`}</span>}
             </button>;
           })}
         </div>
         {error && <div className={styles.error} role="alert"><span>{error}</span><button type="button" disabled={locked} onClick={() => setRefresh((value) => value + 1)}>重新讀取</button></div>}
-        <p className={styles.notice} role="status">{saving ? "正在儲存班次…" : notice}</p>
-        {week?.warnings.map((warning) => <p className={styles.warning} key={warning}>{warning}</p>)}
-        {!week ? <div className={styles.empty}>{loading ? "正在載入場地預約與人員班表…" : "尚未取得班表，請重新讀取。"}</div> : <>
+        <p className={styles.notice} role="status">{saving ? "正在儲存…" : notice}</p>
+        {page === "dispatch" && week?.warnings.map((warning) => <p className={styles.warning} key={warning}>{warning}</p>)}
+        {!week ? <div className={styles.empty}>{loading ? "正在載入場地預約與人員班表…" : "尚未取得班表，請重新讀取。"}</div> : page === "leave" ? (
+          <LeavePage week={week} date={date} disabled={locked} canSchedule={canSchedule} selection={selection} editorRef={editor} onPickDay={navigate} onSelect={setSelection} onClose={() => setSelection(null)} onSave={mutate} />
+        ) : <>
           {!week.me.canSeeAll && <p className={styles.scope}>目前依權限只顯示{week.me.person ? `${week.me.person}自己的排班與相關提醒` : "錄音預約"}；空白格不代表其他同仁沒有排班。</p>}
           <div className={styles.layout}>
             <div className={styles.main}>
@@ -173,7 +187,6 @@ export function ScheduleBoard({ canEdit }: { canEdit: boolean }) {
                 </div>
                 <footer className={styles.matrixFoot}><span>預約來自 Google 日曆 · 值班來自 ERP</span><span>↻ 自動班次依會議／跟錄規則帶入</span></footer>
               </div>
-              <LeavePanel week={week} date={date} disabled={locked} canSchedule={canSchedule} onSelect={setSelection} />
               <details className={styles.weekSummary}><summary>本週進辦公室與錄音時數</summary><div className={styles.stats}>{week.stats.map((stat) => <div key={stat.name}><strong>{stat.name}</strong><p>辦公室 {stat.officeDays}{stat.need !== null ? ` / ${stat.need}` : ""} 天</p><small>錄音 {stat.studioHours} 小時{stat.adjusted ? " · 已調整應到天數" : ""}</small></div>)}</div></details>
             </div>
             <aside className={styles.sidebar} aria-label="班次調整與待處理事項">
@@ -202,41 +215,194 @@ function Issue({ issue, week, date, disabled, onSelect }: { issue: ScheduleConfl
     return slots.length > 0 && <button type="button" disabled={disabled} key={`${target.place}-${target.slots[0]}`} onClick={() => onSelect(target)}>{week.config.places.find((place) => place.id === target.place)?.short} {slots[0].start}–{slots[slots.length - 1].end} →</button>;
   })}</div></div>;
 }
-function LeavePanel({ week, date, disabled, canSchedule, onSelect }: { week: ScheduleWeekPayload; date: string; disabled: boolean; canSchedule: boolean; onSelect: (target: DispatchSelection) => void }) {
+function leaveSlotsFor(place: ScheduleWeekPayload["config"]["places"][number], week: ScheduleWeekPayload) {
+  return week.config.slots.filter((slot) => slot.period !== "eve" && place.slots.includes(slot.id)).map((slot) => slot.id);
+}
+
+function LeavePage({
+  week, date, disabled, canSchedule, selection, editorRef, onPickDay, onSelect, onClose, onSave,
+}: {
+  week: ScheduleWeekPayload;
+  date: string;
+  disabled: boolean;
+  canSchedule: boolean;
+  selection: DispatchSelection | null;
+  editorRef: RefObject<HTMLDivElement | null>;
+  onPickDay: (day: string) => void;
+  onSelect: (target: DispatchSelection) => void;
+  onClose: () => void;
+  onSave: (person: string, selection: DispatchSelection, on: boolean) => Promise<void>;
+}) {
   const place = week.config.places.find((item) => item.kind === "leave");
-  if (!place) return null;
-  const ranges = claimRanges(week.claims.filter((claim) => claim.date === date && claim.place === place.id), week.config.slots);
-  return <div className={styles.leave}><div className={styles.row}><h3>今日請假</h3><span className={styles.muted}>{week.me.canSeeAll ? "全員" : "僅顯示本人"}</span></div><div className={styles.row}>{ranges.map((range) => <button type="button" disabled={disabled} key={`${range.person}-${range.start}`} onClick={() => onSelect({ date, place: place.id, slots: range.slots, person: range.person })}>{range.person} · {range.start}–{range.end}</button>)}{!ranges.length && <span className={styles.muted}>沒有請假紀錄</span>}{canSchedule && <button type="button" disabled={disabled} onClick={() => onSelect({ date, place: place.id, slots: week.config.slots.filter((slot) => slot.period !== "eve" && place.slots.includes(slot.id)).map((slot) => slot.id) })}>＋ 登記請假</button>}</div></div>;
+  if (!place) return <div className={styles.empty}>尚未設定請假場地。</div>;
+  const days = Array.from({ length: 7 }, (_, index) => addDays(week.weekStart, index));
+  const dayClaims = week.claims.filter((claim) => claim.date === date && claim.place === place.id);
+  const ranges = claimRanges(dayClaims, week.config.slots);
+  const weekCount = new Set(week.claims.filter((claim) => claim.place === place.id).map((claim) => `${claim.person}|${claim.date}`)).size;
+  return (
+    <div className={styles.layout}>
+      <div className={styles.main}>
+        {!week.me.canSeeAll && <p className={styles.scope}>目前依權限只顯示{week.me.person ? `${week.me.person}自己的請假` : "可查看範圍"}。</p>}
+        <div className={styles.matrix}>
+          <div className={styles.matrixHeader}>
+            <h3>{dateLabel(date)} · 請假</h3>
+            <span className={styles.muted}>{week.me.canSeeAll ? "全員" : "僅顯示本人"} · 本週 {weekCount} 筆日次</span>
+          </div>
+          <div className={styles.leaveBody}>
+            <div className={styles.leaveList}>
+              {ranges.map((range) => (
+                <button
+                  type="button"
+                  className={styles.leaveCard}
+                  disabled={disabled}
+                  key={`${range.person}-${range.start}`}
+                  onClick={() => onSelect({ date, place: place.id, slots: range.slots, person: range.person })}
+                >
+                  <strong>{range.person}</strong>
+                  <span>{range.start}–{range.end}</span>
+                </button>
+              ))}
+              {!ranges.length && <p className={styles.muted}>這天沒有請假紀錄</p>}
+            </div>
+            {canSchedule && (
+              <button
+                type="button"
+                className={styles.add}
+                disabled={disabled}
+                onClick={() => onSelect({ date, place: place.id, slots: leaveSlotsFor(place, week), endDate: date })}
+              >
+                ＋ 登記請假
+              </button>
+            )}
+          </div>
+          <footer className={styles.matrixFoot}>
+            <span>請假會影響跟錄自動排班與小辦公室值班檢查</span>
+            <span>可連請多天；晚間時段不開放請假</span>
+          </footer>
+        </div>
+        <div className={styles.leaveWeek}>
+          <div className={styles.matrixHeader}><h3>本週請假一覽</h3><span className={styles.muted}>{dateLabel(week.weekStart)} — {dateLabel(addDays(week.weekStart, 6))}</span></div>
+          <div className={styles.leaveWeekGrid}>
+            {days.map((day) => {
+              const dayRanges = claimRanges(week.claims.filter((claim) => claim.date === day && claim.place === place.id), week.config.slots);
+              return (
+                <div key={day} className={day === date ? styles.leaveDayActive : styles.leaveDay}>
+                  <button type="button" className={styles.leaveDayHead} disabled={disabled} onClick={() => onPickDay(day)}>
+                    <strong>{dateLabel(day)}</strong>
+                    <small>{dayRanges.length ? `${dayRanges.length} 段` : "無"}</small>
+                  </button>
+                  <div className={styles.leaveDayBody}>
+                    {dayRanges.map((range) => (
+                      <button
+                        type="button"
+                        key={`${day}-${range.person}-${range.start}`}
+                        disabled={disabled}
+                        onClick={() => { onPickDay(day); onSelect({ date: day, place: place.id, slots: range.slots, person: range.person }); }}
+                      >
+                        {range.person}<span>{range.start}–{range.end}</span>
+                      </button>
+                    ))}
+                    {!dayRanges.length && <span className={styles.muted}>—</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+      <aside className={styles.sidebar} aria-label="請假登記">
+        {selection && selection.place === place.id ? (
+          <div ref={editorRef} tabIndex={-1} className={styles.editorFocus}>
+            <ShiftEditor
+              key={`${selection.date}-${selection.place}-${selection.slots.join(",")}-${selection.person ?? ""}`}
+              week={week}
+              selection={selection}
+              canEdit={canSchedule}
+              saving={disabled}
+              onClose={onClose}
+              onSave={onSave}
+            />
+          </div>
+        ) : (
+          <div className={styles.panel}>
+            <p className={styles.eyebrow}>LEAVE DESK</p>
+            <h3>登記請假</h3>
+            <p className={styles.muted}>可選連續起迄日期一次登記多天；或點已有紀錄調整／取消。</p>
+            {canSchedule && (
+              <button
+                type="button"
+                className={styles.fullButton}
+                disabled={disabled}
+                onClick={() => onSelect({ date, place: place.id, slots: leaveSlotsFor(place, week), endDate: date })}
+              >
+                ＋ 登記請假（可連請多天）
+              </button>
+            )}
+          </div>
+        )}
+      </aside>
+    </div>
+  );
 }
 function ShiftEditor({ week, selection, canEdit, saving, onClose, onSave }: {
   week: ScheduleWeekPayload; selection: DispatchSelection; canEdit: boolean; saving: boolean;
   onClose: () => void; onSave: (person: string, selection: DispatchSelection, on: boolean) => Promise<void>;
 }) {
   const place = week.config.places.find((item) => item.id === selection.place)!;
+  const isLeave = place.kind === "leave";
+  const weekDays = Array.from({ length: 7 }, (_, index) => addDays(week.weekStart, index));
   const initialSlots = selectionSlots(week, selection);
-  const availableSlots = week.config.slots.filter((slot) => place.slots.includes(slot.id));
+  const availableSlots = week.config.slots.filter((slot) => place.slots.includes(slot.id) && (!isLeave || slot.period !== "eve"));
   const [person, setPerson] = useState((week.me.canEditAnyone ? selection.person : null) ?? week.me.person ?? (week.me.canEditAnyone ? week.config.people[0]?.name ?? "" : ""));
+  const [fromDate, setFromDate] = useState(selection.date);
+  const [toDate, setToDate] = useState(selection.endDate ?? selection.date);
   const [start, setStart] = useState(initialSlots[0]?.start ?? "");
   const [end, setEnd] = useState(initialSlots.at(-1)?.end ?? "");
   const chosenSlots = availableSlots.filter((slot) => slot.start >= start && slot.end <= end);
-  const target = { ...selection, slots: chosenSlots.map((slot) => slot.id) };
-  const overlaps = conflictingClaims(week, target, person);
-  const claims = week.claims.filter((claim) => claim.date === target.date && claim.place === target.place && target.slots.includes(claim.slot));
+  const days = isLeave ? datesInRange(fromDate, toDate).filter((day) => weekDays.includes(day)) : [selection.date];
+  const target: DispatchSelection = {
+    ...selection,
+    date: days[0] ?? selection.date,
+    endDate: isLeave ? (days.at(-1) ?? selection.date) : undefined,
+    slots: chosenSlots.map((slot) => slot.id),
+  };
+  const overlaps = days.flatMap((day) => conflictingClaims(week, { ...target, date: day }, person));
+  const claims = week.claims.filter((claim) => days.includes(claim.date) && claim.place === target.place && target.slots.includes(claim.slot));
   const ownManual = claims.filter((claim) => claim.person === person && !claim.auto);
-  const allAssigned = target.slots.length > 0 && target.slots.every((slot) => claims.some((claim) => claim.person === person && claim.slot === slot));
+  const allAssigned = target.slots.length > 0 && days.length > 0 && days.every((day) =>
+    target.slots.every((slot) => claims.some((claim) => claim.person === person && claim.date === day && claim.slot === slot))
+  );
   const editable = canEdit && !!person && (week.me.canEditAnyone || person === week.me.person);
-  const ranges = claimRanges(claims, chosenSlots);
+  const ranges = claimRanges(claims.filter((claim) => claim.date === (days[0] ?? selection.date)), chosenSlots);
   const people = week.me.canEditAnyone ? week.config.people : week.config.people.filter((item) => item.name === week.me.person);
-  return <div className={styles.panel}><div className={styles.queueHeading}><h3>{place.kind === "leave" ? "登記請假" : "安排班次"}</h3><button type="button" aria-label="關閉班次編輯" disabled={saving} onClick={onClose}>×</button></div><p className={styles.muted}>{dateLabel(selection.date)} · {place.name}</p>
-    <form onSubmit={(event) => { event.preventDefault(); if (editable && chosenSlots.length && !saving) void onSave(person, target, true); }}>
+  const spanLabel = isLeave && days.length > 1
+    ? `${dateLabel(days[0])} — ${dateLabel(days[days.length - 1])} · ${days.length} 天`
+    : `${dateLabel(days[0] ?? selection.date)} · ${place.name}`;
+  return <div className={styles.panel}><div className={styles.queueHeading}><h3>{isLeave ? "登記請假" : "安排班次"}</h3><button type="button" aria-label="關閉班次編輯" disabled={saving} onClick={onClose}>×</button></div><p className={styles.muted}>{spanLabel}</p>
+    <form onSubmit={(event) => { event.preventDefault(); if (editable && chosenSlots.length && days.length && !saving) void onSave(person, target, true); }}>
       <label className={styles.field}>人員<select value={person} disabled={!canEdit || saving} onChange={(event) => setPerson(event.target.value)}>{!person && <option value="">沒有可編輯的人員</option>}{people.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
-      <div className={styles.timeFields}><label className={styles.field}>開始<select value={start} disabled={saving} onChange={(event) => { const next = event.target.value; setStart(next); if (end <= next) setEnd(availableSlots.find((slot) => slot.start === next)!.end); }}>{availableSlots.map((slot) => <option key={slot.id} value={slot.start}>{slot.start}</option>)}</select></label>
-        <label className={styles.field}>結束<select value={end} disabled={saving} onChange={(event) => setEnd(event.target.value)}>{availableSlots.filter((slot) => slot.start >= start).map((slot) => <option key={slot.id} value={slot.end}>{slot.end}</option>)}</select></label></div>
+      {isLeave && <div className={styles.timeFields}>
+        <label className={styles.field}>開始日期<select value={fromDate} disabled={saving} onChange={(event) => { const next = event.target.value; setFromDate(next); if (toDate < next) setToDate(next); }}>{weekDays.map((day) => <option key={day} value={day}>{dateLabel(day)}</option>)}</select></label>
+        <label className={styles.field}>結束日期<select value={toDate} disabled={saving} onChange={(event) => { const next = event.target.value; setToDate(next); if (fromDate > next) setFromDate(next); }}>{weekDays.map((day) => <option key={day} value={day}>{dateLabel(day)}</option>)}</select></label>
+      </div>}
+      <div className={styles.timeFields}><label className={styles.field}>{isLeave ? "每日開始" : "開始"}<select value={start} disabled={saving} onChange={(event) => { const next = event.target.value; setStart(next); if (end <= next) setEnd(availableSlots.find((slot) => slot.start === next)!.end); }}>{availableSlots.map((slot) => <option key={slot.id} value={slot.start}>{slot.start}</option>)}</select></label>
+        <label className={styles.field}>{isLeave ? "每日結束" : "結束"}<select value={end} disabled={saving} onChange={(event) => setEnd(event.target.value)}>{availableSlots.filter((slot) => slot.start >= start).map((slot) => <option key={slot.id} value={slot.end}>{slot.end}</option>)}</select></label></div>
+      {isLeave && days.length > 1 && <p className={styles.muted}>將以相同每日時段，一次登記 {days.length} 天（僅限本週）。</p>}
       {overlaps.length > 0 && <p className={styles.editorWarning}>此人同時段已有{[...new Set(overlaps.map((claim) => week.config.places.find((item) => item.id === claim.place)?.name))].join("、")}的安排。新增不會取消原班次，請先確認。</p>}
-      {place.kind !== "leave" && !week.config.offStaff.includes(person) && (!week.dayInfo[selection.date]?.workday || chosenSlots.some((slot) => slot.period === "eve")) && <p className={styles.editorWarning}>假日與晚間原則上由{week.config.offStaff.join("、")}排班。</p>}
-      {editable ? <><button type="submit" className={styles.primary} disabled={saving || !chosenSlots.length || allAssigned}>{saving ? "儲存中…" : allAssigned ? "此人已排入這段時間" : place.kind === "leave" ? "確認登記請假" : "確認安排"}</button>
-        {ownManual.length > 0 && <button type="button" className={styles.remove} disabled={saving} onClick={() => void onSave(person, { ...target, slots: [...new Set(ownManual.map((claim) => claim.slot))] }, false)}>取消{person}這段{place.kind === "leave" ? "請假" : "手動排班"}</button>}</> : <p className={styles.muted}>目前帳號僅可查看此時段。</p>}
+      {!isLeave && !week.config.offStaff.includes(person) && (!week.dayInfo[selection.date]?.workday || chosenSlots.some((slot) => slot.period === "eve")) && <p className={styles.editorWarning}>假日與晚間原則上由{week.config.offStaff.join("、")}排班。</p>}
+      {editable ? <><button type="submit" className={styles.primary} disabled={saving || !chosenSlots.length || !days.length || allAssigned}>{saving ? "儲存中…" : allAssigned ? (isLeave ? "這段日期與時段都已請假" : "此人已排入這段時間") : isLeave ? (days.length > 1 ? `確認連請 ${days.length} 天` : "確認登記請假") : "確認安排"}</button>
+        {ownManual.length > 0 && <button type="button" className={styles.remove} disabled={saving} onClick={() => void onSave(person, { ...target, slots: [...new Set(ownManual.map((claim) => claim.slot))] }, false)}>取消{person}這段{isLeave ? (days.length > 1 ? `請假（${days.length} 天）` : "請假") : "手動排班"}</button>}</> : <p className={styles.muted}>目前帳號僅可查看此時段。</p>}
     </form>
-    <div className={styles.currentClaims}><h4>這段時間的{place.kind === "leave" ? "請假" : "人員"}</h4>{ranges.length === 0 ? <p className={styles.muted}>{week.me.canSeeAll ? "尚未安排" : "沒有你的班次"}</p> : ranges.map((range) => <div key={`${range.person}-${range.start}-${range.auto}`}><strong>{range.person}</strong><span>{range.start}–{range.end}</span><small>{range.auto ? "↻ 自動帶入，請調整來源或登記請假" : "手動排班"}</small></div>)}</div>
+    <div className={styles.currentClaims}><h4>{isLeave ? (days.length > 1 ? "範圍內既有請假" : "這段時間的請假") : "這段時間的人員"}</h4>
+      {isLeave && days.length > 1 ? (
+        days.some((day) => claims.some((claim) => claim.date === day))
+          ? days.map((day) => {
+              const dayRanges = claimRanges(claims.filter((claim) => claim.date === day), chosenSlots);
+              if (!dayRanges.length) return null;
+              return <div key={day} className={styles.leaveRangeDay}><strong>{dateLabel(day)}</strong>{dayRanges.map((range) => <span key={`${day}-${range.person}-${range.start}`}>{range.person} {range.start}–{range.end}</span>)}</div>;
+            })
+          : <p className={styles.muted}>{week.me.canSeeAll ? "尚未安排" : "沒有你的請假"}</p>
+      ) : ranges.length === 0 ? <p className={styles.muted}>{week.me.canSeeAll ? "尚未安排" : "沒有你的班次"}</p> : ranges.map((range) => <div key={`${range.person}-${range.start}-${range.auto}`}><strong>{range.person}</strong><span>{range.start}–{range.end}</span><small>{range.auto ? "↻ 自動帶入，請調整來源或登記請假" : "手動排班"}</small></div>)}
+    </div>
   </div>;
 }

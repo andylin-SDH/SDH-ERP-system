@@ -180,7 +180,7 @@ export function FollowList({ people, canMutate }: { people: string[]; canMutate:
         <p className="text-xs font-semibold text-stone-800">目前的規則</p>
         <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-stone-600">
           <li>跟錄名單用來辨識日曆預約，五吉郎依規則自動帶入；請假時不會自動排入。</li>
-          <li>小辦公室需要有人值班，跟錄或請假造成的缺班會列在場地班表的待處理事項。</li>
+          <li>請假請到「請假」分頁登記；跟錄或請假造成的缺班會列在場地班表的待處理事項。</li>
           <li>週一 10:00–11:00 全員會議自動帶入；實際跟錄與請假依規則處理。</li>
           <li>假日與平日晚上由林安迪、五吉郎排班；撞班、缺人與應到天數由系統統一檢查。</li>
           <li>場地班表分開顯示日曆預約與值班人員；「自動」班次不能直接當作手動班次刪除。</li>

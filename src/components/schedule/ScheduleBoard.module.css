@@ -114,8 +114,37 @@
 .currentClaims small { flex-basis: 100%; color: var(--muted); font-size: 11px; }
 .currentClaims > p { margin-top: 8px; }
 .fullButton { width: 100%; margin-top: 14px; }
-.leave { margin-top: 16px; padding: 15px 18px; }
-.leave button { font-size: 12px; }
+.leaveBody { padding: 16px 18px 18px; display: grid; gap: 14px; }
+.leaveList { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 42px; }
+.leaveCard {
+  display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 10px 12px; background: #fff5e4; border-color: #f0d7a4; font-size: 13px;
+}
+.leaveCard strong { font-weight: 650; }
+.leaveCard span { font-size: 11px; color: #845510; }
+.leaveWeek { margin-top: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.leaveWeekGrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--line); }
+.leaveDay, .leaveDayActive { min-width: 0; border-right: 1px solid var(--line); padding: 0 0 12px; }
+.leaveDay:last-child, .leaveDayActive:last-child { border-right: 0; }
+.leaveDayActive { background: #f3f8f4; }
+.leaveDayHead {
+  width: 100%; border: 0; border-radius: 0; background: transparent; padding: 12px 10px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 0;
+}
+.leaveDayHead small { color: var(--muted); font-size: 11px; }
+.leaveDayBody { display: grid; gap: 6px; padding: 0 8px; }
+.leaveDayBody button {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  font-size: 12px; padding: 8px; background: #fff5e4; border-color: #f0d7a4; min-height: 0;
+}
+.leaveDayBody button span { font-size: 11px; color: #845510; }
+.leaveRangeDay { display: grid; gap: 4px; margin-top: 10px; font-size: 12px; }
+.leaveRangeDay strong { font-size: 12px; }
+.leaveRangeDay span { color: var(--muted); }
+@media (max-width: 900px) {
+  .leaveWeekGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .leaveDay, .leaveDayActive { border-right: 0; border-bottom: 1px solid var(--line); }
+}
 .weekSummary { padding: 16px 18px; margin-top: 16px; font-size: 13px; }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin-top: 18px; }
 .stats p { margin-top: 5px; }
