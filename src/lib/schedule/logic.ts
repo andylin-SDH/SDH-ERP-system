@@ -907,3 +907,24 @@ export function planClaimChange(
     remove: kept.filter((entry) => entry.gone).map(({ gone: _gone, ...claim }) => claim),
   };
 }
+
+/** Translate half-hour edits back to stored rows, retaining untouched halves of legacy hours. */
+export function planStoredClaimChange(
+  weekStart: string, person: string, items: ClaimChangeItem[], on: boolean,
+  stored: ScheduleClaim[], cfg: ScheduleConfig
+): { add: ScheduleClaim[]; remove: ScheduleClaim[]; error?: string } {
+  const current = expandStoredClaims(stored, cfg);
+  const plan = planClaimChange(weekStart, person, items, on, items.length === 1, current, cfg);
+  if (plan.error) return plan;
+  const key = (claim: ScheduleClaim) => `${claim.person}|${claim.date}|${claim.slot}|${claim.place}`;
+  const touched = new Set([...items.map((item) => key({ ...item, person })), ...plan.remove.map(key)]);
+  const legacy = stored.filter((claim) => /^h\d{2}$/.test(claim.slot) &&
+    expandStoredClaims([claim], cfg).some((piece) => touched.has(key(piece))));
+  const removed = new Set(plan.remove.map(key));
+  const storedKeys = new Set(stored.map(key));
+  const add = [...plan.add, ...expandStoredClaims(legacy, cfg).filter((claim) => !removed.has(key(claim)))];
+  return {
+    add: [...new Map(add.filter((claim) => !storedKeys.has(key(claim))).map((claim) => [key(claim), claim])).values()],
+    remove: [...plan.remove.filter((claim) => storedKeys.has(key(claim))), ...legacy],
+  };
+}

@@ -1,892 +1,242 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import type { ScheduleWeekPayload } from "@/lib/schedule/types";
-import { FollowList } from "@/components/schedule/FollowList";
+import { useEffect, useRef, useState } from "react";
+import { FollowList } from "./FollowList";
+import { addDays, isDateStr, mondayOf } from "@/lib/schedule/logic";
+import { bookingOverlaps, claimRanges, conflictingClaims, conflictTargets, selectionSlots, type DispatchSelection } from "@/lib/schedule/dispatch";
+import type { ScheduleBooking, ScheduleConflict, ScheduleWeekPayload } from "@/lib/schedule/types";
+import styles from "./ScheduleBoard.module.css";
 
-const PLACE_TONE: Record<string, string> = {
-  bigOffice: "border-sky-200 bg-sky-50",
-  smallOffice: "border-emerald-200 bg-emerald-50",
-  bigStudio: "border-amber-200 bg-amber-50",
-  smallStudio: "border-violet-200 bg-violet-50",
-  leave: "border-stone-200 bg-stone-100",
-};
-
-const PERIOD_FACE: Record<string, string> = { am: "早", pm: "午", eve: "晚" };
-
-const BLOCK_TONE: Record<string, string> = {
-  bigOffice: "border-sky-300 bg-sky-100 text-sky-950",
-  smallOffice: "border-emerald-300 bg-emerald-100 text-emerald-950",
-  bigStudio: "border-amber-300 bg-amber-100 text-amber-950",
-  smallStudio: "border-violet-300 bg-violet-100 text-violet-950",
-  leave: "border-stone-300 bg-stone-200 text-stone-700",
-};
-
-function weekdayParts(date: string): { name: string; day: string } {
-  const names = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
-  const [y, m, d] = date.split("-").map(Number);
-  const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-  return { name: names[wd], day: `${m}/${d}` };
-}
-
-function weekdayLabel(date: string): string {
-  const { name, day } = weekdayParts(date);
-  return `${day} ${name}`;
-}
-
-function addDays(date: string, days: number): string {
-  const [y, m, d] = date.split("-").map(Number);
-  const next = new Date(Date.UTC(y, m - 1, d + days));
-  const mm = String(next.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(next.getUTCDate()).padStart(2, "0");
-  return `${next.getUTCFullYear()}-${mm}-${dd}`;
-}
-
-function taipeiToday(): string {
+function todayInTaipei() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei" }).format(new Date());
 }
-
-function weekCaption(weekStart: string): string {
-  const [ay, am, ad] = taipeiToday().split("-").map(Number);
-  const [by, bm, bd] = weekStart.split("-").map(Number);
-  const delta = Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000 / 7);
-  if (delta === 0) return "這一週";
-  if (delta === 1) return "下一週";
-  if (delta === -1) return "上週";
-  if (delta > 1) return `${delta} 週後`;
-  return `${-delta} 週前`;
+function dateLabel(date: string) {
+  return new Intl.DateTimeFormat("zh-TW", { timeZone: "Asia/Taipei", month: "numeric", day: "numeric", weekday: "short" })
+    .format(new Date(`${date}T12:00:00+08:00`));
+}
+function bookingTime(booking: ScheduleBooking) {
+  const format = new Intl.DateTimeFormat("zh-TW", { timeZone: "Asia/Taipei", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei" });
+  const start = new Date(booking.start), end = new Date(booking.end);
+  return day.format(start) === day.format(end) ? `${format.format(start)}–${format.format(end)}`
+    : `${dateLabel(day.format(start))} ${format.format(start)}–${dateLabel(day.format(end))} ${format.format(end)}`;
+}
+async function requestWeek(url: string, options?: RequestInit): Promise<ScheduleWeekPayload & { presetAdded?: number }> {
+  const response = await fetch(url, options);
+  const body = await response.json().catch(() => null);
+  if (!response.ok || !body?.ok || !body.data) throw new Error(body?.error || `班表連線失敗（${response.status}），請稍後重試`);
+  return body.data;
 }
 
-async function fetchWeek(weekStart: string, force: boolean): Promise<ScheduleWeekPayload | null> {
-  const params = new URLSearchParams({ week: weekStart });
-  if (force) params.set("force", "1");
-  const response = await fetch(`/api/schedule?${params.toString()}`);
-  const body = (await response.json()) as { ok: boolean; data?: ScheduleWeekPayload; error?: string };
-  return body.ok && body.data ? body.data : null;
-}
-
-function conflictKeysOf(week: ScheduleWeekPayload): Map<string, "error" | "warn"> {
-  const map = new Map<string, "error" | "warn">();
-  for (const conflict of week.conflicts) {
-    for (const cell of conflict.cells) {
-      const key = `${cell.date}|${cell.slot}|${cell.place}`;
-      if (map.get(key) !== "error") map.set(key, conflict.severity);
-    }
-  }
-  return map;
-}
-
-export function ScheduleBoard({
-  canEdit,
-}: {
-  canEdit: boolean;
-}) {
-  const [page, setPage] = useState<"near" | "future" | "follow">("near");
-  const [nearWeeks, setNearWeeks] = useState<ScheduleWeekPayload[] | null>(null);
-  const [futureWeeks, setFutureWeeks] = useState<ScheduleWeekPayload[] | null>(null);
-  const [futureAnchor, setFutureAnchor] = useState("");
-  const [loadingNear, setLoadingNear] = useState(true);
+export function ScheduleBoard({ canEdit }: { canEdit: boolean }) {
+  const [date, setDate] = useState(todayInTaipei);
+  const weekStart = mondayOf(date);
+  const [page, setPage] = useState<"dispatch" | "follow">("dispatch");
+  const [data, setData] = useState<ScheduleWeekPayload | null>(null);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [editingPerson, setEditingPerson] = useState<string>("");
-  const [gridWeek, setGridWeek] = useState(0);
-
-  const loadPair = useCallback(async (weekStart: string, force: boolean) => {
-    const loaded = await Promise.all([weekStart, addDays(weekStart, 7)].map((date) => fetchWeek(date, force)));
-    if (loaded.some((item) => !item)) return null;
-    return loaded as ScheduleWeekPayload[];
-  }, []);
-
-  const loadNear = useCallback(async (force = false) => {
-    setLoadingNear(true);
-    setError(null);
-    const next = await loadPair(taipeiToday(), force);
-    setLoadingNear(false);
-    if (!next) {
-      setError("讀取班表失敗");
-      return;
-    }
-    setNearWeeks(next);
-    setEditingPerson((prev) => {
-      const first = next[0];
-      if (first.me.canEditAnyone && prev && first.config.people.some((person) => person.name === prev)) return prev;
-      return first.me.person ?? "";
-    });
-  }, [loadPair]);
-
-  const loadFuture = useCallback(async (weekStart: string, force = false) => {
-    setError(null);
-    const next = await loadPair(weekStart, force);
-    if (!next) {
-      setError("讀取班表失敗");
-      return;
-    }
-    setFutureWeeks(next);
-  }, [loadPair]);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [refresh, setRefresh] = useState(0);
+  const [selection, setSelection] = useState<DispatchSelection | null>(null);
+  const mutation = useRef(false);
+  const sequence = useRef(0);
+  const editor = useRef<HTMLDivElement>(null);
+  const week = data?.weekStart === weekStart ? data : null;
 
   useEffect(() => {
-    void loadNear();
-  }, [loadNear]);
+    const controller = new AbortController();
+    const id = ++sequence.current;
+    setLoading(true);
+    setError("");
+    requestWeek(`/api/schedule?week=${weekStart}${refresh ? "&force=1" : ""}`, { signal: controller.signal })
+      .then((next) => { if (sequence.current === id) setData(next); })
+      .catch((reason: unknown) => { if (!controller.signal.aborted && sequence.current === id) setError(reason instanceof Error ? reason.message : "讀取班表失敗"); })
+      .finally(() => { if (!controller.signal.aborted && sequence.current === id) setLoading(false); });
+    return () => controller.abort();
+  }, [weekStart, refresh, page]);
 
-  const futureStart = futureAnchor || addDays(taipeiToday(), 14);
   useEffect(() => {
-    if (page !== "future") return;
-    void loadFuture(futureStart);
-  }, [futureStart, loadFuture, page]);
-
-  function replaceWeek(next: ScheduleWeekPayload) {
-    const apply = (prev: ScheduleWeekPayload[] | null) =>
-      prev?.some((item) => item.weekStart === next.weekStart) ? prev.map((item) => (item.weekStart === next.weekStart ? next : item)) : prev;
-    setNearWeeks(apply);
-    setFutureWeeks(apply);
-  }
-
-  async function writeClaims(weekStart: string, person: string, items: { date: string; slot: string; place: string }[], on: boolean) {
-    if (!canEdit) return;
-    setSaving(true);
-    setNotice(null);
-    setError(null);
-    const response = await fetch("/api/schedule", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ weekStart, person, items, on }),
-    });
-    const body = (await response.json()) as { ok: boolean; data?: ScheduleWeekPayload; error?: string };
-    setSaving(false);
-    if (!body.ok || !body.data) {
-      setError(body.error || "寫入失敗");
-      return;
+    if (selection) {
+      editor.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      editor.current?.focus({ preventScroll: true });
     }
-    replaceWeek(body.data);
+  }, [selection]);
+
+  function navigate(next: string) {
+    if (mutation.current || !isDateStr(next)) return;
+    setDate(next); setSelection(null); setNotice("");
+  }
+  async function mutate(person: string, target: DispatchSelection, on: boolean) {
+    if (!week || !canEdit || mutation.current) return;
+    mutation.current = true;
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const next = await requestWeek("/api/schedule", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ weekStart: week.weekStart, person, on, items: target.slots.map((slot) => ({ date: target.date, place: target.place, slot })) }),
+      });
+      setData(next); setNotice(`${person}的班次已${on ? "儲存" : "取消"}`);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "儲存失敗，請重試"); }
+    finally { mutation.current = false; setSaving(false); }
+  }
+  async function preset() {
+    if (!week || !canEdit || mutation.current) return;
+    mutation.current = true;
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const next = await requestWeek("/api/schedule/preset", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ weekStart }),
+      });
+      setData(next); setNotice(next.presetAdded ? `已補上 ${next.presetAdded} 個半小時班次` : "本週沒有需要補上的跟錄班次");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "預排失敗，請重試"); }
+    finally { mutation.current = false; setSaving(false); }
   }
 
-  async function preset(weekStart: string) {
-    if (!canEdit) return;
-    setSaving(true);
-    setError(null);
-    const response = await fetch("/api/schedule/preset", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ weekStart }),
-    });
-    const body = (await response.json()) as { ok: boolean; data?: ScheduleWeekPayload & { presetAdded?: number }; error?: string };
-    setSaving(false);
-    if (!body.ok || !body.data) {
-      setError(body.error || "預排失敗");
-      return;
-    }
-    replaceWeek(body.data);
-    setNotice(body.data.presetAdded ? `已補上 ${body.data.presetAdded} 個整點` : "沒有要補的空白時段");
-  }
-
-  function shiftFuture(direction: -1 | 1) {
-    const min = addDays(taipeiToday(), 14);
-    const next = addDays(futureStart, direction * 14);
-    if (next < min) return;
-    setFutureAnchor(next);
-    setGridWeek(0);
-  }
-
-  const identity = nearWeeks?.[0] ?? futureWeeks?.[0] ?? null;
-  const actor = identity ? (identity.me.canEditAnyone ? editingPerson : identity.me.person) : null;
-  const canToggle = canEdit && !!actor;
-  const futureReady = futureWeeks?.[0]?.weekStart === futureStart;
-  const activeWeeks = page === "future" ? (futureReady ? futureWeeks : null) : nearWeeks;
-  const activeLoading = page === "future" ? !futureReady : loadingNear && !nearWeeks;
-  const tabs = [
-    { id: "near" as const, label: "近兩週班表" },
-    { id: "future" as const, label: "未來班表" },
-    { id: "follow" as const, label: "跟錄名單" },
-  ];
-
+  const locked = saving || loading;
+  const dayIssues = week?.conflicts.filter((issue) => issue.cells.some((cell) => cell.date === date)) ?? [];
+  const weeklyIssues = week?.conflicts.filter((issue) => issue.cells.length === 0) ?? [];
+  const canSchedule = canEdit && !!week && (week.me.canEditAnyone || !!week.me.person);
   return (
-    <section className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold text-stone-900">班表</h2>
-        <p className="mt-1 text-sm text-stone-600">
-          {identity?.me.person
-            ? `你是${identity.me.person}。缺人的格子會寫還缺幾人，按旁邊的 + 加上${identity.me.canEditAnyone ? "你選的那一位" : "你"}，人名旁邊的 × 拿掉。`
-            : identity
-              ? "你不在排班名單裡，可以看，不能改。"
-              : "正在讀取班表…"}
-        </p>
-      </div>
-
-      <div className="flex flex-wrap gap-1 rounded-xl border border-stone-200 bg-stone-100 p-1">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setPage(tab.id)}
-            className={`rounded-lg px-4 py-2.5 text-sm font-semibold ${
-              page === tab.id ? "bg-stone-900 text-white" : "text-stone-600 hover:bg-white hover:text-stone-900"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {page !== "follow" && identity?.me.canEditAnyone && canEdit && (
-        <label className="flex items-center gap-2 text-sm text-stone-700">
-          正在排
-          <select
-            className="rounded-lg border border-stone-300 bg-white px-2 py-1"
-            value={editingPerson}
-            onChange={(event) => setEditingPerson(event.target.value)}
-          >
-            {identity.config.people.map((person) => (
-              <option key={person.name} value={person.name}>
-                {person.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-
-      {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
-      {notice && page !== "follow" && <p className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">{notice}</p>}
-      {page !== "follow" &&
-        activeWeeks?.[0]?.warnings.map((warning) => (
-          <p key={warning} className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-            {warning}
-          </p>
-        ))}
-
-      {page === "follow" ? (
-        <FollowList people={identity?.config.people.map((person) => person.name) ?? []} canMutate={canEdit} />
-      ) : activeLoading || !activeWeeks ? (
-        <p className="text-sm text-stone-500">正在讀取班表…</p>
-      ) : (
-        <SchedulePair
-          weeks={activeWeeks}
-          actor={actor}
-          canToggle={canToggle}
-          saving={saving}
-          gridWeek={Math.min(gridWeek, activeWeeks.length - 1)}
-          onGridWeek={setGridWeek}
-          onToggle={(weekStart, items, on) => {
-            if (actor) void writeClaims(weekStart, actor, items, on);
-          }}
-          onPreset={(weekStart) => void preset(weekStart)}
-          onRefresh={() => void (page === "future" ? loadFuture(futureStart, true) : loadNear(true))}
-          earlierLabel={page === "future" && futureStart > addDays(taipeiToday(), 14) ? "← 前兩週" : undefined}
-          laterLabel={page === "future" ? "後兩週 →" : undefined}
-          onEarlier={() => shiftFuture(-1)}
-          onLater={() => shiftFuture(1)}
-        />
-      )}
+    <section className={styles.board} aria-label="場地班表" aria-busy={loading || saving}>
+      <header className={styles.header}>
+        <div><p className={styles.eyebrow}>DAILY OPERATIONS</p><h2>場地調度</h2><p className={styles.subtitle}>先看場地，再安排人。預約、值班與待處理事項，一起掌握。</p></div>
+        <nav className={styles.tabs} aria-label="班表功能">
+          <button type="button" aria-pressed={page === "dispatch"} disabled={saving} onClick={() => setPage("dispatch")}>場地班表</button>
+          <button type="button" aria-pressed={page === "follow"} disabled={saving} onClick={() => { setPage("follow"); setSelection(null); }}>跟錄名單</button>
+        </nav>
+      </header>
+      {page === "follow" ? <FollowList people={data?.config.people.map((person) => person.name) ?? []} canMutate={canEdit} /> : <>
+        <div className={styles.toolbar}>
+          <div className={styles.row}>
+            <button type="button" disabled={locked} onClick={() => navigate(addDays(date, -7))} aria-label="上一週">←</button>
+            <h3>{dateLabel(weekStart)} — {dateLabel(addDays(weekStart, 6))}</h3>
+            <button type="button" disabled={locked} onClick={() => navigate(addDays(date, 7))} aria-label="下一週">→</button>
+            <button type="button" disabled={saving} onClick={() => navigate(todayInTaipei())}>今天</button>
+          </div>
+          <div className={styles.row}>
+            <label className={styles.datePicker}>跳至日期<input type="date" aria-label="跳至日期" value={date} disabled={saving} onChange={(event) => navigate(event.target.value)} /></label>
+            <button type="button" disabled={locked} onClick={() => setRefresh((value) => value + 1)}>{loading ? "讀取中…" : "同步日曆"}</button>
+          </div>
+        </div>
+        <div className={styles.days} aria-label="選擇日期">
+          {Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)).map((day) => {
+            const issueCount = week?.conflicts.filter((issue) => issue.cells.some((cell) => cell.date === day)).length ?? 0;
+            return <button type="button" key={day} aria-pressed={day === date} disabled={saving} onClick={() => navigate(day)}>
+              <span>{dateLabel(day)}</span><small>{week?.dayInfo[day]?.holiday || (day === todayInTaipei() ? "今天" : week?.dayInfo[day]?.weekend ? "週末" : "平日")}</small>
+              {issueCount > 0 && <span className={styles.dayCount}>{issueCount} 件待處理</span>}
+            </button>;
+          })}
+        </div>
+        {error && <div className={styles.error} role="alert"><span>{error}</span><button type="button" disabled={locked} onClick={() => setRefresh((value) => value + 1)}>重新讀取</button></div>}
+        <p className={styles.notice} role="status">{saving ? "正在儲存班次…" : notice}</p>
+        {week?.warnings.map((warning) => <p className={styles.warning} key={warning}>{warning}</p>)}
+        {!week ? <div className={styles.empty}>{loading ? "正在載入場地預約與人員班表…" : "尚未取得班表，請重新讀取。"}</div> : <>
+          {!week.me.canSeeAll && <p className={styles.scope}>目前依權限只顯示{week.me.person ? `${week.me.person}自己的排班與相關提醒` : "錄音預約"}；空白格不代表其他同仁沒有排班。</p>}
+          <div className={styles.layout}>
+            <div className={styles.main}>
+              <div className={styles.matrix}>
+                <div className={styles.matrixHeader}><h3>{dateLabel(date)} · 場地安排</h3><span className={styles.muted}>{week.me.canSeeAll ? "全員班表" : "個人班表"}</span></div>
+                <div className={styles.tableScroll}>
+                  <table className={styles.table}>
+                    <thead><tr><th scope="col">場地</th>{week.config.periods.map((period) => <th scope="col" key={period.id}>{period.label}<span>{period.start}–{period.end}</span></th>)}</tr></thead>
+                    <tbody>{week.config.places.filter((place) => place.kind !== "leave").map((place) => <tr key={place.id}>
+                      <th scope="row">{place.name}<span>{place.kind === "studio" ? "預約與跟錄" : "辦公與值班"}</span></th>
+                      {week.config.periods.map((period) => {
+                        const slots = week.config.slots.filter((slot) => slot.period === period.id && place.slots.includes(slot.id));
+                        const ids = slots.map((slot) => slot.id);
+                        const claims = week.claims.filter((claim) => claim.date === date && claim.place === place.id && ids.includes(claim.slot));
+                        const bookings = week.bookings.filter((booking) => booking.placeId === place.id && bookingOverlaps(booking.start, booking.end, date, period.start, period.end));
+                        const ranges = claimRanges(claims, slots);
+                        const issues = dayIssues.filter((issue) => issue.cells.some((cell) => cell.date === date && cell.place === place.id && ids.includes(cell.slot)));
+                        const selected = selection?.date === date && selection.place === place.id && selection.slots.some((slot) => ids.includes(slot));
+                        return <td key={period.id} data-period={`${period.label} · ${period.start}–${period.end}`} className={selected ? styles.selectedCell : undefined}>
+                          {!slots.length ? <p className={styles.muted}>非開放時段</p> : <div className={styles.cell}>
+                            {bookings.map((booking, index) => <div className={styles.booking} key={`${booking.start}-${index}`}>
+                              <span className={styles.micro}>日曆預約 · {booking.kind === "follow" ? "需跟錄" : booking.kind === "own" ? "自有節目" : "一般預約"}</span>
+                              <strong>{booking.show || booking.title}</strong><span>{bookingTime(booking)}</span>
+                              {booking.andyRecording && <small>安迪訪談</small>}
+                            </div>)}
+                            {place.kind === "studio" && !bookings.length && <p className={styles.muted}>{week.warnings.length ? "目前未讀到預約" : "無預約"}</p>}
+                            {ranges.length > 0 && <span className={styles.micro}>值班人員</span>}
+                            {ranges.map((range) => <button type="button" className={styles.claim} key={`${range.person}-${range.start}-${range.auto}`} disabled={locked} onClick={() => setSelection({ date, place: place.id, slots: range.slots, person: range.person })}>
+                              <strong>{range.person}<span>{range.auto ? "↻ 自動" : "手動"}</span></strong><small>{range.start}–{range.end}</small>
+                            </button>)}
+                            {!ranges.length && <p className={styles.muted}>{week.me.canSeeAll ? "尚未排班" : "沒有你的班次"}</p>}
+                            {issues.length > 0 && <button type="button" className={styles.cellIssue} disabled={locked} onClick={() => setSelection({ date, place: place.id, slots: ids })}>{issues.length} 件待處理 ↗</button>}
+                            <button type="button" className={styles.add} disabled={locked} onClick={() => setSelection({ date, place: place.id, slots: ids })}>{canSchedule ? "＋ 安排班次" : "查看時段"}</button>
+                          </div>}
+                        </td>;
+                      })}
+                    </tr>)}</tbody>
+                  </table>
+                </div>
+                <footer className={styles.matrixFoot}><span>預約來自 Google 日曆 · 值班來自 ERP</span><span>↻ 自動班次依會議／跟錄規則帶入</span></footer>
+              </div>
+              <LeavePanel week={week} date={date} disabled={locked} canSchedule={canSchedule} onSelect={setSelection} />
+              <details className={styles.weekSummary}><summary>本週進辦公室與錄音時數</summary><div className={styles.stats}>{week.stats.map((stat) => <div key={stat.name}><strong>{stat.name}</strong><p>辦公室 {stat.officeDays}{stat.need !== null ? ` / ${stat.need}` : ""} 天</p><small>錄音 {stat.studioHours} 小時{stat.adjusted ? " · 已調整應到天數" : ""}</small></div>)}</div></details>
+            </div>
+            <aside className={styles.sidebar} aria-label="班次調整與待處理事項">
+              {selection && <div ref={editor} tabIndex={-1} className={styles.editorFocus}>
+                <ShiftEditor key={`${selection.date}-${selection.place}-${selection.slots.join(",")}-${selection.person ?? ""}`} week={week} selection={selection} canEdit={canSchedule} saving={locked} onClose={() => setSelection(null)} onSave={mutate} />
+              </div>}
+              <div className={styles.panel}><p className={styles.eyebrow}>ACTION QUEUE</p><div className={styles.queueHeading}><h3>待處理事項</h3><span className={styles.badge}>{dayIssues.length}</span></div>
+                <p className={styles.muted}>{dateLabel(date)}{week.me.canSeeAll ? " · 全員" : " · 你的相關提醒"}</p>
+                {dayIssues.length === 0 && <p className={styles.clear}>{week.warnings.length ? "目前資料沒有待處理事項；日曆讀取仍有警告。" : "目前沒有待處理事項。"}</p>}
+                {dayIssues.map((issue, index) => <Issue key={`${issue.type}-${index}`} issue={issue} week={week} date={date} disabled={locked} onSelect={setSelection} />)}
+                {weeklyIssues.length > 0 && <details className={styles.weeklyIssues}><summary>本週其他提醒（{weeklyIssues.length}）</summary>{weeklyIssues.map((issue, index) => <p key={index}>{issue.message}</p>)}</details>}
+              </div>
+              {canSchedule && (week.me.canEditAnyone || week.config.presetPeople.includes(week.me.person ?? "")) && week.config.presetPeople.length > 0 && <div className={styles.panel}><h3>跟錄預排</h3><p className={styles.muted}>依跟錄名單，補上{week.me.canEditAnyone ? week.config.presetPeople.join("、") : week.me.person}本週可預排的班次。</p><button type="button" className={styles.fullButton} disabled={locked} onClick={() => void preset()}>補上本週跟錄班次</button></div>}
+            </aside>
+          </div>
+        </>}
+      </>}
     </section>
   );
 }
 
-function weekRangeLabel(dates: string[]): string {
-  const names = ["日", "一", "二", "三", "四", "五", "六"];
-  const face = (date: string) => {
-    const [y, m, d] = date.split("-").map(Number);
-    const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-    return `${m}/${d}（${names[wd]}）`;
-  };
-  return `${face(dates[0])} – ${face(dates[dates.length - 1])}`;
+function Issue({ issue, week, date, disabled, onSelect }: { issue: ScheduleConflict; week: ScheduleWeekPayload; date: string; disabled: boolean; onSelect: (target: DispatchSelection) => void }) {
+  const targets = conflictTargets(issue, date, week.config.slots);
+  return <div className={styles.issue}><span className={issue.severity === "error" ? styles.urgent : styles.attention}>{issue.severity === "error" ? "需要處理" : "提醒"}</span><p>{issue.message}</p><div className={styles.issueActions}>{targets.map((target) => {
+    const slots = selectionSlots(week, target);
+    return slots.length > 0 && <button type="button" disabled={disabled} key={`${target.place}-${target.slots[0]}`} onClick={() => onSelect(target)}>{week.config.places.find((place) => place.id === target.place)?.short} {slots[0].start}–{slots[slots.length - 1].end} →</button>;
+  })}</div></div>;
 }
-
-function hourText(hours: number): string {
-  return Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
+function LeavePanel({ week, date, disabled, canSchedule, onSelect }: { week: ScheduleWeekPayload; date: string; disabled: boolean; canSchedule: boolean; onSelect: (target: DispatchSelection) => void }) {
+  const place = week.config.places.find((item) => item.kind === "leave");
+  if (!place) return null;
+  const ranges = claimRanges(week.claims.filter((claim) => claim.date === date && claim.place === place.id), week.config.slots);
+  return <div className={styles.leave}><div className={styles.row}><h3>今日請假</h3><span className={styles.muted}>{week.me.canSeeAll ? "全員" : "僅顯示本人"}</span></div><div className={styles.row}>{ranges.map((range) => <button type="button" disabled={disabled} key={`${range.person}-${range.start}`} onClick={() => onSelect({ date, place: place.id, slots: range.slots, person: range.person })}>{range.person} · {range.start}–{range.end}</button>)}{!ranges.length && <span className={styles.muted}>沒有請假紀錄</span>}{canSchedule && <button type="button" disabled={disabled} onClick={() => onSelect({ date, place: place.id, slots: week.config.slots.filter((slot) => slot.period !== "eve" && place.slots.includes(slot.id)).map((slot) => slot.id) })}>＋ 登記請假</button>}</div></div>;
 }
-
-const GLANCE_PLACE_IDS = ["smallStudio", "bigStudio", "bigOffice"] as const;
-const GLANCE_PLACE_SHORT: Record<string, string> = { smallStudio: "小錄", bigStudio: "大錄", bigOffice: "新辦" };
-const GLANCE_PERIOD_LABEL: Record<string, string> = { am: "早", pm: "中", eve: "晚" };
-
-const PERIOD_BAND: Record<string, { box: string; chip: string }> = {
-  am: { box: "border-stone-300 bg-stone-50", chip: "bg-stone-500 text-white" },
-  pm: { box: "border-stone-400 bg-stone-100", chip: "bg-stone-600 text-white" },
-  eve: { box: "border-stone-500 bg-stone-200", chip: "bg-stone-800 text-white" },
-};
-
-const PLACE_FACE: Record<string, { idle: string; filled: string }> = {
-  smallStudio: { idle: "border-violet-300 bg-violet-50/70", filled: "border-violet-400 bg-violet-50" },
-  bigStudio: { idle: "border-amber-300 bg-amber-50/70", filled: "border-amber-400 bg-amber-50" },
-  bigOffice: { idle: "border-sky-200 bg-white", filled: "border-sky-300 bg-sky-50" },
-};
-
-const STUDIO_OTHER: Record<string, string> = { smallStudio: "bigStudio", bigStudio: "smallStudio" };
-const FOLLOW_COVER = "林安迪";
-
-function periodSlotIds(week: ScheduleWeekPayload, periodId: string): Set<string> {
-  return new Set(week.config.slots.filter((slot) => slot.period === periodId).map((slot) => slot.id));
-}
-
-function hasFollowBooking(week: ScheduleWeekPayload, date: string, placeId: string, slotIds: Set<string>): boolean {
-  return week.bookings.some(
-    (booking) => booking.kind === "follow" && booking.placeId === placeId && booking.slots.some((slot) => slot.date === date && slotIds.has(slot.slot))
-  );
-}
-
-function peopleInCell(week: ScheduleWeekPayload, date: string, placeId: string, slotIds: Set<string>, manualOnly: boolean): string[] {
-  const follower = week.config.followPerson;
-  const studio = placeId === "smallStudio" || placeId === "bigStudio";
-  return [
-    ...new Set(
-      week.claims
-        .filter((claim) => {
-          if (claim.date !== date || claim.place !== placeId || !slotIds.has(claim.slot)) return false;
-          if (!claim.auto) return true;
-          return !manualOnly && studio && claim.person === follower;
-        })
-        .map((claim) => claim.person)
-    ),
-  ].filter((name) => manualOnly || name !== follower || !andyFollowMark(week, date, placeId, slotIds));
-}
-
-function studioShortBy(week: ScheduleWeekPayload, date: string, placeId: string, periodId: string, people: string[], manual: string[]): number {
-  const slotIds = periodSlotIds(week, periodId);
-  const followHere = hasFollowBooking(week, date, placeId, slotIds);
-  const otherId = STUDIO_OTHER[placeId];
-  const followOther = !!otherId && hasFollowBooking(week, date, otherId, slotIds);
-  const andyLeave = week.claims.some(
-    (claim) => !claim.auto && claim.person === FOLLOW_COVER && claim.place === "leave" && claim.date === date && slotIds.has(claim.slot)
-  );
-  const follower = week.config.followPerson;
-  const followerHere = people.includes(follower);
-  const followGap = followHere && followSlotsUncovered(week, date, placeId, slotIds);
-  let need = 0;
-  if (followHere && !followerHere) need += 1;
-  else if (followGap) need += 1;
-  if (followHere && andyLeave) need += 1;
-  if (followOther && !followerHere) need += 1;
-  const outsideSlots = new Set(
-    week.bookings
-      .filter((booking) => booking.kind === "other" && booking.placeId === placeId)
-      .flatMap((booking) => booking.slots.filter((slot) => slot.date === date && slotIds.has(slot.slot)).map((slot) => slot.slot))
-  );
-  if (!followHere && !followOther && outsideSlots.size > 0 && manual.length === 0) {
-    const coveredByFollower = [...outsideSlots].every((slot) =>
-      week.claims.some((claim) => claim.person === follower && claim.date === date && claim.place === placeId && claim.slot === slot)
-    );
-    if (!coveredByFollower) need = Math.max(need, 1);
-  }
-  return Math.max(0, need - manual.length);
-}
-
-function followSlotsUncovered(week: ScheduleWeekPayload, date: string, placeId: string, slotIds: Set<string>): boolean {
-  const follower = week.config.followPerson;
-  let missing = false;
-  for (const booking of week.bookings) {
-    if (booking.kind !== "follow" || booking.placeId !== placeId) continue;
-    for (const slot of booking.slots) {
-      if (slot.date !== date || !slotIds.has(slot.slot)) continue;
-      const covered = week.claims.some(
-        (claim) => claim.date === date && claim.place === placeId && claim.slot === slot.slot && (claim.person === follower || !claim.auto)
-      );
-      if (!covered) missing = true;
-    }
-  }
-  return missing;
-}
-
-function andyFollowMark(week: ScheduleWeekPayload, date: string, placeId: string, slotIds: Set<string>): boolean {
-  const followSlots = new Set(
-    week.bookings
-      .filter((booking) => booking.kind === "follow" && booking.placeId === placeId)
-      .flatMap((booking) => booking.slots.filter((slot) => slot.date === date && slotIds.has(slot.slot)).map((slot) => slot.slot))
-  );
-  return week.bookings.some((booking) => booking.andyRecording && booking.slots.some((slot) => slot.date === date && followSlots.has(slot.slot)));
-}
-
-function followTitles(week: ScheduleWeekPayload, date: string, placeId: string, slotIds: Set<string>): string[] {
-  return [
-    ...new Set(
-      week.bookings
-        .filter((booking) => booking.kind === "follow" && booking.placeId === placeId && booking.slots.some((slot) => slot.date === date && slotIds.has(slot.slot)))
-        .map((booking) => booking.show || booking.title)
-        .filter(Boolean)
-    ),
-  ];
-}
-
-function glanceCell(week: ScheduleWeekPayload, actor: string | null, date: string, placeId: string, periodId: string) {
-  const place = week.config.places.find((item) => item.id === placeId);
-  const slots = week.config.slots.filter((slot) => slot.period === periodId && place?.slots.includes(slot.id));
-  if (!place || slots.length === 0) return null;
-  const slotIds = new Set(slots.map((slot) => slot.id));
-  const items = slots.map((slot) => ({ date, slot: slot.id, place: placeId }));
-  const people = peopleInCell(week, date, placeId, slotIds, false);
-  const manual = peopleInCell(week, date, placeId, slotIds, true);
-  const titles = followTitles(week, date, placeId, slotIds);
-  return {
-    place,
-    items,
-    people,
-    titles,
-    andyMark: andyFollowMark(week, date, placeId, slotIds),
-    shortBy: place.kind === "studio" ? studioShortBy(week, date, placeId, periodId, people, manual) : 0,
-    actorOn: !!actor && people.includes(actor),
-    actorRemovable: !!actor && manual.includes(actor),
-  };
-}
-
-function ShiftSlot({
-  placeId,
-  placeName,
-  people,
-  actor,
-  actorOn,
-  actorRemovable,
-  shortBy,
-  titles,
-  andyMark,
-  editable,
-  saving,
-  ring,
-  fill,
-  onAdd,
-  onRemove,
-}: {
-  placeId: string;
-  placeName: string;
-  people: string[];
-  actor: string | null;
-  actorOn: boolean;
-  actorRemovable: boolean;
-  shortBy: number;
-  titles: string[];
-  andyMark?: boolean;
-  editable: boolean;
-  saving: boolean;
-  ring?: string;
-  fill?: boolean;
-  onAdd: () => void;
-  onRemove: () => void;
+function ShiftEditor({ week, selection, canEdit, saving, onClose, onSave }: {
+  week: ScheduleWeekPayload; selection: DispatchSelection; canEdit: boolean; saving: boolean;
+  onClose: () => void; onSave: (person: string, selection: DispatchSelection, on: boolean) => Promise<void>;
 }) {
-  const face = PLACE_FACE[placeId] ?? { idle: "border-stone-200 bg-white", filled: "border-stone-300 bg-stone-50" };
-  const label = GLANCE_PLACE_SHORT[placeId] ?? placeName;
-  const showAdd = editable && !actorOn;
-  const hasBody = !!titles[0] || people.length > 0 || shortBy > 0 || !!andyMark;
-  const addButton = showAdd ? (
-    <button
-      type="button"
-      disabled={saving}
-      aria-label={actor ? `把${actor}排上${placeName}` : `排上${placeName}`}
-      title={actor ? `把${actor}排上` : "排上"}
-      onClick={onAdd}
-      className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-stone-900 text-base leading-none text-white hover:bg-stone-700 disabled:opacity-40"
-    >
-      +
-    </button>
-  ) : null;
-  return (
-    <div className={`rounded-lg border border-l-4 px-1.5 py-1.5 ${fill ? "h-full" : ""} ${people.length > 0 || titles[0] || andyMark ? face.filled : face.idle} ${andyMark ? "ring-2 ring-amber-500" : ""} ${ring ?? ""}`}>
-      <div className={`flex items-center justify-between gap-1 ${hasBody ? "border-b border-stone-300/80 pb-1" : ""}`}>
-        <p className="text-[11px] font-semibold leading-none text-stone-700">{label}</p>
-        {shortBy === 0 ? addButton : null}
-      </div>
-      {titles[0] ? (
-        <p className="mt-1 flex items-start gap-1 text-[13px] font-bold leading-snug text-stone-950">
-          <svg className="mt-0.5 h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-            <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M19 10v1a7 7 0 0 1-14 0v-1" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M12 18v3" strokeLinecap="round" />
-          </svg>
-          <span className="line-clamp-2 min-w-0">{titles.join("、")}</span>
-        </p>
-      ) : null}
-      {andyMark ? <p className="mt-1 text-[11px] font-bold leading-snug text-amber-950">五吉郎在訪談需要其他人支援跟錄</p> : null}
-      {people.length > 0 ? (
-        <ul className="mt-1 space-y-1">
-          {people.map((name) => (
-            <li key={name} className="flex items-center gap-1 rounded-md bg-white px-1.5 py-1 ring-1 ring-stone-200">
-              <svg className="h-3.5 w-3.5 shrink-0 text-stone-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                <circle cx="12" cy="8" r="4" />
-                <path d="M5 20a7 7 0 0 1 14 0" strokeLinecap="round" />
-              </svg>
-              <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-stone-900">{name}</span>
-              {editable && actorRemovable && name === actor ? (
-                <button
-                  type="button"
-                  disabled={saving}
-                  aria-label={`拿掉${name}`}
-                  title={`拿掉${name}`}
-                  onClick={onRemove}
-                  className="grid h-4 w-4 shrink-0 place-items-center rounded text-[13px] leading-none text-stone-400 hover:bg-stone-100 hover:text-stone-800 disabled:opacity-40"
-                >
-                  ×
-                </button>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {shortBy > 0 ? (
-        <div className="mt-1 flex items-center justify-between gap-1">
-          <span className="text-[12px] font-semibold text-red-700">缺 {shortBy} 人</span>
-          {addButton}
-        </div>
-      ) : null}
-    </div>
-  );
+  const place = week.config.places.find((item) => item.id === selection.place)!;
+  const initialSlots = selectionSlots(week, selection);
+  const availableSlots = week.config.slots.filter((slot) => place.slots.includes(slot.id));
+  const [person, setPerson] = useState((week.me.canEditAnyone ? selection.person : null) ?? week.me.person ?? (week.me.canEditAnyone ? week.config.people[0]?.name ?? "" : ""));
+  const [start, setStart] = useState(initialSlots[0]?.start ?? "");
+  const [end, setEnd] = useState(initialSlots.at(-1)?.end ?? "");
+  const chosenSlots = availableSlots.filter((slot) => slot.start >= start && slot.end <= end);
+  const target = { ...selection, slots: chosenSlots.map((slot) => slot.id) };
+  const overlaps = conflictingClaims(week, target, person);
+  const claims = week.claims.filter((claim) => claim.date === target.date && claim.place === target.place && target.slots.includes(claim.slot));
+  const ownManual = claims.filter((claim) => claim.person === person && !claim.auto);
+  const allAssigned = target.slots.length > 0 && target.slots.every((slot) => claims.some((claim) => claim.person === person && claim.slot === slot));
+  const editable = canEdit && !!person && (week.me.canEditAnyone || person === week.me.person);
+  const ranges = claimRanges(claims, chosenSlots);
+  const people = week.me.canEditAnyone ? week.config.people : week.config.people.filter((item) => item.name === week.me.person);
+  return <div className={styles.panel}><div className={styles.queueHeading}><h3>{place.kind === "leave" ? "登記請假" : "安排班次"}</h3><button type="button" aria-label="關閉班次編輯" disabled={saving} onClick={onClose}>×</button></div><p className={styles.muted}>{dateLabel(selection.date)} · {place.name}</p>
+    <form onSubmit={(event) => { event.preventDefault(); if (editable && chosenSlots.length && !saving) void onSave(person, target, true); }}>
+      <label className={styles.field}>人員<select value={person} disabled={!canEdit || saving} onChange={(event) => setPerson(event.target.value)}>{!person && <option value="">沒有可編輯的人員</option>}{people.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
+      <div className={styles.timeFields}><label className={styles.field}>開始<select value={start} disabled={saving} onChange={(event) => { const next = event.target.value; setStart(next); if (end <= next) setEnd(availableSlots.find((slot) => slot.start === next)!.end); }}>{availableSlots.map((slot) => <option key={slot.id} value={slot.start}>{slot.start}</option>)}</select></label>
+        <label className={styles.field}>結束<select value={end} disabled={saving} onChange={(event) => setEnd(event.target.value)}>{availableSlots.filter((slot) => slot.start >= start).map((slot) => <option key={slot.id} value={slot.end}>{slot.end}</option>)}</select></label></div>
+      {overlaps.length > 0 && <p className={styles.editorWarning}>此人同時段已有{[...new Set(overlaps.map((claim) => week.config.places.find((item) => item.id === claim.place)?.name))].join("、")}的安排。新增不會取消原班次，請先確認。</p>}
+      {place.kind !== "leave" && !week.config.offStaff.includes(person) && (!week.dayInfo[selection.date]?.workday || chosenSlots.some((slot) => slot.period === "eve")) && <p className={styles.editorWarning}>假日與晚間原則上由{week.config.offStaff.join("、")}排班。</p>}
+      {editable ? <><button type="submit" className={styles.primary} disabled={saving || !chosenSlots.length || allAssigned}>{saving ? "儲存中…" : allAssigned ? "此人已排入這段時間" : place.kind === "leave" ? "確認登記請假" : "確認安排"}</button>
+        {ownManual.length > 0 && <button type="button" className={styles.remove} disabled={saving} onClick={() => void onSave(person, { ...target, slots: [...new Set(ownManual.map((claim) => claim.slot))] }, false)}>取消{person}這段{place.kind === "leave" ? "請假" : "手動排班"}</button>}</> : <p className={styles.muted}>目前帳號僅可查看此時段。</p>}
+    </form>
+    <div className={styles.currentClaims}><h4>這段時間的{place.kind === "leave" ? "請假" : "人員"}</h4>{ranges.length === 0 ? <p className={styles.muted}>{week.me.canSeeAll ? "尚未安排" : "沒有你的班次"}</p> : ranges.map((range) => <div key={`${range.person}-${range.start}-${range.auto}`}><strong>{range.person}</strong><span>{range.start}–{range.end}</span><small>{range.auto ? "↻ 自動帶入，請調整來源或登記請假" : "手動排班"}</small></div>)}</div>
+  </div>;
 }
-
-function PersonWeekGrid({
-  week,
-  actor,
-  canToggle,
-  saving,
-  onToggle,
-}: {
-  week: ScheduleWeekPayload;
-  actor: string | null;
-  canToggle: boolean;
-  saving: boolean;
-  onToggle: (items: { date: string; slot: string; place: string }[], on: boolean) => void;
-}) {
-  const today = taipeiToday();
-  const dayNames = ["日", "一", "二", "三", "四", "五", "六"];
-  const stat = week.stats.find((item) => item.name === actor);
-  const office = stat?.need == null ? `辦公室 ${stat?.officeDays ?? 0} 天` : `辦公室 ${stat.officeDays}/${stat.need} 天`;
-  const legend = week.config.places.filter((place) => (GLANCE_PLACE_IDS as readonly string[]).includes(place.id));
-
-  return (
-    <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-3 py-2">
-        <div>
-          <p className="text-sm font-semibold text-stone-900">{actor ? `${actor} 的這一週` : "這一週"}</p>
-          {actor ? (
-            <p className="text-[11px] text-stone-500">
-              {office}　錄音 {hourText(stat?.studioHours ?? 0)} 小時
-            </p>
-          ) : (
-            <p className="text-[11px] text-stone-500">你不在排班名單裡，這格沒有個人班表。</p>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-1.5 text-[11px] text-stone-600">
-          {legend.map((place) => (
-            <span key={place.id} className={`rounded-md border px-1.5 py-0.5 ${BLOCK_TONE[place.id] ?? "border-stone-200 bg-stone-50"}`}>
-              {place.name}
-            </span>
-          ))}
-        </div>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[980px] border-separate border-spacing-0 text-left">
-          <thead>
-            <tr className="bg-stone-50 text-xs text-stone-500">
-              {week.dates.map((date) => {
-                const [y, m, d] = date.split("-").map(Number);
-                const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-                const weekend = wd === 0 || wd === 6;
-                const holiday = week.dayInfo[date]?.holiday;
-                return (
-                  <th key={date} className={`border-b border-stone-200 px-2 py-2 font-semibold ${weekend ? "bg-stone-100/80" : ""} ${date === today ? "text-sky-800" : ""}`}>
-                    <span className="block text-sm text-stone-800">{String(d).padStart(2, "0")}</span>
-                    <span className="font-medium">{dayNames[wd]}</span>
-                    {holiday ? <span className="mt-0.5 block font-normal text-[10px] text-amber-700">{holiday}</span> : null}
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {week.config.periods.map((period) => {
-              const band = PERIOD_BAND[period.id] ?? { box: "border-stone-300 bg-stone-50", chip: "bg-stone-600 text-white" };
-              const placeIds = GLANCE_PLACE_IDS.filter((placeId) => glanceCell(week, actor, week.dates[0], placeId, period.id));
-              return (
-                <tr key={period.id}>
-                  {week.dates.map((date) => {
-                    const [y, m, d] = date.split("-").map(Number);
-                    const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-                    const weekend = wd === 0 || wd === 6;
-                    const editable = canToggle && !!actor;
-                    return (
-                      <td key={date} className={`h-px min-w-[8.5rem] px-1.5 py-1 align-top ${weekend ? "bg-stone-50/80" : ""}`}>
-                        <div className={`flex h-full flex-col rounded-lg border-2 p-1 ${band.box}`}>
-                          <p className={`mb-1 rounded px-1 py-1 text-center leading-tight ${band.chip}`}>
-                            <span className="block text-xs font-semibold">{GLANCE_PERIOD_LABEL[period.id] ?? period.label}</span>
-                            <span className="block text-[9px] font-medium opacity-90">{period.start}–{period.end}</span>
-                          </p>
-                          <div
-                            className="grid min-h-0 flex-1 gap-1"
-                            style={{ gridTemplateRows: `repeat(${Math.max(placeIds.length, 1)}, minmax(auto, 1fr))` }}
-                          >
-                            {placeIds.map((placeId) => {
-                              const cell = glanceCell(week, actor, date, placeId, period.id);
-                              if (!cell) return <div key={placeId} />;
-                              return (
-                                <ShiftSlot
-                                  key={placeId}
-                                  placeId={placeId}
-                                  placeName={cell.place.name}
-                                  people={cell.people}
-                                  actor={actor}
-                                  actorOn={cell.actorOn}
-                                  actorRemovable={cell.actorRemovable}
-                                  shortBy={cell.shortBy}
-                                    titles={cell.titles}
-                                    andyMark={cell.andyMark}
-                                    editable={editable}
-                                  saving={saving}
-                                  fill
-                                  onAdd={() => onToggle(cell.items, true)}
-                                  onRemove={() => onToggle(cell.items, false)}
-                                />
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p className="border-t border-stone-100 px-3 py-2 text-[11px] text-stone-500">
-        跟錄節目寫在格子上，五吉郎會先排好。缺人旁邊的 + 是排上正在排的人，人名旁的 × 拿掉。小錄是紫色、大錄是黃色、新辦是藍色。
-      </p>
-    </div>
-  );
-}
-
-function SchedulePair({
-  weeks,
-  actor,
-  canToggle,
-  saving,
-  gridWeek,
-  onGridWeek,
-  onToggle,
-  onPreset,
-  onRefresh,
-  earlierLabel,
-  laterLabel,
-  onEarlier,
-  onLater,
-}: {
-  weeks: ScheduleWeekPayload[];
-  actor: string | null;
-  canToggle: boolean;
-  saving: boolean;
-  gridWeek: number;
-  onGridWeek: (index: number) => void;
-  onToggle: (weekStart: string, items: { date: string; slot: string; place: string }[], on: boolean) => void;
-  onPreset: (weekStart: string) => void;
-  onRefresh: () => void;
-  earlierLabel?: string;
-  laterLabel?: string;
-  onEarlier: () => void;
-  onLater: () => void;
-}) {
-  const gridItem = weeks[gridWeek] ?? weeks[0];
-  const [showPlaceGrids, setShowPlaceGrids] = useState(false);
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stone-300 bg-white px-4 py-3">
-        <p className="text-sm font-semibold text-stone-900">{weekRangeLabel([weeks[0].dates[0], weeks[weeks.length - 1].dates[6]])}</p>
-        <div className="flex flex-wrap items-center gap-2">
-          {earlierLabel ? (
-            <button type="button" className="rounded-lg bg-stone-900 px-3 py-2 text-sm font-semibold text-white hover:bg-stone-700" onClick={onEarlier}>
-              {earlierLabel}
-            </button>
-          ) : null}
-          {laterLabel ? (
-            <button type="button" className="rounded-lg bg-stone-900 px-3 py-2 text-sm font-semibold text-white hover:bg-stone-700" onClick={onLater}>
-              {laterLabel}
-            </button>
-          ) : null}
-          <button type="button" className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100" onClick={onRefresh}>
-            重新整理
-          </button>
-        </div>
-      </div>
-
-      {gridItem ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            {weeks.map((item, index) => (
-              <button
-                key={item.weekStart}
-                type="button"
-                onClick={() => onGridWeek(index)}
-                className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
-                  index === gridWeek ? "bg-stone-900 text-white" : "bg-white text-stone-700 ring-1 ring-stone-300"
-                }`}
-              >
-                {weekCaption(item.weekStart)}
-              </button>
-            ))}
-          </div>
-          <p className="text-sm font-semibold text-stone-900">
-            {weekCaption(gridItem.weekStart)}　{weekRangeLabel(gridItem.dates)}
-          </p>
-          <PersonWeekGrid
-            week={gridItem}
-            actor={actor}
-            canToggle={canToggle}
-            saving={saving}
-            onToggle={(slots, on) => onToggle(gridItem.weekStart, slots, on)}
-          />
-          <ConflictList week={gridItem} />
-          <button
-            type="button"
-            onClick={() => setShowPlaceGrids((open) => !open)}
-            className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100"
-          >
-            {showPlaceGrids ? "收合依地點細格" : "依地點細格（早午晚）"}
-          </button>
-          {showPlaceGrids
-            ? gridItem.config.places.map((place) => (
-                <PlaceGrid
-                  key={`${gridItem.weekStart}-${place.id}`}
-                  placeId={place.id}
-                  week={gridItem}
-                  actor={actor}
-                  canToggle={canToggle}
-                  conflictKeys={conflictKeysOf(gridItem)}
-                  onToggle={(slots, on) => onToggle(gridItem.weekStart, slots, on)}
-                />
-              ))
-            : null}
-          {canToggle && gridItem.config.presetPeople.length > 0 && (gridItem.me.canEditAnyone || gridItem.config.presetPeople.includes(gridItem.me.person ?? "")) && (
-            <button type="button" className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm" onClick={() => onPreset(gridItem.weekStart)} disabled={saving}>
-              預排{gridItem.config.presetPeople.join("、")}{weekCaption(gridItem.weekStart)}的時間
-            </button>
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function ConflictList({ week }: { week: ScheduleWeekPayload }) {
-  const today = taipeiToday();
-  const conflicts = week.conflicts.filter((conflict) => conflict.cells.length === 0 || conflict.cells.some((cell) => cell.date >= today));
-  if (!conflicts.length) {
-    return <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">這週沒有衝突。</p>;
-  }
-  return (
-    <div className="rounded-xl border border-stone-200 bg-white px-3 py-3">
-      <p className="text-sm font-semibold text-stone-800">衝突檢查</p>
-      <ul className="mt-2 space-y-1">
-        {conflicts.map((conflict, index) => (
-          <li key={`${conflict.type}-${index}`} className={`text-xs ${conflict.severity === "error" ? "text-red-700" : "text-amber-800"}`}>
-            {conflict.severity === "error" ? "錯誤" : "提醒"}　{conflict.message}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function meetingNote(week: ScheduleWeekPayload, date: string, placeId: string): string | null {
-  const hit = week.meetings.find((meeting) => meeting.date === date && meeting.placeId === placeId);
-  if (!hit) return null;
-  return `${hit.start}–${hit.end} 全員開會，不用點`;
-}
-
-function PlaceGrid({
-  placeId,
-  week,
-  actor,
-  canToggle,
-  conflictKeys,
-  onToggle,
-}: {
-  placeId: string;
-  week: ScheduleWeekPayload;
-  actor: string | null;
-  canToggle: boolean;
-  conflictKeys: Map<string, "error" | "warn">;
-  onToggle: (items: { date: string; slot: string; place: string }[], on: boolean) => void;
-}) {
-  const place = week.config.places.find((item) => item.id === placeId);
-  const dates = week.dates;
-  if (!place || dates.length === 0) return null;
-  const tone = PLACE_TONE[place.id] ?? "border-stone-200 bg-white";
-  const rows = week.config.periods.map((period) => ({
-    id: period.id,
-    label: PERIOD_FACE[period.id] ?? period.label,
-    time: `${period.start}–${period.end}`,
-    slots: week.config.slots.filter((slot) => slot.period === period.id && place.slots.includes(slot.id)).map((slot) => slot.id),
-  }));
-
-  return (
-    <div className={`overflow-x-auto rounded-2xl border p-3 ${tone}`}>
-      <p className="mb-2 text-sm font-semibold text-stone-900">{place.name}</p>
-      <table className="w-full min-w-[720px] border-separate border-spacing-1 text-left text-xs">
-        <thead>
-          <tr>
-            <th className="w-16 px-1 py-1 font-medium text-stone-500">時段</th>
-            {dates.map((date) => (
-              <th key={date} className="px-1 py-1 font-medium text-stone-600">
-                {weekdayLabel(date)}
-                {week.dayInfo[date]?.holiday ? ` ${week.dayInfo[date].holiday}` : ""}
-                {meetingNote(week, date, place.id) ? (
-                  <span className="mt-0.5 block font-normal text-[10px] text-stone-500">{meetingNote(week, date, place.id)}</span>
-                ) : null}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => {
-            const band = PERIOD_BAND[row.id] ?? { box: "border-stone-300 bg-stone-50", chip: "bg-stone-600 text-white" };
-            return (
-            <tr key={row.id}>
-              <td className="px-1 py-1 align-top">
-                <span className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-black ${band.chip}`}>{row.label}</span>
-                <span className="mt-0.5 block text-[10px] text-stone-500">{row.time}</span>
-              </td>
-              {dates.map((date) => {
-                if (row.slots.length === 0) {
-                  return (
-                    <td key={date} className="align-top">
-                      <div className="rounded-lg bg-white/40 px-1.5 py-2 text-[10px] text-stone-400">沒有這段</div>
-                    </td>
-                  );
-                }
-                const items = row.slots.map((slot) => ({ date, slot, place: place.id }));
-                const slotIds = new Set(row.slots);
-                const names = peopleInCell(week, date, place.id, slotIds, false);
-                const manual = peopleInCell(week, date, place.id, slotIds, true);
-                const actorOn = !!actor && names.includes(actor);
-                const severity = items.reduce<"error" | "warn" | null>((current, item) => {
-                  const hit = conflictKeys.get(`${item.date}|${item.slot}|${item.place}`);
-                  if (hit === "error" || current === "error") return "error";
-                  return hit ?? current;
-                }, null);
-                const ring = severity === "error" ? "ring-2 ring-red-400" : severity === "warn" ? "ring-2 ring-amber-300" : "";
-                const shortBy = place.kind === "studio" ? studioShortBy(week, date, place.id, row.id, names, manual) : 0;
-                return (
-                  <td key={date} className="align-top">
-                    <ShiftSlot
-                      placeId={place.id}
-                      placeName={place.name}
-                      people={names}
-                      actor={actor}
-                      actorOn={actorOn}
-                      actorRemovable={!!actor && manual.includes(actor)}
-                      shortBy={shortBy}
-                      titles={followTitles(week, date, place.id, slotIds)}
-                      andyMark={andyFollowMark(week, date, place.id, slotIds)}
-                      editable={canToggle}
-                      saving={false}
-                      ring={ring}
-                      onAdd={() => onToggle(items, true)}
-                      onRemove={() => onToggle(items, false)}
-                    />
-                  </td>
-                );
-              })}
-            </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-

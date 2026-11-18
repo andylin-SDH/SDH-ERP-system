@@ -15,10 +15,10 @@ import {
   weekDates,
   weekStats,
 } from "@/lib/schedule/logic";
-import type { FollowShow, ScheduleBooking, ScheduleClaim, ScheduleConfig, ScheduleWeekPayload } from "@/lib/schedule/types";
+import type { FollowShow, ScheduleBooking, ScheduleConfig, ScheduleWeekPayload } from "@/lib/schedule/types";
 import { FollowTableMissingError, listFollowShowRecords } from "@/lib/db/follow-shows";
 import { applyClaimRows, listClaimsBetween, ScheduleTableMissingError } from "@/lib/db/schedule";
-import { planClaimChange, type ClaimChangeItem } from "@/lib/schedule/logic";
+import { planStoredClaimChange, type ClaimChangeItem } from "@/lib/schedule/logic";
 
 const CACHE_MS = 5 * 60 * 1000;
 let calendarCache: { key: string; at: number; bookings: Omit<ScheduleBooking, "slots">[]; warnings: string[] } | null = null;
@@ -204,28 +204,12 @@ export async function changeScheduleClaims(
   const weekStart = normalizeWeekStart(weekStartInput);
   assertCanEdit(person, user);
   if (!items.length) throw new Error("沒有要寫入的時段");
-  if (items.length > 200) throw new Error("一次最多 200 個整點");
+  if (items.length > 200) throw new Error("一次最多 200 個半小時時段");
   const dates = weekDates(weekStart);
   const stored = await listClaimsBetween(dates[0], addDays(dates[6], 1));
-  const current = expandStoredClaims(stored, SCHEDULE_CONFIG);
-  const plan = planClaimChange(weekStart, person, items, on, items.length === 1, current, SCHEDULE_CONFIG);
+  const plan = planStoredClaimChange(weekStart, person, items, on, stored, SCHEDULE_CONFIG);
   if (plan.error) throw new Error(plan.error);
-  const same = (claim: { date: string; slot: string; place: string; person: string }, item: { date: string; slot: string; place: string }) =>
-    claim.person === person && claim.date === item.date && claim.slot === item.slot && claim.place === item.place;
-  const legacy = stored.filter(
-    (claim) =>
-      /^h\d{2}$/.test(claim.slot) &&
-      claim.person === person &&
-      expandStoredClaims([claim], SCHEDULE_CONFIG).some((slot) => items.some((item) => same(slot, item)))
-  );
-  const remove = [...plan.remove.filter((claim) => stored.some((row) => same(row, claim))), ...legacy];
-  const add = on
-    ? items
-        .filter((item) => current.some((claim) => same(claim, item)) || plan.add.some((claim) => same(claim, item)))
-        .filter((item) => !stored.some((claim) => same(claim, item)))
-        .map((item) => ({ ...item, person }))
-    : plan.add;
-  await applyClaimRows(add, remove);
+  await applyClaimRows(plan.add, plan.remove);
   return buildScheduleWeek(weekStart, user, false);
 }
 

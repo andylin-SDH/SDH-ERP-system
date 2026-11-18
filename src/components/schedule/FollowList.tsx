@@ -16,12 +16,16 @@ export function FollowList({ people, canMutate }: { people: string[]; canMutate:
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
-    const response = await fetch("/api/schedule/follow");
-    const body = (await response.json()) as { ok: boolean; shows?: FollowItem[]; canEdit?: boolean; error?: string };
-    setCanEdit(Boolean(body.canEdit) && canMutate);
-    setShows(body.shows ?? []);
-    if (!body.ok) setError(body.error || "讀取跟錄名單失敗");
-    else setError(null);
+    try {
+      const response = await fetch("/api/schedule/follow");
+      const body = (await response.json()) as { ok: boolean; shows?: FollowItem[]; canEdit?: boolean; error?: string };
+      setCanEdit(Boolean(body.canEdit) && canMutate);
+      setShows(body.shows ?? []);
+      if (!response.ok || !body.ok) throw new Error(body.error || "讀取跟錄名單失敗");
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "讀取跟錄名單失敗，請稍後重試");
+    }
   }, [canMutate]);
 
   useEffect(() => {
@@ -38,38 +42,48 @@ export function FollowList({ people, canMutate }: { people: string[]; canMutate:
   async function save() {
     setSaving(true);
     setError(null);
-    const response = await fetch("/api/schedule/follow", {
-      method: editingId ? "PATCH" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: editingId ?? undefined, show, keywords, companions }),
-    });
-    const body = (await response.json()) as { ok: boolean; shows?: FollowItem[]; error?: string };
-    setSaving(false);
-    if (!body.ok) {
-      setError(body.error || "儲存失敗");
-      return;
+    try {
+      const response = await fetch("/api/schedule/follow", {
+        method: editingId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: editingId ?? undefined, show, keywords, companions }),
+      });
+      const body = (await response.json()) as { ok: boolean; shows?: FollowItem[]; error?: string };
+      if (!body.ok) {
+        setError(body.error || "儲存失敗");
+        return;
+      }
+      setShows(body.shows ?? []);
+      resetForm();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "連線失敗，請稍後重試");
+    } finally {
+      setSaving(false);
     }
-    setShows(body.shows ?? []);
-    resetForm();
   }
 
   async function remove(id: number) {
     setSaving(true);
     setError(null);
-    const response = await fetch("/api/schedule/follow", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
-    const body = (await response.json()) as { ok: boolean; shows?: FollowItem[]; error?: string };
-    setSaving(false);
-    if (!body.ok) {
-      setError(body.error || "刪除失敗");
-      return;
+    try {
+      const response = await fetch("/api/schedule/follow", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const body = (await response.json()) as { ok: boolean; shows?: FollowItem[]; error?: string };
+      if (!body.ok) {
+        setError(body.error || "刪除失敗");
+        return;
+      }
+      setShows(body.shows ?? []);
+      setConfirmDeleteId(null);
+      if (editingId === id) resetForm();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "連線失敗，請稍後重試");
+    } finally {
+      setSaving(false);
     }
-    setShows(body.shows ?? []);
-    setConfirmDeleteId(null);
-    if (editingId === id) resetForm();
   }
 
   return (
@@ -165,13 +179,11 @@ export function FollowList({ people, canMutate }: { people: string[]; canMutate:
       <div className="mt-4 border-t border-stone-200 pt-3">
         <p className="text-xs font-semibold text-stone-800">目前的規則</p>
         <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-stone-600">
-          <li>跟錄名單上的節目，五吉郎會先排上，不用手動點。</li>
-          <li>同一時段的另一間錄音室，固定再缺 1 人。五吉郎若已經在那間做安迪訪談，那間就不缺。</li>
-          <li>林安迪這段若請假，要跟錄的那一格再缺 1 人。五吉郎不算補上這個缺。</li>
-          <li>五吉郎自己請假時不會自動排，跟錄那格要另外找人。</li>
-          <li>外面的錄音室預約沒人，才會缺 1 人。自己人的節目，例如郝聲音、安迪，不另開缺人。</li>
-          <li>格子只顯示跟錄節目名。節目名前是麥克風，人名前面是人。</li>
-          <li>「安迪」就是五吉郎，人在那場錄音的錄音室。跟錄時間若重疊，跟錄那格不寫他的名字，改標「五吉郎在訪談需要其他人支援跟錄」。時間沒重疊就照常排。</li>
+          <li>跟錄名單用來辨識日曆預約，五吉郎依規則自動帶入；請假時不會自動排入。</li>
+          <li>小辦公室需要有人值班，跟錄或請假造成的缺班會列在場地班表的待處理事項。</li>
+          <li>週一 10:00–11:00 全員會議自動帶入；實際跟錄與請假依規則處理。</li>
+          <li>假日與平日晚上由林安迪、五吉郎排班；撞班、缺人與應到天數由系統統一檢查。</li>
+          <li>場地班表分開顯示日曆預約與值班人員；「自動」班次不能直接當作手動班次刪除。</li>
         </ol>
       </div>
     </div>
