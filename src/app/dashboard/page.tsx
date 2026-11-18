@@ -2218,6 +2218,7 @@ export default function DashboardPage() {
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [invoiceEditSavingId, setInvoiceEditSavingId] = useState<string | null>(null);
+  const [invoiceBatchSaving, setInvoiceBatchSaving] = useState(false);
   const [invoiceEditError, setInvoiceEditError] = useState<string | null>(null);
   /** 發票金額 vs 專案未稅×1.05 軟警示（不擋存檔） */
   const [invoiceAmountMismatchNotice, setInvoiceAmountMismatchNotice] = useState<string | null>(null);
@@ -3593,6 +3594,12 @@ export default function DashboardPage() {
     return rows;
   }, [invoices, invoiceLedgerTab, invoiceMonthTab, invoiceLedgerSnapshot]);
   const selectedInvoiceIdSet = useMemo(() => new Set(selectedInvoiceIds), [selectedInvoiceIds]);
+  const invoiceDirtyIdSet = useMemo(() => new Set(invoiceDirtyIds), [invoiceDirtyIds]);
+  /** 發票清冊：已勾選且有未存檔變更（批次存檔用） */
+  const selectedDirtyInvoiceIds = useMemo(
+    () => selectedInvoiceIds.filter((id) => id.trim() !== "" && invoiceDirtyIdSet.has(id)),
+    [selectedInvoiceIds, invoiceDirtyIdSet]
+  );
   /** 發票清冊：勾選列的發票金額含稅即時加總（狀態列用） */
   const selectedInvoicesTaxedAmountSum = useMemo(() => {
     let sum = 0;
@@ -3605,7 +3612,6 @@ export default function DashboardPage() {
     return sum;
   }, [invoices, selectedInvoiceIdSet]);
   const deletingInvoiceIdSet = useMemo(() => new Set(deletingInvoiceIds), [deletingInvoiceIds]);
-  const invoiceDirtyIdSet = useMemo(() => new Set(invoiceDirtyIds), [invoiceDirtyIds]);
   const deletingPaymentIdSet = useMemo(() => new Set(deletingPaymentIds), [deletingPaymentIds]);
   const paymentDirtyIdSet = useMemo(() => new Set(paymentDirtyIds), [paymentDirtyIds]);
 
@@ -5410,7 +5416,7 @@ export default function DashboardPage() {
   /** 發票清冊：寫回 DB（整列一併更新） */
   const persistInvoiceRowById = useCallback(
     async (id: string) => {
-      if (!id) return;
+      if (!id || invoiceBatchSaving) return;
       if (invoiceSaveInflightRef.current.has(id)) {
         invoiceSavePendingRef.current.add(id);
         return;
@@ -5464,8 +5470,103 @@ export default function DashboardPage() {
         }
       }
     },
-    [masterUntaxedByProjectId, refreshDashboardData]
+    [invoiceBatchSaving, masterUntaxedByProjectId, refreshDashboardData]
   );
+
+  /** 發票清冊：勾選列批次存檔（只寫有未存檔變更的；失敗不中斷其餘） */
+  const persistSelectedDirtyInvoices = useCallback(async () => {
+    const ids = selectedInvoiceIds.filter((id) => id.trim() !== "" && invoiceDirtyIds.includes(id));
+    if (ids.length === 0) {
+      setInvoiceEditError("勾選的發票沒有未存檔變更，請先編輯後再批次存檔");
+      return;
+    }
+    if (invoiceBatchSaving) return;
+    setInvoiceBatchSaving(true);
+    setInvoiceEditError(null);
+    setInvoiceAmountMismatchNotice(null);
+    const errors: string[] = [];
+    const mismatchNotices: string[] = [];
+    const savedIds: string[] = [];
+    const snapshotPatch: Record<string, string> = {};
+    const invoicePatch = new Map<string, InvoiceRow>();
+    try {
+      for (const id of ids) {
+        const row = invoicesRef.current.find((r) => r.id === id);
+        if (!row?.id) continue;
+        if (invoiceSaveInflightRef.current.has(id)) {
+          errors.push(`${String(row.發票號碼 ?? id).trim() || id}（忙碌中）`);
+          continue;
+        }
+        invoiceSaveInflightRef.current.add(id);
+        setInvoiceEditSavingId(id);
+        try {
+          const res = await fetch("/api/invoices", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: row.id, ...invoiceRowToInsertInput(row) }),
+          });
+          const data = (await safeResJson(res)) as { ok?: boolean; error?: string; invoice?: InvoiceRow };
+          if (!res.ok || data.ok === false) {
+            errors.push(`${String(row.發票號碼 ?? id).trim() || id}：${String(data.error ?? "儲存失敗")}`);
+            continue;
+          }
+          const saved = data.invoice ? { ...row, ...data.invoice } : row;
+          if (data.invoice) {
+            const savedId = String(data.invoice.id ?? id);
+            snapshotPatch[savedId] = String(data.invoice.廠商付款日期 ?? "");
+            invoicePatch.set(id, data.invoice);
+          }
+          savedIds.push(id);
+          const mismatch = getInvoiceAmountMismatch(saved, masterUntaxedByProjectId);
+          if (mismatch) {
+            mismatchNotices.push(formatInvoiceAmountMismatchNotice(mismatch, saved.發票號碼));
+          }
+        } catch (e) {
+          errors.push(
+            `${String(row.發票號碼 ?? id).trim() || id}：${e instanceof Error ? e.message : "儲存失敗"}`
+          );
+        } finally {
+          invoiceSaveInflightRef.current.delete(id);
+        }
+      }
+      if (invoicePatch.size > 0) {
+        setInvoices((prev) =>
+          sortInvoicesByInvoiceNumber(
+            prev.map((r) => {
+              if (!r.id || !invoicePatch.has(r.id)) return r;
+              return { ...r, ...invoicePatch.get(r.id)! };
+            })
+          )
+        );
+      }
+      if (Object.keys(snapshotPatch).length > 0) {
+        setInvoiceLedgerSnapshot((prev) => ({ ...prev, ...snapshotPatch }));
+      }
+      if (savedIds.length > 0) {
+        const savedSet = new Set(savedIds);
+        setInvoiceDirtyIds((prev) => prev.filter((dirtyId) => !savedSet.has(dirtyId)));
+        await refreshDashboardData(["finance", "payout"]);
+      }
+      if (errors.length > 0) {
+        const preview = errors.slice(0, 3).join("；");
+        setInvoiceEditError(
+          `批次存檔：成功 ${savedIds.length} 筆，失敗 ${errors.length} 筆。${preview}${errors.length > 3 ? "…" : ""}`
+        );
+      }
+      if (mismatchNotices.length > 0) {
+        setInvoiceAmountMismatchNotice(mismatchNotices.slice(0, 2).join("\n"));
+      }
+    } finally {
+      setInvoiceEditSavingId(null);
+      setInvoiceBatchSaving(false);
+    }
+  }, [
+    selectedInvoiceIds,
+    invoiceDirtyIds,
+    invoiceBatchSaving,
+    masterUntaxedByProjectId,
+    refreshDashboardData,
+  ]);
 
   /** 手動刷新：只對尚未完成的字軌發票打光貿；平常不主動查。 */
   const refreshAmegoInvoiceStatuses = useCallback(async () => {
@@ -12575,15 +12676,31 @@ export default function DashboardPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
+                        onClick={() => void persistSelectedDirtyInvoices()}
+                        disabled={invoiceBatchSaving || selectedDirtyInvoiceIds.length === 0}
+                        className="rounded-xl border border-amber-400 bg-amber-500 px-3 py-1.5 text-xs font-bold text-slate-900 shadow-sm transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        title={
+                          selectedDirtyInvoiceIds.length === 0
+                            ? "勾選列沒有未存檔變更"
+                            : `將存檔 ${selectedDirtyInvoiceIds.length} 筆有變更的發票`
+                        }
+                      >
+                        {invoiceBatchSaving
+                          ? "批次存檔中…"
+                          : `批次存檔 ${selectedDirtyInvoiceIds.length} 筆`}
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => exportSelectedInvoicesExcel()}
-                        className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100"
+                        disabled={invoiceBatchSaving}
+                        className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-60"
                       >
                         匯出 Excel {selectedInvoiceIds.length} 筆
                       </button>
                       <button
                         type="button"
                         onClick={() => void deleteInvoicesByIdList(selectedInvoiceIds)}
-                        disabled={deletingInvoiceIds.length > 0}
+                        disabled={deletingInvoiceIds.length > 0 || invoiceBatchSaving}
                         className="rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 transition hover:bg-red-100 disabled:opacity-60"
                       >
                         刪除已選 {selectedInvoiceIds.length} 筆
@@ -12658,7 +12775,7 @@ export default function DashboardPage() {
               )}
               {invoices.length > 0 && (
                 <p className="mb-2 text-[11px] text-stone-500">
-                  各欄可直接編輯；系統不會自動儲存，填好後請按該列「存檔」。發票號碼不可空白。金額若與「專案總金額未稅×1.05」不符會標示警示（仍可存檔）。
+                  各欄可直接編輯；系統不會自動儲存。填好後可按該列「存檔」，或勾選多筆後按「批次存檔」。發票號碼不可空白。金額若與「專案總金額未稅×1.05」不符會標示警示（仍可存檔）。
                 </p>
               )}
               <ListAmountSummary
@@ -12681,6 +12798,7 @@ export default function DashboardPage() {
                               visibleInvoiceIds.length > 0 &&
                               visibleInvoiceIds.every((id) => selectedInvoiceIdSet.has(id))
                             }
+                            disabled={invoiceBatchSaving}
                             onChange={(e) => {
                               setSelectedInvoiceIds((prev) => {
                                 const next = new Set(prev);
@@ -12711,7 +12829,10 @@ export default function DashboardPage() {
                       ) : (
                         visibleInvoicesRows.map((inv, i) => {
                           const rowId = typeof inv.id === "string" && inv.id ? inv.id : null;
-                          const saving = rowId != null && invoiceEditSavingId === rowId;
+                          const saving =
+                            rowId != null &&
+                            (invoiceEditSavingId === rowId ||
+                              (invoiceBatchSaving && selectedInvoiceIdSet.has(rowId) && invoiceDirtyIdSet.has(rowId)));
                           const dirty = rowId != null && invoiceDirtyIdSet.has(rowId);
                           const amountMismatch = getInvoiceAmountMismatch(inv, masterUntaxedByProjectId);
                           return (
@@ -12728,7 +12849,7 @@ export default function DashboardPage() {
                                   <input
                                     type="checkbox"
                                     checked={selectedInvoiceIdSet.has(rowId)}
-                                    disabled={deletingInvoiceIdSet.has(rowId)}
+                                    disabled={deletingInvoiceIdSet.has(rowId) || invoiceBatchSaving}
                                     onChange={(e) => {
                                       setSelectedInvoiceIds((prev) => {
                                         const next = new Set(prev);
@@ -12975,7 +13096,7 @@ export default function DashboardPage() {
                                       </button>
                                       <button
                                         type="button"
-                                        disabled={saving || !dirty}
+                                        disabled={saving || !dirty || invoiceBatchSaving}
                                         onClick={() => void persistInvoiceRowById(rowId)}
                                         className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
                                           dirty
@@ -13413,6 +13534,12 @@ export default function DashboardPage() {
             <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-end gap-x-3 gap-y-2 text-xs sm:text-sm">
               <span className="text-stone-600">
                 已選 <strong className="tabular-nums text-stone-900">{selectedInvoiceIds.length}</strong> 筆
+                {selectedDirtyInvoiceIds.length > 0 ? (
+                  <>
+                    {" "}
+                    · 未存檔 <strong className="tabular-nums text-amber-900">{selectedDirtyInvoiceIds.length}</strong> 筆
+                  </>
+                ) : null}
               </span>
               <span className="hidden text-stone-300 sm:inline" aria-hidden>
                 ·
@@ -13423,8 +13550,19 @@ export default function DashboardPage() {
               </span>
               <button
                 type="button"
+                onClick={() => void persistSelectedDirtyInvoices()}
+                disabled={invoiceBatchSaving || selectedDirtyInvoiceIds.length === 0}
+                className="rounded-lg border border-amber-400 bg-amber-500 px-3 py-1.5 text-xs font-bold text-slate-900 shadow-sm transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
+              >
+                {invoiceBatchSaving
+                  ? "批次存檔中…"
+                  : `批次存檔${selectedDirtyInvoiceIds.length > 0 ? ` ${selectedDirtyInvoiceIds.length}` : ""}`}
+              </button>
+              <button
+                type="button"
                 onClick={() => exportSelectedInvoicesExcel()}
-                className="rounded-lg border border-emerald-300 bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-500 sm:text-sm"
+                disabled={invoiceBatchSaving}
+                className="rounded-lg border border-emerald-300 bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-500 disabled:opacity-60 sm:text-sm"
               >
                 匯出 Excel
               </button>
