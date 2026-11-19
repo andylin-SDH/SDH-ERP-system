@@ -414,27 +414,52 @@ export function weekStats(
   const eff = effectiveClaims(weekStart, claims, bookings, dayInfo, cfg).claims;
   const dates = weekDates(weekStart);
   const regularSlots = cfg.SLOTS.filter((slot) => !cfg.RULES.offHours.periods.includes(slot.period));
-  const per: Record<string, { officeDates: Record<string, boolean>; byPlace: Record<string, Record<string, boolean>>; studio: Record<string, boolean>; leave: Record<string, boolean> }> = {};
+  /** 到班天：辦公室＋錄音室合併；早或午各算 0.5 天，兩段都有才算 1 天 */
+  const dayPeriods = ["am", "pm"] as const;
+  const per: Record<
+    string,
+    {
+      periodsByDate: Record<string, Record<string, boolean>>;
+      byPlacePeriods: Record<string, Record<string, Record<string, boolean>>>;
+      studio: Record<string, boolean>;
+      leave: Record<string, boolean>;
+    }
+  > = {};
   const leave: Record<string, boolean> = {};
-  for (const person of cfg.PEOPLE) per[person.name] = { officeDates: {}, byPlace: {}, studio: {}, leave: {} };
+  for (const person of cfg.PEOPLE) per[person.name] = { periodsByDate: {}, byPlacePeriods: {}, studio: {}, leave: {} };
   for (const claim of eff) {
     const stat = per[claim.person];
     if (!stat) continue;
     const kind = placeKind(cfg, claim.place);
+    const period = periodOfSlot(cfg, claim.slot);
     if (kind === "leave") {
-      stat.leave[`${claim.date}|${periodOfSlot(cfg, claim.slot)}`] = true;
+      stat.leave[`${claim.date}|${period}`] = true;
       leave[`${claim.person}|${claim.date}|${claim.slot}`] = true;
-    } else if (kind === "office") {
-      stat.officeDates[claim.date] = true;
-      stat.byPlace[claim.place] = stat.byPlace[claim.place] ?? {};
-      stat.byPlace[claim.place][claim.date] = true;
-    } else if (kind === "studio") {
-      stat.studio[`${claim.date}|${claim.slot}|${claim.place}`] = true;
+    } else if (kind === "office" || kind === "studio") {
+      stat.periodsByDate[claim.date] = stat.periodsByDate[claim.date] ?? {};
+      if (dayPeriods.includes(period as (typeof dayPeriods)[number])) {
+        stat.periodsByDate[claim.date][period] = true;
+      }
+      if (kind === "office" && dayPeriods.includes(period as (typeof dayPeriods)[number])) {
+        stat.byPlacePeriods[claim.place] = stat.byPlacePeriods[claim.place] ?? {};
+        stat.byPlacePeriods[claim.place][claim.date] = stat.byPlacePeriods[claim.place][claim.date] ?? {};
+        stat.byPlacePeriods[claim.place][claim.date][period] = true;
+      } else if (kind === "studio") {
+        stat.studio[`${claim.date}|${claim.slot}|${claim.place}`] = true;
+      }
     }
   }
   return cfg.PEOPLE.map((person) => {
     const stat = per[person.name];
-    const officeDates = Object.keys(stat.officeDates).sort();
+    let halfUnits = 0;
+    const officeDates: string[] = [];
+    for (const date of Object.keys(stat.periodsByDate).sort()) {
+      const covered = dayPeriods.filter((period) => stat.periodsByDate[date]?.[period]).length;
+      if (!covered) continue;
+      halfUnits += covered;
+      officeDates.push(date);
+    }
+    const officeDays = halfUnits / 2;
     const required = person.minOfficeDays === undefined ? null : person.minOfficeDays;
     const available = dates.filter(
       (date) => dayInfo[date]?.workday && !regularSlots.every((slot) => leave[`${person.name}|${date}|${slot.id}`])
@@ -442,12 +467,18 @@ export function weekStats(
     const need = required === null ? null : Math.min(required, available);
     const byPlace: Record<string, number> = {};
     for (const place of cfg.PLACES) {
-      if (place.kind === "office") byPlace[place.id] = Object.keys(stat.byPlace[place.id] ?? {}).length;
+      if (place.kind !== "office") continue;
+      // 該辦公室本身的早／午各 0.5；勿因別處錄音室湊滿而灌水
+      let placeHalves = 0;
+      for (const date of Object.keys(stat.byPlacePeriods[place.id] ?? {})) {
+        placeHalves += dayPeriods.filter((period) => stat.byPlacePeriods[place.id]?.[date]?.[period]).length;
+      }
+      byPlace[place.id] = placeHalves / 2;
     }
     return {
       name: person.name,
       role: person.role || "",
-      officeDays: officeDates.length,
+      officeDays,
       officeDates,
       byPlace,
       studioHours: Object.keys(stat.studio).length / 2,
@@ -455,9 +486,15 @@ export function weekStats(
       required,
       need,
       adjusted: need !== null && required !== null && need < required,
-      met: need === null ? null : officeDates.length >= need,
+      met: need === null ? null : officeDays >= need,
     };
   });
+}
+
+/** 到班天數顯示（0.5 步进，避免浮點雜訊） */
+export function formatAttendanceDays(days: number): string {
+  const halves = Math.round(days * 2);
+  return halves % 2 === 0 ? String(halves / 2) : (halves / 2).toFixed(1);
 }
 
 export function presetClaims(
@@ -541,10 +578,9 @@ export function followGaps(
   for (const key of Object.keys(byHour)) {
     const [date, slot] = key.split("|");
     if (isOffHours(date, slot, dayInfo, cfg) || isMeetingBackupExempt(date, slot, dayInfo, cfg)) continue;
-    const bookingsHere = byHour[key] ?? [];
-    // 只有大錄音室（不同空間）跟錄時，才需要小辦公室／小錄音室另有人留守
-    if (!bookingsHere.some((booking) => pullsAwayFromBackup(cfg, booking.placeId))) continue;
-    if (coverPeople(date, slot).length > 0) continue;
+    // 五吉郎在跟錄（含小錄音室）時忙著跟節目，小辦公室要另有人；他本人不算留守
+    const others = coverPeople(date, slot).filter((person) => person !== follower);
+    if (others.length) continue;
     perDate[date] = perDate[date] ?? [];
     perDate[date].push(slot);
   }
@@ -706,7 +742,7 @@ export function findConflicts(
       type: "BACKUP_MISSING",
       severity: "error",
       cells: gap.slots.map((slot) => ({ date: gap.date, slot, place: backupId })),
-      message: `${whenText(cfg, gap.date, gap.slots)} ${follower} 要去大錄音室跟錄${unique(gap.bookings.map((booking) => `「${booking.show}」`)).join("")}，小辦公室／小錄音室需要另一位同仁值班（目前沒有人）`,
+      message: `${whenText(cfg, gap.date, gap.slots)} ${follower} 在跟錄${unique(gap.bookings.map((booking) => `「${booking.show}」`)).join("")}，小辦公室需要另一位同仁值班（目前沒有人）`,
     });
   }
 
@@ -900,7 +936,7 @@ export function findConflicts(
         type: "OFFICE_DAYS",
         severity: "warn",
         cells: [],
-        message: `${stat.name} 本週進辦公室只排了 ${stat.officeDays} 天，至少需要 ${stat.need} 天${stat.adjusted ? "（已扣除假日與請假）" : ""}`,
+        message: `${stat.name} 本週到班只排了 ${formatAttendanceDays(stat.officeDays)} 天，至少需要 ${stat.need} 天（早或午各算 0.5 天；辦公室與錄音室合計${stat.adjusted ? "；已扣除假日與請假" : ""}）`,
       });
     }
   }

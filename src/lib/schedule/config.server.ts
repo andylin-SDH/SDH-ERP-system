@@ -67,7 +67,7 @@ export const SCHEDULE_CONFIG: ScheduleConfig = {
     { name: "林安迪", role: "老闆（只排晚上與假日）", minOfficeDays: null },
     { name: "五吉郎", role: "小辦公室值班、跟錄", minOfficeDays: null },
     { name: "克萊", role: "", minOfficeDays: 3 },
-    { name: "維尼", role: "主要週一、跟錄灃食", minOfficeDays: null },
+    { name: "維尼", role: "主要週一、跟錄灃食", minOfficeDays: 3 },
     { name: "IVY", role: "", minOfficeDays: 3 },
   ],
   PERIODS,
@@ -100,7 +100,7 @@ export const SCHEDULE_CONFIG: ScheduleConfig = {
     workdays: [1, 2, 3, 4, 5],
     followPerson: "五吉郎",
     backupPlaceId: "smallOffice",
-    /** 小辦公室與小錄音室同一空間；五吉郎在其中一處即算值班，不必硬排另一人 */
+    /** 小辦公室與小錄音室同一空間：無跟錄時五吉郎在其中一處即算值班；跟錄中則要另有人留守 */
     backupCoverPlaceIds: ["smallOffice", "smallStudio"],
     minStaff: { smallOffice: 0, bigOffice: 0 },
     maxStaff: {},

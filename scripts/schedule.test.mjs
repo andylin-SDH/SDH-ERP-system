@@ -75,6 +75,31 @@ test('big-studio follow without cover staff still needs backup', async () => {
   assert.equal(claims.some((row) => row.person === '五吉郎' && row.place === 'bigStudio'), true);
   assert.equal(conflicts.some((item) => item.type === 'BACKUP_MISSING'), true);
 });
+test('small-studio follow also needs another person at the office', async () => {
+  const { findConflicts, buildDayInfo, effectiveClaims } = await import('../src/lib/schedule/logic.ts');
+  const dayInfo = buildDayInfo(week, {}, cfg);
+  const bookings = [{
+    calendar: '小錄音室', placeId: 'smallStudio', color: '#000', title: '慢慢長出來', start: `${date}T14:00:00+08:00`, end: `${date}T15:00:00+08:00`,
+    kind: 'follow', show: '慢慢長出來', owner: '', companions: [], andyRecording: false,
+    slots: [{ date, slot: 'm1400' }, { date, slot: 'm1430' }],
+  }];
+  const claims = effectiveClaims(week, [], bookings, dayInfo, cfg).claims;
+  const conflicts = findConflicts(week, [], bookings, dayInfo, cfg);
+  assert.equal(claims.some((row) => row.person === '五吉郎' && row.place === 'smallStudio'), true);
+  assert.equal(conflicts.some((item) => item.type === 'BACKUP_MISSING' && item.message.includes('跟錄')), true);
+});
+test('small-studio follow is fine when another person covers the office', async () => {
+  const { findConflicts, buildDayInfo } = await import('../src/lib/schedule/logic.ts');
+  const dayInfo = buildDayInfo(week, {}, cfg);
+  const bookings = [{
+    calendar: '小錄音室', placeId: 'smallStudio', color: '#000', title: '慢慢長出來', start: `${date}T14:00:00+08:00`, end: `${date}T15:00:00+08:00`,
+    kind: 'follow', show: '慢慢長出來', owner: '', companions: [], andyRecording: false,
+    slots: [{ date, slot: 'm1400' }, { date, slot: 'm1430' }],
+  }];
+  const stored = [claim('m1400', 'smallOffice', '克萊'), claim('m1430', 'smallOffice', '克萊')];
+  const conflicts = findConflicts(week, stored, bookings, dayInfo, cfg);
+  assert.equal(conflicts.some((item) => item.type === 'BACKUP_MISSING'), false);
+});
 test('rejects dates outside the requested week and invalid place slots', () => {
   assert.match(planStoredClaimChange(week,'克萊',[{...item('m0900'),date:'2026-11-23'}],true,[],cfg).error,/不在/);
   assert.match(planStoredClaimChange(week,'克萊',[item('m2000')],true,[],cfg).error,/時段/);
@@ -86,4 +111,62 @@ test('overlap warning includes leave and automatic meetings but excludes same-pl
 test('Sunday belongs to the same Monday week and bookings retain half-hour accuracy', () => {
   assert.equal(mondayOf('2026-11-22'),week);
   assert.deepEqual(bookingSlots(week,{start:'2026-11-18T09:30:00+08:00',end:'2026-11-18T10:00:00+08:00'},cfg),[{date,slot:'m0930'}]);
+});
+test('studio-only am+pm days count toward attendance without office places', async () => {
+  const { weekStats, findConflicts, buildDayInfo } = await import('../src/lib/schedule/logic.ts');
+  const dayInfo = buildDayInfo(week, {}, cfg);
+  // 避開週一：全員會議會自動佔新辦公室上午 0.5 天
+  const days = ['2026-11-17', '2026-11-18', '2026-11-19'];
+  const amPm = cfg.SLOTS.filter((slot) => slot.period === 'am' || slot.period === 'pm').map((slot) => slot.id);
+  for (const place of ['bigStudio', 'smallStudio']) {
+    const claims = days.flatMap((day) => amPm.map((slot) => ({ date: day, slot, place, person: '克萊', auto: false })));
+    const claire = weekStats(week, claims, dayInfo, cfg, []).find((row) => row.name === '克萊');
+    // 3 天錄音室 + 週一會議 0.5
+    assert.equal(claire.officeDays, 3.5, `${place} should count studio days plus Monday meeting`);
+    assert.equal(claire.byPlace.bigOffice, 0.5);
+    assert.equal(claire.byPlace.smallOffice, 0);
+    assert.equal(
+      findConflicts(week, claims, [], dayInfo, cfg).some((item) => item.type === 'OFFICE_DAYS' && item.message.includes('克萊')),
+      false,
+      `${place}-only schedule must not warn about missing office days`
+    );
+  }
+});
+test('studio morning alone counts as 0.5 day each', async () => {
+  const { weekStats, findConflicts, buildDayInfo, formatAttendanceDays } = await import('../src/lib/schedule/logic.ts');
+  const dayInfo = buildDayInfo(week, {}, cfg);
+  const days = ['2026-11-17', '2026-11-18', '2026-11-19'];
+  const am = cfg.SLOTS.filter((slot) => slot.period === 'am').map((slot) => slot.id);
+  const claims = days.flatMap((day) => am.map((slot) => ({ date: day, slot, place: 'bigStudio', person: 'IVY', auto: false })));
+  const ivy = weekStats(week, claims, dayInfo, cfg, []).find((row) => row.name === 'IVY');
+  // 3×0.5 錄音室上午 + 週一會議 0.5
+  assert.equal(ivy.officeDays, 2);
+  assert.equal(formatAttendanceDays(ivy.officeDays), '2');
+  assert.equal(
+    findConflicts(week, claims, [], dayInfo, cfg).some((item) => item.type === 'OFFICE_DAYS' && item.message.includes('IVY')),
+    true,
+    '2 < 3 should still warn'
+  );
+});
+test('six studio mornings meet the 3-day attendance need', async () => {
+  const { weekStats, findConflicts, buildDayInfo } = await import('../src/lib/schedule/logic.ts');
+  const dayInfo = buildDayInfo(week, {}, cfg);
+  const days = ['2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19', '2026-11-20', '2026-11-21'];
+  const am = cfg.SLOTS.filter((slot) => slot.period === 'am').map((slot) => slot.id);
+  const claims = days.flatMap((day) => am.map((slot) => ({ date: day, slot, place: 'smallStudio', person: '克萊', auto: false })));
+  assert.equal(weekStats(week, claims, dayInfo, cfg, []).find((row) => row.name === '克萊').officeDays, 3);
+  assert.equal(
+    findConflicts(week, claims, [], dayInfo, cfg).some((item) => item.type === 'OFFICE_DAYS' && item.message.includes('克萊')),
+    false
+  );
+});
+test('half-day units: one morning is exactly 0.5 without Monday meeting noise', async () => {
+  const { weekStats, buildDayInfo } = await import('../src/lib/schedule/logic.ts');
+  // 用週二單日上午，避開週一會議
+  const dayInfo = buildDayInfo(week, {}, cfg);
+  const am = cfg.SLOTS.filter((slot) => slot.period === 'am').map((slot) => slot.id);
+  const claims = am.map((slot) => ({ date: '2026-11-17', slot, place: 'bigStudio', person: 'IVY', auto: false }));
+  const ivy = weekStats(week, claims, dayInfo, cfg, []).find((row) => row.name === 'IVY');
+  // 週一會議 0.5 + 週二上午 0.5
+  assert.equal(ivy.officeDays, 1);
 });

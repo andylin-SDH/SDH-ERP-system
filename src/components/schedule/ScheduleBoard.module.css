@@ -114,7 +114,10 @@
 .currentClaims small { flex-basis: 100%; color: var(--muted); font-size: 11px; }
 .currentClaims > p { margin-top: 8px; }
 .fullButton { width: 100%; margin-top: 14px; }
-.leaveBody { padding: 16px 18px 18px; display: grid; gap: 14px; }
+.leaveStatusBody { padding: 16px 18px 18px; display: grid; gap: 18px; }
+.leaveToday, .leaveRoster { display: grid; gap: 10px; }
+.leaveTodayHead, .leaveRosterName { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.leaveTodayCount { font-size: 12px; font-weight: 650; color: #845510; }
 .leaveList { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 42px; }
 .leaveCard {
   display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px;
@@ -122,6 +125,28 @@
 }
 .leaveCard strong { font-weight: 650; }
 .leaveCard span { font-size: 11px; color: #845510; }
+.leaveRosterList { display: grid; gap: 8px; }
+.leaveRosterRow, .leaveRosterRowActive {
+  display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; align-items: start;
+  padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #fbfcfb;
+}
+.leaveRosterRowActive { background: #fff8ec; border-color: #f0d7a4; }
+.leaveRosterName { display: grid; gap: 2px; }
+.leaveRosterName small { color: var(--muted); font-size: 11px; }
+.leaveRosterEntries { display: flex; flex-wrap: wrap; gap: 6px; }
+.leaveRosterEntries button {
+  font-size: 12px; padding: 7px 10px; background: #fff5e4; border-color: #f0d7a4; min-height: 0;
+}
+.leaveRosterEntries .leaveEntryActive, .leaveRosterEntries button.leaveEntryActive {
+  background: var(--green); color: #fff; border-color: transparent;
+}
+.leaveRosterEmpty { color: var(--muted); font-size: 13px; }
+.leaveAsideNote {
+  margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: #fff5e4; color: #845510; font-size: 12px;
+}
+@media (max-width: 720px) {
+  .leaveRosterRow, .leaveRosterRowActive { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+}
 .leaveWeek { margin-top: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .leaveWeekGrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--line); }
 .leaveDay, .leaveDayActive { min-width: 0; border-right: 1px solid var(--line); padding: 0 0 12px; }

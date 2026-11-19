@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { FollowList } from "./FollowList";
-import { addDays, datesInRange, isDateStr, mondayOf } from "@/lib/schedule/logic";
+import { addDays, datesInRange, formatAttendanceDays, isDateStr, mondayOf } from "@/lib/schedule/logic";
 import { bookingOverlaps, claimRanges, conflictingClaims, conflictTargets, selectionSlots, type DispatchSelection } from "@/lib/schedule/dispatch";
 import type { ScheduleBooking, ScheduleConflict, ScheduleWeekPayload } from "@/lib/schedule/types";
 import styles from "./ScheduleBoard.module.css";
@@ -106,7 +106,7 @@ export function ScheduleBoard({ canEdit }: { canEdit: boolean }) {
   return (
     <section className={styles.board} aria-label="場地班表" aria-busy={loading || saving}>
       <header className={styles.header}>
-        <div><p className={styles.eyebrow}>DAILY OPERATIONS</p><h2>場地調度</h2><p className={styles.subtitle}>先看場地，再安排人。預約、值班與待處理事項，一起掌握。</p></div>
+        <div><p className={styles.eyebrow}>DAILY OPERATIONS</p><h2>場地調度</h2><p className={styles.subtitle}>先看場地，再安排人。預約、值班與待排班事項，一起掌握。</p></div>
         <nav className={styles.tabs} aria-label="班表功能">
           <button type="button" aria-pressed={page === "dispatch"} disabled={saving} onClick={() => { setPage("dispatch"); setSelection(null); }}>場地班表</button>
           <button type="button" aria-pressed={page === "leave"} disabled={saving} onClick={() => { setPage("leave"); setSelection(null); }}>請假</button>
@@ -136,7 +136,7 @@ export function ScheduleBoard({ canEdit }: { canEdit: boolean }) {
                 : 0;
             return <button type="button" key={day} aria-pressed={day === date} disabled={saving} onClick={() => navigate(day)}>
               <span>{dateLabel(day)}</span><small>{week?.dayInfo[day]?.holiday || (day === todayInTaipei() ? "今天" : week?.dayInfo[day]?.weekend ? "週末" : "平日")}</small>
-              {issueCount > 0 && <span className={styles.dayCount}>{page === "dispatch" ? `${issueCount} 件待處理` : `${issueCount} 人請假`}</span>}
+              {issueCount > 0 && <span className={styles.dayCount}>{page === "dispatch" ? `${issueCount} 件待排班` : `${issueCount} 人請假`}</span>}
             </button>;
           })}
         </div>
@@ -181,7 +181,7 @@ export function ScheduleBoard({ canEdit }: { canEdit: boolean }) {
                               <strong>{range.person}<span>{range.auto ? "↻ 自動" : "手動"}</span></strong><small>{range.start}–{range.end}</small>
                             </button>)}
                             {!ranges.length && <p className={styles.muted}>{week.me.canSeeAll ? "尚未排班" : "沒有你的班次"}</p>}
-                            {issues.length > 0 && <button type="button" className={styles.cellIssue} disabled={locked} onClick={() => setSelection({ date, place: place.id, slots: ids })}>{issues.length} 件待處理 ↗</button>}
+                            {issues.length > 0 && <button type="button" className={styles.cellIssue} disabled={locked} onClick={() => setSelection({ date, place: place.id, slots: ids })}>{issues.length} 件待排班 ↗</button>}
                             <button type="button" className={styles.add} disabled={locked} onClick={() => setSelection({ date, place: place.id, slots: ids })}>{canSchedule ? "＋ 安排班次" : "查看時段"}</button>
                           </div>}
                         </td>;
@@ -191,15 +191,15 @@ export function ScheduleBoard({ canEdit }: { canEdit: boolean }) {
                 </div>
                 <footer className={styles.matrixFoot}><span>預約來自 Google 日曆 · 值班來自 ERP</span><span>↻ 自動班次依會議／跟錄規則帶入</span></footer>
               </div>
-              <details className={styles.weekSummary}><summary>本週進辦公室與錄音時數</summary><div className={styles.stats}>{week.stats.map((stat) => <div key={stat.name}><strong>{stat.name}</strong><p>辦公室 {stat.officeDays}{stat.need !== null ? ` / ${stat.need}` : ""} 天</p><small>錄音 {stat.studioHours} 小時{stat.adjusted ? " · 已調整應到天數" : ""}</small></div>)}</div></details>
+              <details className={styles.weekSummary}><summary>本週到班天數（早／午各 0.5 天）</summary><div className={styles.stats}>{week.stats.map((stat) => <div key={stat.name}><strong>{stat.name}</strong><p>到班 {formatAttendanceDays(stat.officeDays)}{stat.need !== null ? ` / ${stat.need}` : ""} 天</p><small>辦公室＋錄音室合計 · 早或午各 0.5 · 其中錄音 {stat.studioHours} 小時{stat.adjusted ? " · 已調整應到天數" : ""}</small></div>)}</div></details>
             </div>
-            <aside className={styles.sidebar} aria-label="班次調整與待處理事項">
+            <aside className={styles.sidebar} aria-label="班次調整與待排班事項">
               {selection && <div ref={editor} tabIndex={-1} className={styles.editorFocus}>
                 <ShiftEditor key={`${selection.date}-${selection.place}-${selection.slots.join(",")}-${selection.person ?? ""}`} week={week} selection={selection} canEdit={canSchedule} saving={locked} onClose={() => setSelection(null)} onSave={mutate} />
               </div>}
-              <div className={styles.panel}><p className={styles.eyebrow}>ACTION QUEUE</p><div className={styles.queueHeading}><h3>待處理事項</h3><span className={styles.badge}>{dayIssues.length}</span></div>
+              <div className={styles.panel}><p className={styles.eyebrow}>ACTION QUEUE</p><div className={styles.queueHeading}><h3>待排班事項</h3><span className={styles.badge}>{dayIssues.length}</span></div>
                 <p className={styles.muted}>{dateLabel(date)}{week.me.canSeeAll ? " · 全員" : " · 你的相關提醒"}</p>
-                {dayIssues.length === 0 && <p className={styles.clear}>{week.warnings.length ? "目前資料沒有待處理事項；日曆讀取仍有警告。" : "目前沒有待處理事項。"}</p>}
+                {dayIssues.length === 0 && <p className={styles.clear}>{week.warnings.length ? "目前資料沒有待排班事項；日曆讀取仍有警告。" : "目前沒有待排班事項。"}</p>}
                 {dayIssues.map((issue, index) => <Issue key={`${issue.type}-${index}`} issue={issue} week={week} date={date} disabled={locked} onSelect={setSelection} />)}
                 {weeklyIssues.length > 0 && <details className={styles.weeklyIssues}><summary>本週其他提醒（{weeklyIssues.length}）</summary>{weeklyIssues.map((issue, index) => <p key={index}>{issue.message}</p>)}</details>}
               </div>
@@ -223,6 +223,15 @@ function leaveSlotsFor(place: ScheduleWeekPayload["config"]["places"][number], w
   return week.config.slots.filter((slot) => slot.period !== "eve" && place.slots.includes(slot.id)).map((slot) => slot.id);
 }
 
+function personLeaveEntries(week: ScheduleWeekPayload, placeId: string, person: string, days: string[]) {
+  return days.flatMap((day) =>
+    claimRanges(
+      week.claims.filter((claim) => claim.date === day && claim.place === placeId && claim.person === person),
+      week.config.slots
+    ).map((range) => ({ date: day, ...range }))
+  );
+}
+
 function LeavePage({
   week, date, disabled, canSchedule, selection, editorRef, onPickDay, onSelect, onClose, onSave,
 }: {
@@ -240,8 +249,18 @@ function LeavePage({
   const place = week.config.places.find((item) => item.kind === "leave");
   if (!place) return <div className={styles.empty}>尚未設定請假場地。</div>;
   const days = Array.from({ length: 7 }, (_, index) => addDays(week.weekStart, index));
+  const people = week.me.canSeeAll
+    ? week.config.people
+    : week.config.people.filter((person) => person.name === week.me.person);
   const dayClaims = week.claims.filter((claim) => claim.date === date && claim.place === place.id);
   const ranges = claimRanges(dayClaims, week.config.slots);
+  const todayOnLeave = [...new Set(ranges.map((range) => range.person))];
+  const weekLeavePeople = people
+    .map((person) => ({
+      name: person.name,
+      entries: personLeaveEntries(week, place.id, person.name, days),
+    }))
+    .filter((row) => row.entries.length > 0);
   const weekCount = new Set(week.claims.filter((claim) => claim.place === place.id).map((claim) => `${claim.person}|${claim.date}`)).size;
   return (
     <div className={styles.layout}>
@@ -249,24 +268,72 @@ function LeavePage({
         {!week.me.canSeeAll && <p className={styles.scope}>目前依權限只顯示{week.me.person ? `${week.me.person}自己的請假` : "可查看範圍"}。</p>}
         <div className={styles.matrix}>
           <div className={styles.matrixHeader}>
-            <h3>{dateLabel(date)} · 請假</h3>
+            <h3>目前請假情形</h3>
             <span className={styles.muted}>{week.me.canSeeAll ? "全員" : "僅顯示本人"} · 本週 {weekCount} 筆日次</span>
           </div>
-          <div className={styles.leaveBody}>
-            <div className={styles.leaveList}>
-              {ranges.map((range) => (
-                <button
-                  type="button"
-                  className={styles.leaveCard}
-                  disabled={disabled}
-                  key={`${range.person}-${range.start}`}
-                  onClick={() => onSelect({ date, place: place.id, slots: range.slots, person: range.person })}
-                >
-                  <strong>{range.person}</strong>
-                  <span>{range.start}–{range.end}</span>
-                </button>
-              ))}
-              {!ranges.length && <p className={styles.muted}>這天沒有請假紀錄</p>}
+          <div className={styles.leaveStatusBody}>
+            <div className={styles.leaveToday}>
+              <p className={styles.eyebrow}>SELECTED DAY</p>
+              <div className={styles.leaveTodayHead}>
+                <h4>{dateLabel(date)}</h4>
+                <span className={todayOnLeave.length ? styles.leaveTodayCount : styles.muted}>
+                  {todayOnLeave.length ? `${todayOnLeave.length} 人請假` : "無人請假"}
+                </span>
+              </div>
+              <div className={styles.leaveList}>
+                {ranges.map((range) => (
+                  <button
+                    type="button"
+                    className={styles.leaveCard}
+                    disabled={disabled}
+                    key={`${range.person}-${range.start}`}
+                    onClick={() => onSelect({ date, place: place.id, slots: range.slots, person: range.person })}
+                  >
+                    <strong>{range.person}</strong>
+                    <span>{range.start}–{range.end}</span>
+                  </button>
+                ))}
+                {!ranges.length && <p className={styles.muted}>這天沒有請假紀錄</p>}
+              </div>
+            </div>
+            <div className={styles.leaveRoster}>
+              <p className={styles.eyebrow}>THIS WEEK</p>
+              <h4>本週各員請假</h4>
+              <div className={styles.leaveRosterList}>
+                {people.map((person) => {
+                  const entries = personLeaveEntries(week, place.id, person.name, days);
+                  const onSelectedDay = entries.some((entry) => entry.date === date);
+                  return (
+                    <div key={person.name} className={onSelectedDay ? styles.leaveRosterRowActive : styles.leaveRosterRow}>
+                      <div className={styles.leaveRosterName}>
+                        <strong>{person.name}</strong>
+                        <small>{entries.length ? `${entries.length} 段` : "本週無請假"}</small>
+                      </div>
+                      <div className={styles.leaveRosterEntries}>
+                        {entries.length === 0 ? (
+                          <span className={styles.muted}>—</span>
+                        ) : (
+                          entries.map((entry) => (
+                            <button
+                              type="button"
+                              key={`${person.name}-${entry.date}-${entry.start}`}
+                              disabled={disabled}
+                              className={entry.date === date ? styles.leaveEntryActive : undefined}
+                              onClick={() => {
+                                onPickDay(entry.date);
+                                onSelect({ date: entry.date, place: place.id, slots: entry.slots, person: person.name });
+                              }}
+                            >
+                              {dateLabel(entry.date)} · {entry.start}–{entry.end}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {!weekLeavePeople.length && <p className={styles.leaveRosterEmpty}>本週目前沒有任何人請假。</p>}
             </div>
             {canSchedule && (
               <button
@@ -285,7 +352,7 @@ function LeavePage({
           </footer>
         </div>
         <div className={styles.leaveWeek}>
-          <div className={styles.matrixHeader}><h3>本週請假一覽</h3><span className={styles.muted}>{dateLabel(week.weekStart)} — {dateLabel(addDays(week.weekStart, 6))}</span></div>
+          <div className={styles.matrixHeader}><h3>本週請假日曆</h3><span className={styles.muted}>{dateLabel(week.weekStart)} — {dateLabel(addDays(week.weekStart, 6))}</span></div>
           <div className={styles.leaveWeekGrid}>
             {days.map((day) => {
               const dayRanges = claimRanges(week.claims.filter((claim) => claim.date === day && claim.place === place.id), week.config.slots);
@@ -293,7 +360,7 @@ function LeavePage({
                 <div key={day} className={day === date ? styles.leaveDayActive : styles.leaveDay}>
                   <button type="button" className={styles.leaveDayHead} disabled={disabled} onClick={() => onPickDay(day)}>
                     <strong>{dateLabel(day)}</strong>
-                    <small>{dayRanges.length ? `${dayRanges.length} 段` : "無"}</small>
+                    <small>{dayRanges.length ? `${[...new Set(dayRanges.map((range) => range.person))].length} 人` : "無人"}</small>
                   </button>
                   <div className={styles.leaveDayBody}>
                     {dayRanges.map((range) => (
@@ -331,7 +398,10 @@ function LeavePage({
           <div className={styles.panel}>
             <p className={styles.eyebrow}>LEAVE DESK</p>
             <h3>登記請假</h3>
-            <p className={styles.muted}>可選連續起迄日期一次登記多天；或點已有紀錄調整／取消。</p>
+            <p className={styles.muted}>上方可看全員本週請假；也可選連續起迄一次登記多天。</p>
+            {todayOnLeave.length > 0 && (
+              <p className={styles.leaveAsideNote}>{dateLabel(date)} 請假：{todayOnLeave.join("、")}</p>
+            )}
             {canSchedule && (
               <button
                 type="button"
