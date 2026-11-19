@@ -191,7 +191,7 @@ export function ScheduleBoard({ canEdit }: { canEdit: boolean }) {
                 </div>
                 <footer className={styles.matrixFoot}><span>預約來自 Google 日曆 · 值班來自 ERP</span><span>↻ 自動班次依會議／跟錄規則帶入</span></footer>
               </div>
-              <details className={styles.weekSummary}><summary>本週到班天數（早／午各 0.5 天）</summary><div className={styles.stats}>{week.stats.map((stat) => <div key={stat.name}><strong>{stat.name}</strong><p>到班 {formatAttendanceDays(stat.officeDays)}{stat.need !== null ? ` / ${stat.need}` : ""} 天</p><small>辦公室＋錄音室合計 · 早或午各 0.5 · 其中錄音 {stat.studioHours} 小時{stat.adjusted ? " · 已調整應到天數" : ""}</small></div>)}</div></details>
+              <details className={styles.weekSummary}><summary>本週到班天數（早／午各 0.5 天）</summary><div className={styles.stats}>{week.stats.filter((stat) => stat.required !== null).map((stat) => <div key={stat.name}><strong>{stat.name}</strong><p>到班 {formatAttendanceDays(stat.officeDays)} / {stat.need} 天</p></div>)}</div></details>
             </div>
             <aside className={styles.sidebar} aria-label="班次調整與待排班事項">
               {selection && <div ref={editor} tabIndex={-1} className={styles.editorFocus}>
