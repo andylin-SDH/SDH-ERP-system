@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { FollowList } from "./FollowList";
-import { addDays, isDateStr, mondayOf } from "@/lib/schedule/logic";
-import { bookingOverlaps, claimRanges, conflictingClaims, conflictTargets, datesInRange, selectionSlots, type DispatchSelection } from "@/lib/schedule/dispatch";
+import { addDays, datesInRange, isDateStr, mondayOf } from "@/lib/schedule/logic";
+import { bookingOverlaps, claimRanges, conflictingClaims, conflictTargets, selectionSlots, type DispatchSelection } from "@/lib/schedule/dispatch";
 import type { ScheduleBooking, ScheduleConflict, ScheduleWeekPayload } from "@/lib/schedule/types";
 import styles from "./ScheduleBoard.module.css";
 
@@ -155,7 +155,11 @@ export function ScheduleBoard({ canEdit }: { canEdit: boolean }) {
                   <table className={styles.table}>
                     <thead><tr><th scope="col">場地</th>{week.config.periods.map((period) => <th scope="col" key={period.id}>{period.label}<span>{period.start}–{period.end}</span></th>)}</tr></thead>
                     <tbody>{week.config.places.filter((place) => place.kind !== "leave").map((place) => <tr key={place.id}>
-                      <th scope="row">{place.name}<span>{place.kind === "studio" ? "預約與跟錄" : "辦公與值班"}</span></th>
+                      <th scope="row">{place.name}<span>{
+                        place.id === "smallOffice" || place.id === "smallStudio"
+                          ? "同一空間 · 值班／跟錄"
+                          : place.kind === "studio" ? "預約與跟錄" : "辦公與值班"
+                      }</span></th>
                       {week.config.periods.map((period) => {
                         const slots = week.config.slots.filter((slot) => slot.period === period.id && place.slots.includes(slot.id));
                         const ids = slots.map((slot) => slot.id);

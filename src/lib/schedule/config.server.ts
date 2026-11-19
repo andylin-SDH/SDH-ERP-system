@@ -100,7 +100,9 @@ export const SCHEDULE_CONFIG: ScheduleConfig = {
     workdays: [1, 2, 3, 4, 5],
     followPerson: "五吉郎",
     backupPlaceId: "smallOffice",
-    minStaff: { smallOffice: 1, bigOffice: 0 },
+    /** 小辦公室與小錄音室同一空間；五吉郎在其中一處即算值班，不必硬排另一人 */
+    backupCoverPlaceIds: ["smallOffice", "smallStudio"],
+    minStaff: { smallOffice: 0, bigOffice: 0 },
     maxStaff: {},
     mondayMeeting: {
       enabled: true,

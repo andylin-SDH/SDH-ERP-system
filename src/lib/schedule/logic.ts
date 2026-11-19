@@ -23,6 +23,19 @@ export function addDays(dateStr: string, n: number): string {
   return `${date.getUTCFullYear()}-${mm}-${dd}`;
 }
 
+/** Inclusive date list from → to（自動對調顛倒的起迄）。 */
+export function datesInRange(from: string, to: string): string[] {
+  const start = from <= to ? from : to;
+  const end = from <= to ? to : from;
+  const out: string[] = [];
+  let cursor = start;
+  while (cursor <= end) {
+    out.push(cursor);
+    cursor = addDays(cursor, 1);
+  }
+  return out;
+}
+
 export function isDateStr(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && addDays(value, 0) === value;
 }
@@ -135,6 +148,40 @@ export function placeKind(cfg: ScheduleConfig, id: string): string {
 
 function placeName(cfg: ScheduleConfig, id: string): string {
   return placeById(cfg, id)?.name ?? id;
+}
+
+/** 小辦公室／小錄音室等同一實體空間；人在其中任一處都算備援值班有人。 */
+function backupCoverPlaceIds(cfg: ScheduleConfig): string[] {
+  const ids = cfg.RULES.backupCoverPlaceIds?.filter(Boolean) ?? [];
+  if (ids.length) return [...new Set(ids)];
+  return cfg.RULES.backupPlaceId ? [cfg.RULES.backupPlaceId] : [];
+}
+
+function isBackupCoverPlace(cfg: ScheduleConfig, placeId: string): boolean {
+  return backupCoverPlaceIds(cfg).includes(placeId);
+}
+
+/** 跟錄／錄音把人拉離備援空間（大錄音室）；小錄音室與小辦公室同地不算離場。 */
+function pullsAwayFromBackup(cfg: ScheduleConfig, placeId: string): boolean {
+  return placeKind(cfg, placeId) === "studio" && !isBackupCoverPlace(cfg, placeId);
+}
+
+/** 撞班檢查：同一空間的多個場地 ID 算同一個站點。 */
+function distinctScheduleSites(cfg: ScheduleConfig, places: string[]): string[] {
+  const covers = new Set(backupCoverPlaceIds(cfg));
+  const sites: string[] = [];
+  let coverSeen = false;
+  for (const place of places) {
+    if (covers.has(place)) {
+      if (!coverSeen) {
+        sites.push(cfg.RULES.backupPlaceId || place);
+        coverSeen = true;
+      }
+      continue;
+    }
+    sites.push(place);
+  }
+  return sites;
 }
 
 export function buildDayInfo(weekStart: string, holidays: Record<string, string>, cfg: ScheduleConfig): Record<string, DayInfo> {
@@ -306,11 +353,16 @@ export function effectiveClaims(
       followAutos.push({ date: slot.date, slot: slot.slot, place: booking.placeId, person: follower, auto: true });
     }
   }
-  const atStudio: Record<string, boolean> = {};
+  const awayFromBackup: Record<string, boolean> = {};
   for (const claim of [...base, ...followAutos, ...andyAutos]) {
-    if (claim.person === follower && placeKind(cfg, claim.place) === "studio") atStudio[`${claim.date}|${claim.slot}`] = true;
+    if (claim.person === follower && pullsAwayFromBackup(cfg, claim.place)) {
+      awayFromBackup[`${claim.date}|${claim.slot}`] = true;
+    }
   }
-  base = base.filter((claim) => !(claim.person === follower && claim.place === backupId && atStudio[`${claim.date}|${claim.slot}`]));
+  // 只有被大錄音室等「不同空間」拉走時，才拿掉小辦公室班；小錄音室同地則保留／不算離場
+  base = base.filter(
+    (claim) => !(claim.person === follower && claim.place === backupId && awayFromBackup[`${claim.date}|${claim.slot}`])
+  );
   const meetings = meetingCells(weekStart, dayInfo, cfg, bookings, base);
   const leave = onLeave;
   let out = base.slice();
@@ -459,6 +511,7 @@ export function followGaps(
   const eff = effectiveClaims(weekStart, claims, bookings, dayInfo, cfg);
   const follower = cfg.RULES.followPerson;
   const backupId = cfg.RULES.backupPlaceId;
+  const coverIds = backupCoverPlaceIds(cfg);
   const cellPeople: Record<string, string[]> = {};
   for (const claim of eff.claims) {
     if (placeKind(cfg, claim.place) === "leave") continue;
@@ -466,6 +519,15 @@ export function followGaps(
     cellPeople[key] = cellPeople[key] ?? [];
     cellPeople[key].push(claim.person);
   }
+  const coverPeople = (date: string, slot: string) => {
+    const names: string[] = [];
+    for (const placeId of coverIds) {
+      for (const person of cellPeople[cellKey(date, slot, placeId)] ?? []) {
+        if (!names.includes(person)) names.push(person);
+      }
+    }
+    return names;
+  };
   const byHour: Record<string, ScheduleBooking[]> = {};
   for (const booking of bookings) {
     if (booking.kind !== "follow") continue;
@@ -479,8 +541,10 @@ export function followGaps(
   for (const key of Object.keys(byHour)) {
     const [date, slot] = key.split("|");
     if (isOffHours(date, slot, dayInfo, cfg) || isMeetingBackupExempt(date, slot, dayInfo, cfg)) continue;
-    const others = (cellPeople[cellKey(date, slot, backupId)] ?? []).filter((person) => person !== follower);
-    if (others.length) continue;
+    const bookingsHere = byHour[key] ?? [];
+    // 只有大錄音室（不同空間）跟錄時，才需要小辦公室／小錄音室另有人留守
+    if (!bookingsHere.some((booking) => pullsAwayFromBackup(cfg, booking.placeId))) continue;
+    if (coverPeople(date, slot).length > 0) continue;
     perDate[date] = perDate[date] ?? [];
     perDate[date].push(slot);
   }
@@ -594,7 +658,10 @@ export function findConflicts(
   for (const key of Object.keys(personSlot)) {
     if (personSlot[key].length < 2) continue;
     const [person, date, slot] = key.split("|");
-    doubles.push({ person, date, slot, places: personSlot[key].slice().sort() });
+    const places = personSlot[key].slice().sort();
+    // 小辦公室＋小錄音室同一空間，不算撞班
+    if (distinctScheduleSites(cfg, places).length < 2) continue;
+    doubles.push({ person, date, slot, places });
   }
   eachRange(cfg, doubles, (item) => `${item.person}|${item.date}|${item.places.join(",")}`, (item, ids) => {
     out.push({
@@ -639,7 +706,7 @@ export function findConflicts(
       type: "BACKUP_MISSING",
       severity: "error",
       cells: gap.slots.map((slot) => ({ date: gap.date, slot, place: backupId })),
-      message: `${whenText(cfg, gap.date, gap.slots)} ${follower} 要跟錄${unique(gap.bookings.map((booking) => `「${booking.show}」`)).join("")}，需要一位同仁去${placeName(cfg, backupId)}值班（目前沒有人）`,
+      message: `${whenText(cfg, gap.date, gap.slots)} ${follower} 要去大錄音室跟錄${unique(gap.bookings.map((booking) => `「${booking.show}」`)).join("")}，小辦公室／小錄音室需要另一位同仁值班（目前沒有人）`,
     });
   }
 
@@ -741,22 +808,29 @@ export function findConflicts(
     });
   });
 
-  const backupPlace = placeById(cfg, backupId);
+  const coverIds = backupCoverPlaceIds(cfg);
+  const coverSlotIds = [...new Set(coverIds.flatMap((placeId) => placeById(cfg, placeId)?.slots ?? []))];
   const away: { date: string; slot: string; reason: string }[] = [];
-  if (backupPlace) {
-    for (const date of dates) {
-      for (const slot of backupPlace.slots) {
-        if (isOffHours(date, slot, dayInfo, cfg) || isMeetingBackupExempt(date, slot, dayInfo, cfg)) continue;
-        if (suppress[cellKey(date, slot, backupId)]) continue;
-        const key = `${follower}|${date}|${slot}`;
-        const elsewhere = (personSlot[key] ?? []).filter((place) => place !== backupId);
-        const onLeave = !!leaveSet[key];
-        if (!elsewhere.length && !onLeave) continue;
-        const others = people(date, slot, backupId).filter((person) => person !== follower);
-        if (others.length) continue;
-        suppress[cellKey(date, slot, backupId)] = true;
-        away.push({ date, slot, reason: onLeave ? " 請假" : ` 排在${elsewhere.map((id) => placeName(cfg, id)).join("、")}` });
-      }
+  for (const date of dates) {
+    for (const slot of coverSlotIds) {
+      if (isOffHours(date, slot, dayInfo, cfg) || isMeetingBackupExempt(date, slot, dayInfo, cfg)) continue;
+      if (suppress[cellKey(date, slot, backupId)]) continue;
+      const key = `${follower}|${date}|${slot}`;
+      const elsewhere = (personSlot[key] ?? []).filter((place) => !isBackupCoverPlace(cfg, place));
+      const onLeave = !!leaveSet[key];
+      // 五吉郎沒請假、也沒被大錄音室拉走 → 視為人在小辦公室／小錄音室，不強迫排班
+      if (!elsewhere.length && !onLeave) continue;
+      const others = [...new Set(coverIds.flatMap((placeId) => people(date, slot, placeId)))].filter(
+        (person) => person !== follower
+      );
+      if (others.length) continue;
+      suppress[cellKey(date, slot, backupId)] = true;
+      for (const placeId of coverIds) suppress[cellKey(date, slot, placeId)] = true;
+      away.push({
+        date,
+        slot,
+        reason: onLeave ? " 請假" : ` 排在${elsewhere.map((id) => placeName(cfg, id)).join("、")}`,
+      });
     }
   }
   eachRange(cfg, away, (item) => `${item.date}|${item.reason}`, (item, ids) => {
@@ -764,7 +838,7 @@ export function findConflicts(
       type: "BACKUP_MISSING",
       severity: "error",
       cells: ids.map((slot) => ({ date: item.date, slot, place: backupId })),
-      message: `${whenText(cfg, item.date, ids)} ${follower}${item.reason}，需要一位同仁去${placeName(cfg, backupId)}值班（目前沒有人）`,
+      message: `${whenText(cfg, item.date, ids)} ${follower}${item.reason}，小辦公室／小錄音室需要另一位同仁值班（目前沒有人）`,
     });
   });
 
@@ -787,6 +861,20 @@ export function findConflicts(
     }
   }
   eachRange(cfg, understaffed, (item) => `${item.date}|${item.place.id}`, (item, ids) => {
+    const backupHint =
+      item.place.id === backupId
+        ? (() => {
+            const reasons = new Set<string>();
+            for (const slot of ids) {
+              const key = `${follower}|${item.date}|${slot}`;
+              if (leaveSet[key]) reasons.add("請假");
+              const elsewhere = (personSlot[key] ?? []).filter((place) => place !== backupId);
+              if (elsewhere.length) reasons.add(`排在${elsewhere.map((id) => placeName(cfg, id)).join("、")}`);
+            }
+            if (reasons.size) return `（${follower}目前${[...reasons].join("／")}，小辦公室要另有人）`;
+            return `（小辦公室平日至少要有一人；請把${follower}或其他同仁排進小辦公室）`;
+          })()
+        : "";
     out.push({
       type: "UNDERSTAFFED",
       severity: "warn",
@@ -794,7 +882,7 @@ export function findConflicts(
       message:
         `${whenText(cfg, item.date, ids)} ${item.place.name}` +
         (item.min === 1 ? " 沒有人值班" : ` 人數不足（需要至少 ${item.min} 人）`) +
-        (item.place.id === backupId ? `（${follower} 不在時一定要有人）` : ""),
+        backupHint,
     });
   });
   eachRange(cfg, over, (item) => `${item.date}|${item.place.id}`, (item, ids) => {
@@ -864,25 +952,39 @@ export function planClaimChange(
   const adds: ScheduleClaim[] = [];
   const same = (claim: ScheduleClaim, item: ClaimChangeItem) =>
     claim.person === person && claim.date === item.date && claim.slot === item.slot && claim.place === item.place;
-  const atStudio = (item: ClaimChangeItem) =>
-    kept.some((entry) => !entry.gone && entry.person === follower && entry.date === item.date && entry.slot === item.slot && placeKind(cfg, entry.place) === "studio") ||
-    adds.some((claim) => claim.person === follower && claim.date === item.date && claim.slot === item.slot && placeKind(cfg, claim.place) === "studio");
+  const atAwayStudio = (item: ClaimChangeItem) =>
+    kept.some(
+      (entry) =>
+        !entry.gone &&
+        entry.person === follower &&
+        entry.date === item.date &&
+        entry.slot === item.slot &&
+        pullsAwayFromBackup(cfg, entry.place)
+    ) ||
+    adds.some(
+      (claim) =>
+        claim.person === follower &&
+        claim.date === item.date &&
+        claim.slot === item.slot &&
+        pullsAwayFromBackup(cfg, claim.place)
+    );
 
   for (const item of items) {
     if (on) {
-      if (person === follower && item.place === backupId && atStudio(item)) {
+      // 只有人在大錄音室時，才禁止五吉郎同時排小辦公室；小錄音室同地可並存
+      if (person === follower && item.place === backupId && atAwayStudio(item)) {
         if (strict) {
           return {
             add: [],
             remove: [],
-            error: `${follower}這個時段排在錄音室跟錄，${placeName(cfg, backupId)}請排另一位同仁值班`,
+            error: `${follower}這個時段排在大錄音室跟錄，${placeName(cfg, backupId)}請排另一位同仁值班`,
           };
         }
         continue;
       }
       const exists = kept.some((entry) => !entry.gone && same(entry, item)) || adds.some((claim) => same(claim, item));
       if (!exists) adds.push({ date: item.date, slot: item.slot, place: item.place, person });
-      if (person === follower && placeKind(cfg, item.place) === "studio") {
+      if (person === follower && pullsAwayFromBackup(cfg, item.place)) {
         for (const entry of kept) {
           if (!entry.gone && entry.person === follower && entry.date === item.date && entry.slot === item.slot && entry.place === backupId) {
             entry.gone = true;

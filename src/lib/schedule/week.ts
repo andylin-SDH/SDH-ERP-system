@@ -52,6 +52,7 @@ function publicConfig() {
     slots: SCHEDULE_CONFIG.SLOTS,
     followPerson: SCHEDULE_CONFIG.RULES.followPerson,
     backupPlaceId: SCHEDULE_CONFIG.RULES.backupPlaceId,
+    backupCoverPlaceIds: SCHEDULE_CONFIG.RULES.backupCoverPlaceIds,
     offStaff: SCHEDULE_CONFIG.RULES.offHours.staff,
     mondayMeeting: meeting.enabled
       ? { start: meeting.start, end: meeting.end, placeId: meeting.placeId, label: meeting.label }

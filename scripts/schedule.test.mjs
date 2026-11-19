@@ -47,9 +47,33 @@ test('moving follower to studio converts the legacy backup without leaving doubl
   const result = apply(stored,plan);
   assert.deepEqual(result.map(r=>[r.slot,r.place]).sort(),[['m0900','bigStudio'],['m0930','smallOffice']]);
 });
-test('single backup assignment is rejected while follower is in studio', () => {
+test('single backup assignment is rejected while follower is in big studio', () => {
   const plan = planStoredClaimChange(week,'五吉郎',[item('m0900')],true,[claim('m0900','bigStudio','五吉郎')],cfg);
-  assert.match(plan.error,/錄音室/);
+  assert.match(plan.error,/大錄音室/);
+});
+test('small studio and small office count as the same site for the follower', () => {
+  const plan = planStoredClaimChange(week,'五吉郎',[item('m0900')],true,[claim('m0900','smallStudio','五吉郎')],cfg);
+  assert.equal(plan.error, undefined);
+  assert.equal(plan.add.some((row) => row.place === 'smallOffice' && row.slot === 'm0900'), true);
+});
+test('empty small office is fine when follower is not pulled to the big studio', async () => {
+  const { findConflicts, buildDayInfo } = await import('../src/lib/schedule/logic.ts');
+  const dayInfo = buildDayInfo(week, {}, cfg);
+  const conflicts = findConflicts(week, [], [], dayInfo, cfg);
+  assert.equal(conflicts.some((item) => item.type === 'UNDERSTAFFED' && item.message.includes('小辦公室')), false);
+});
+test('big-studio follow without cover staff still needs backup', async () => {
+  const { findConflicts, buildDayInfo, effectiveClaims } = await import('../src/lib/schedule/logic.ts');
+  const dayInfo = buildDayInfo(week, {}, cfg);
+  const bookings = [{
+    calendar: '大錄音室', placeId: 'bigStudio', color: '#000', title: '灃食', start: `${date}T09:00:00+08:00`, end: `${date}T10:00:00+08:00`,
+    kind: 'follow', show: '灃食 食光餐桌', owner: '', companions: ['維尼'], andyRecording: false,
+    slots: [{ date, slot: 'm0900' }, { date, slot: 'm0930' }],
+  }];
+  const claims = effectiveClaims(week, [], bookings, dayInfo, cfg).claims;
+  const conflicts = findConflicts(week, [], bookings, dayInfo, cfg);
+  assert.equal(claims.some((row) => row.person === '五吉郎' && row.place === 'bigStudio'), true);
+  assert.equal(conflicts.some((item) => item.type === 'BACKUP_MISSING'), true);
 });
 test('rejects dates outside the requested week and invalid place slots', () => {
   assert.match(planStoredClaimChange(week,'克萊',[{...item('m0900'),date:'2026-11-23'}],true,[],cfg).error,/不在/);

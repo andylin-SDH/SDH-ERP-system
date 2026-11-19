@@ -60,6 +60,8 @@ export type ScheduleRules = {
   workdays: number[];
   followPerson: string;
   backupPlaceId: string;
+  /** 與值班備援同一實體空間的場地（例：小辦公室＝小錄音室）；人在其中任一處都算有值班 */
+  backupCoverPlaceIds: string[];
   minStaff: Record<string, number>;
   maxStaff: Record<string, number>;
   mondayMeeting: {
@@ -159,6 +161,7 @@ export type ScheduleWeekPayload = {
     slots: ScheduleSlot[];
     followPerson: string;
     backupPlaceId: string;
+    backupCoverPlaceIds: string[];
     offStaff: string[];
     mondayMeeting: { start: string; end: string; placeId: string; label: string } | null;
     presetPeople: string[];
