@@ -93,7 +93,7 @@ export const SCHEDULE_CONFIG: ScheduleConfig = {
   OWN_SHOWS: [
     { owner: "五吉郎", show: "安迪", code: "5glan6", email: "andy@5glanpodcast.com" },
     { owner: "克萊", show: "克萊", code: "clairevip", email: "claire@sdh-corp.com" },
-    { owner: "IVY", show: "歐逆", code: "", email: "ivylan231@gmail.com" },
+    { owner: "IVY", show: "歐逆", code: "", email: "" },
   ],
   HOLIDAYS: [],
   RULES: {
