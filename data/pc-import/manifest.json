@@ -1,0 +1,21 @@
+{
+  "projects": [
+    {
+      "id": "PC-ICUE-WEITHINK",
+      "program_name": "iCue維思感創",
+      "client_name": "維思感創",
+      "csv": "icue-weithink.csv",
+      "sheet_url": "https://docs.google.com/spreadsheets/d/10MyavYRhEVbLukHforMl5o0gqbTjpYga2BGzUto_UK0/edit",
+      "pm_email": "pc-pm@sdh-uat.test",
+      "pm_name": "測試PM",
+      "editor_name": "涵雯",
+      "services": {
+        "AUDIO_EDIT": { "quantity": 12 },
+        "SHORT_VIDEO_EDIT": { "quantity": 12 },
+        "SHORT_SCRIPT": { "quantity": 12 },
+        "SHOWNOTES": { "quantity": 12 },
+        "COVER_PACKAGE": { "quantity": 1 }
+      }
+    }
+  ]
+}

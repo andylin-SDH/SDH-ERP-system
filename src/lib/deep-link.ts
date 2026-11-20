@@ -76,3 +76,12 @@ export function resolvePostLoginPath(searchParams: URLSearchParams): string {
 
   return "/dashboard";
 }
+
+/** 依角色決定登入後首頁（製作案非員工角色不進 Dashboard） */
+export function resolveHomePathForRole(role: string, fallback = "/dashboard"): string {
+  const r = String(role ?? "").trim();
+  if (r === "外包") return "/production-case/vendor";
+  if (r === "製作案主") return "/production-case/client";
+  if (r === "KOL") return "/kol";
+  return fallback;
+}

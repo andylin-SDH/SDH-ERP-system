@@ -5,7 +5,7 @@
  * 角色列表：董事長、管理者、經紀人、製作人、會計、行政、KOL（訪客入口）
  */
 
-export const ROLES = ["董事長", "管理者", "經紀人", "製作人", "會計", "行政", "KOL"] as const;
+export const ROLES = ["董事長", "管理者", "經紀人", "製作人", "會計", "行政", "KOL", "外包", "製作案主"] as const;
 export type RoleKey = (typeof ROLES)[number] | string;
 
 /** 各角色可看到的「區塊」與資料範圍 */
@@ -25,32 +25,32 @@ export interface RoleVisibilityConfig {
 export const ROLE_VISIBILITY: Record<string, RoleVisibilityConfig> = {
   董事長: {
     fullAccess: true,
-    sections: ["overview", "master", "partners", "tasks", "schedule", "payout", "finance"],
+    sections: ["overview", "master", "partners", "tasks", "schedule", "production", "payout", "finance"],
     filterNote: "全公司，不過濾",
   },
   管理者: {
     fullAccess: true,
-    sections: ["overview", "master", "partners", "tasks", "schedule", "payout", "finance"],
+    sections: ["overview", "master", "partners", "tasks", "schedule", "production", "payout", "finance"],
     filterNote: "全公司，不過濾",
   },
   經紀人: {
     fullAccess: false,
-    sections: ["overview", "master", "partners", "tasks", "schedule"],
+    sections: ["overview", "master", "partners", "tasks", "schedule", "production"],
     filterNote: "可進大總表；列依姓名／Email 對到相關專案，不是全公司",
   },
   製作人: {
     fullAccess: false,
-    sections: ["overview", "master", "tasks", "schedule"],
+    sections: ["overview", "master", "tasks", "schedule", "production"],
     filterNote: "專案與任務，可依 project_bd 或 task_owner 擴充過濾",
   },
   會計: {
     fullAccess: true,
-    sections: ["overview", "payout", "finance", "schedule"],
+    sections: ["overview", "payout", "finance", "schedule", "production"],
     filterNote: "財務相關表，目前全開",
   },
   行政: {
     fullAccess: false,
-    sections: ["overview", "master", "partners", "tasks", "schedule"],
+    sections: ["overview", "master", "partners", "tasks", "schedule", "production"],
     filterNote: "可進大總表；列依姓名／Email 對到相關專案，不是全公司",
   },
   /** 僅使用 /kol 訪客頁；不進員工 Dashboard 資料區塊 */
@@ -58,6 +58,18 @@ export const ROLE_VISIBILITY: Record<string, RoleVisibilityConfig> = {
     fullAccess: false,
     sections: [],
     filterNote: "訪客入口，與員工後台分離",
+  },
+  /** 製作案外包入口 /production-case/vendor */
+  外包: {
+    fullAccess: false,
+    sections: [],
+    filterNote: "僅製作案外包工單入口",
+  },
+  /** 製作案案主入口 /production-case/client */
+  製作案主: {
+    fullAccess: false,
+    sections: [],
+    filterNote: "僅製作案案主入口",
   },
 };
 
@@ -94,10 +106,22 @@ export function ensureMasterSectionForRole(role: string, sections: string[]): st
 }
 
 /** 員工都看得到班表。舊的角色區塊設定若沒勾這項，讀取時補上，不改資料庫。 */
+const NON_STAFF_DASHBOARD_ROLES = new Set(["KOL", "外包", "製作案主"]);
+
 export function ensureScheduleSection(role: string, sections: string[]): string[] {
-  if (!role || role === "KOL") return sections;
+  if (!role || NON_STAFF_DASHBOARD_ROLES.has(role)) return sections;
   if (sections.includes("schedule")) return sections;
   return [...sections, "schedule"];
+}
+
+/** 員工都看得到製作控管。舊的角色區塊設定若沒勾這項，讀取時補上，不改資料庫。 */
+export function ensureProductionSection(role: string, sections: string[]): string[] {
+  if (!role || NON_STAFF_DASHBOARD_ROLES.has(role)) return sections;
+  if (sections.includes("production")) return sections;
+  const next = [...sections];
+  const scheduleAt = next.indexOf("schedule");
+  next.splice(scheduleAt >= 0 ? scheduleAt + 1 : next.length, 0, "production");
+  return next;
 }
 
 /**

@@ -40,8 +40,9 @@ import {
   displayPayoutTypeLabel,
   isExtraBonusPayoutType,
 } from "@/lib/payout-dedupe";
-import { ensureMasterSectionForRole, ensureScheduleSection, getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
+import { ensureMasterSectionForRole, ensureProductionSection, ensureScheduleSection, getSectionsForRole, isFullAccessRole, ROLE_VISIBILITY, ROLES } from "@/config/role-visibility";
 import { ScheduleBoard } from "@/components/schedule/ScheduleBoard";
+import { ProductionCaseApp } from "@/components/production-case/ProductionCaseApp";
 import { PROJECT_TYPES, calc專案營收, kolExtraCostHint, projectRevenueFormulaHint } from "@/config/project-types";
 import { DEFAULT_PROJECT_STATUS_OPTIONS } from "@/config/project-status-defaults";
 import { DEFAULT_PROJECT_EXPENSE_TYPE_OPTIONS } from "@/config/project-expense-type-defaults";
@@ -3058,7 +3059,10 @@ export default function DashboardPage() {
     }
     /** 舊設定「發票」獨立區塊 → 整併為「財務」 */
     const merged = base.map((s) => (s === "invoices" ? "finance" : s));
-    return ensureScheduleSection(visibilitySubject.role, ensureMasterSectionForRole(visibilitySubject.role, [...new Set(merged)]));
+    return ensureProductionSection(
+      visibilitySubject.role,
+      ensureScheduleSection(visibilitySubject.role, ensureMasterSectionForRole(visibilitySubject.role, [...new Set(merged)]))
+    );
   }, [visibilitySubject, effectiveVisibility, systemConfig]);
 
   /** Dashboard 分頁列表：一般使用者只有資料區塊；董事長/管理者多「可見性與權限」「帳號視角」；董事長另有「異動紀錄」 */
@@ -6734,8 +6738,17 @@ export default function DashboardPage() {
         return false;
       }
       const user = sess.user as unknown as User;
-      if (String(user.role ?? "").trim() === "KOL") {
+      const role = String(user.role ?? "").trim();
+      if (role === "KOL") {
         window.location.replace("/kol");
+        return true;
+      }
+      if (role === "外包") {
+        window.location.replace("/production-case/vendor");
+        return true;
+      }
+      if (role === "製作案主") {
+        window.location.replace("/production-case/client");
         return true;
       }
       setMe(user);
@@ -6883,8 +6896,17 @@ export default function DashboardPage() {
 
   const handleDashboardLoginSuccess = useCallback(
     async (user: Record<string, unknown>) => {
-      if (String(user.role ?? "").trim() === "KOL") {
+      const role = String(user.role ?? "").trim();
+      if (role === "KOL") {
         window.location.replace("/kol");
+        return;
+      }
+      if (role === "外包") {
+        window.location.replace("/production-case/vendor");
+        return;
+      }
+      if (role === "製作案主") {
+        window.location.replace("/production-case/client");
         return;
       }
       setLoading(true);
@@ -8160,6 +8182,8 @@ export default function DashboardPage() {
             )}
 
         {activeSection === "schedule" && <ScheduleBoard canEdit={canMutate} />}
+
+        {activeSection === "production" && <ProductionCaseApp embedded />}
 
         {/* 總覽：與我有關的進行中專案 + 指派給我的任務；董事長可切全公司 */}
         {activeSection === "overview" && (

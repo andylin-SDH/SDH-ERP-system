@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ErpLoginPanel, fetchSessionWithRetry } from "@/components/ErpLoginPanel";
-import { resolvePostLoginPath } from "@/lib/deep-link";
+import { resolveHomePathForRole, resolvePostLoginPath } from "@/lib/deep-link";
 
 export default function Home() {
   const [checking, setChecking] = useState(true);
@@ -23,7 +23,10 @@ export default function Home() {
         const sess = await fetchSessionWithRetry();
         if (sess.ok && sess.user) {
           const role = String(sess.user.role ?? "").trim();
-          window.location.replace(role === "KOL" ? "/kol" : afterLogin);
+          const spNext = new URLSearchParams(window.location.search).get("next");
+          window.location.replace(
+            spNext ? afterLogin : resolveHomePathForRole(role, afterLogin)
+          );
           return;
         }
       } catch {
@@ -38,7 +41,7 @@ export default function Home() {
     const sp = new URLSearchParams(window.location.search);
     const afterLogin = resolvePostLoginPath(sp);
     const role = String(user.role ?? "").trim();
-    window.location.href = role === "KOL" ? "/kol" : afterLogin;
+    window.location.href = sp.get("next") ? afterLogin : resolveHomePathForRole(role, afterLogin);
   }
 
   if (checking) {

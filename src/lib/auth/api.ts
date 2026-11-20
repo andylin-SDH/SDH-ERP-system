@@ -46,15 +46,21 @@ export async function requireAuth(request: NextRequest | Request): Promise<{ use
   return { user };
 }
 
-/** 必須為員工後台帳號（KOL 老師入口不可呼叫員工 API） */
+const NON_EMPLOYEE_ROLES = new Set([KOL_ROLE, "外包", "製作案主"]);
+
+/** 必須為員工後台帳號（KOL／外包／案主不可呼叫員工 API） */
 export async function requireEmployee(request: NextRequest | Request): Promise<{ user: User } | NextResponse> {
   const result = await requireAuth(request);
   if (result instanceof NextResponse) return result;
-  if (String(result.user.role ?? "").trim() === KOL_ROLE) {
-    return NextResponse.json(
-      { ok: false, error: "KOL 帳號僅可使用老師專屬入口（/kol）" },
-      { status: 403 }
-    );
+  const role = String(result.user.role ?? "").trim();
+  if (NON_EMPLOYEE_ROLES.has(role)) {
+    const hint =
+      role === KOL_ROLE
+        ? "KOL 帳號僅可使用老師專屬入口（/kol）或製作案入口（/production-case/kol）"
+        : role === "外包"
+          ? "外包帳號請使用 /production-case/vendor"
+          : "案主帳號請使用 /production-case/client";
+    return NextResponse.json({ ok: false, error: hint }, { status: 403 });
   }
   return result;
 }
