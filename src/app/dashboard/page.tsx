@@ -3059,6 +3059,7 @@ export default function DashboardPage() {
     }
     /** 舊設定「發票」獨立區塊 → 整併為「財務」 */
     const merged = base.map((s) => (s === "invoices" ? "finance" : s));
+    /** 班表／製作控管：舊自訂可見範圍若沒勾，讀取時仍補上（員工角色） */
     return ensureProductionSection(
       visibilitySubject.role,
       ensureScheduleSection(visibilitySubject.role, ensureMasterSectionForRole(visibilitySubject.role, [...new Set(merged)]))
